@@ -229,7 +229,7 @@ const salesController = {
           if (custRows.length > 0) {
             customerName = custRows[0].name;
             customerMobile = custRows[0].mobile;
-            await connection.query('UPDATE customers SET total_bills = total_bills + 1, lifetime_spend = lifetime_spend + ?, last_purchase_at = ? WHERE id = ?', [finalAmt, bill_date, customer_id]);
+            await connection.query('UPDATE customers SET total_bills = total_bills + 1, lifetime_spend = lifetime_spend + ? WHERE id = ?', [finalAmt, customer_id]);
           }
         }
 

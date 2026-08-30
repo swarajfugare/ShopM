@@ -510,8 +510,8 @@ if ($cleanUri === '/api/v1/sales' && $method === 'POST') {
 
             // Update customer loyalty
             if ($custId) {
-                $custStmt = $pdo->prepare("UPDATE customers SET total_bills = total_bills + 1, lifetime_spend = lifetime_spend + ?, last_purchase_at = ? WHERE id = ?");
-                $custStmt->execute([$finalAmt, $billDate, $custId]);
+                $custStmt = $pdo->prepare("UPDATE customers SET total_bills = total_bills + 1, lifetime_spend = lifetime_spend + ? WHERE id = ?");
+                $custStmt->execute([$finalAmt, $custId]);
             }
 
             $pdo->commit();
