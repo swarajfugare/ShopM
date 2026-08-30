@@ -245,6 +245,8 @@ const salesController = {
             INSERT INTO bill_items (bill_id, product_id, product_name_snapshot, sku_snapshot, quantity, selling_price, cost_price, discount_amount, line_total, line_cost, line_profit, profit_type)
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
           `, [billId, it.product_id, it.product_name, it.sku, it.quantity, it.selling_price, it.cost_price, it.discount_amount, it.line_total, it.line_cost, it.line_profit, it.profit_type]);
+        }
+
         // Insert Payment Record
         await connection.query(`
           INSERT INTO payments (bill_id, shop_id, payment_method, amount, payment_status)
@@ -283,7 +285,6 @@ const salesController = {
           connection.release();
         }
         return res.status(500).json({ status: 'error', message: err.message });
-      }
       }
     }
 
