@@ -161,6 +161,7 @@ const salesController = {
       items = []
     } = req.body;
 
+    const txUuid = transaction_uuid || `tx-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
     let subtotal = 0.0;
     let finalAmt = 0.0;
     let totalCost = 0.0;
