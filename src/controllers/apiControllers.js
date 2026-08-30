@@ -245,7 +245,17 @@ const salesController = {
             INSERT INTO bill_items (bill_id, product_id, product_name_snapshot, sku_snapshot, quantity, selling_price, cost_price, discount_amount, line_total, line_cost, line_profit, profit_type)
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
           `, [billId, it.product_id, it.product_name, it.sku, it.quantity, it.selling_price, it.cost_price, it.discount_amount, it.line_total, it.line_cost, it.line_profit, it.profit_type]);
-        }
+        // Insert Payment Record
+        await connection.query(`
+          INSERT INTO payments (bill_id, shop_id, payment_method, amount, payment_status)
+          VALUES (?, 1, ?, ?, 'PAID')
+        `, [billId, payment_method, finalAmt]);
+
+        // Insert Sync Log
+        await connection.query(`
+          INSERT INTO sync_logs (shop_id, device_id, entity_type, transaction_uuid, status, payload)
+          VALUES (1, ?, 'SALE', ?, 'SUCCESS', ?)
+        `, [req.body.device_id || 'android_pos', txUuid, JSON.stringify(req.body)]);
 
         await connection.commit();
         connection.release();
@@ -272,7 +282,8 @@ const salesController = {
           await connection.rollback();
           connection.release();
         }
-        console.error('[Sale Error]', err);
+        return res.status(500).json({ status: 'error', message: err.message });
+      }
       }
     }
 
@@ -413,36 +424,49 @@ const customersController = {
   create: async (req, res) => {
     const { name, mobile, email, address, notes } = req.body;
     if (!name || !mobile) return res.status(422).json({ status: 'error', message: 'Name and mobile are required' });
+    const shopId = req.user?.shop_id || 1;
+    const cleanMobile = String(mobile).replace(/[^0-9+]/g, '');
+    const last10 = cleanMobile.length >= 10 ? cleanMobile.slice(-10) : cleanMobile;
 
-    if (isDbConnected()) {
+    if (isDbConnected() && pool) {
       try {
+        // Prevent duplicate customer by normalized 10-digit mobile
+        const [existing] = await pool.query('SELECT * FROM customers WHERE shop_id = ? AND (mobile LIKE ? OR mobile = ?) LIMIT 1', [shopId, `%${last10}`, cleanMobile]);
+        if (existing.length > 0) {
+          return res.json({
+            status: 'success',
+            message: 'Existing customer retrieved',
+            data: { customer: existing[0], is_existing: true }
+          });
+        }
+
         const [result] = await pool.query(`
           INSERT INTO customers (shop_id, name, mobile, email, address, total_bills, lifetime_spend, tier)
-          VALUES (1, ?, ?, ?, ?, 0, 0.00, 'REGULAR')
-        `, [name, mobile, email || null, address || null]);
+          VALUES (?, ?, ?, ?, ?, 0, 0.00, 'REGULAR')
+        `, [shopId, name.trim(), cleanMobile, email ? email.trim() : null, address ? address.trim() : null]);
         
         const newCust = {
           id: result.insertId,
-          shop_id: 1,
-          name,
-          mobile,
-          email: email || null,
-          address: address || null,
+          shop_id: shopId,
+          name: name.trim(),
+          mobile: cleanMobile,
+          email: email ? email.trim() : null,
+          address: address ? address.trim() : null,
           total_bills: 0,
           lifetime_spend: 0.00,
           tier: 'REGULAR'
         };
-        return res.status(201).json({ status: 'success', data: { customer: newCust } });
+        return res.status(201).json({ status: 'success', message: 'Customer created successfully', data: { customer: newCust } });
       } catch (e) {
-        console.warn('[!] DB Customer insert notice:', e.message);
+        return res.status(500).json({ status: 'error', message: e.message });
       }
     }
 
     const newCust = {
       id: memoryStore.customers.length + 1,
-      shop_id: 1,
-      name,
-      mobile,
+      shop_id: shopId,
+      name: name.trim(),
+      mobile: cleanMobile,
       email: email || null,
       address: address || null,
       total_bills: 0,
@@ -556,33 +580,36 @@ const productsController = {
   create: async (req, res) => {
     const { name, sku, selling_price, cost_price, category_id, track_inventory, current_stock } = req.body;
     if (!name || !selling_price) return res.status(422).json({ status: 'error', message: 'Name and price required' });
+    const shopId = req.user?.shop_id || 1;
 
-    if (isDbConnected()) {
+    if (isDbConnected() && pool) {
       try {
         const [result] = await pool.query(`
           INSERT INTO products (shop_id, category_id, name, sku, selling_price, cost_price, current_stock)
-          VALUES (1, ?, ?, ?, ?, ?, ?)
-        `, [category_id || null, name, sku || null, parseFloat(selling_price), cost_price ? parseFloat(cost_price) : null, current_stock || 10]);
+          VALUES (?, ?, ?, ?, ?, ?, ?)
+        `, [shopId, category_id || null, name.trim(), sku ? sku.trim() : null, parseFloat(selling_price), cost_price ? parseFloat(cost_price) : null, current_stock || 10]);
 
         const newProd = {
           id: result.insertId,
-          shop_id: 1,
+          shop_id: shopId,
           category_id: category_id || null,
-          name,
-          sku: sku || null,
+          name: name.trim(),
+          sku: sku ? sku.trim() : null,
           selling_price: parseFloat(selling_price),
           cost_price: cost_price ? parseFloat(cost_price) : null,
           current_stock: current_stock || 10
         };
-        return res.status(201).json({ status: 'success', data: { product: newProd } });
-      } catch (e) {}
+        return res.status(201).json({ status: 'success', message: 'Product created successfully', data: { product: newProd } });
+      } catch (e) {
+        return res.status(500).json({ status: 'error', message: e.message });
+      }
     }
 
     const newProd = {
       id: memoryStore.products.length + 1,
-      shop_id: 1,
+      shop_id: shopId,
       category_id: category_id || null,
-      name,
+      name: name.trim(),
       sku: sku || null,
       selling_price: parseFloat(selling_price),
       cost_price: cost_price ? parseFloat(cost_price) : null,
@@ -603,24 +630,96 @@ const categoriesController = {
       } catch (e) {}
     }
     return res.json({ status: 'success', data: { categories: memoryStore.categories } });
+  },
+
+  create: async (req, res) => {
+    const { name, description } = req.body;
+    if (!name) return res.status(422).json({ status: 'error', message: 'Category name is required' });
+    const shopId = req.user?.shop_id || 1;
+
+    if (isDbConnected() && pool) {
+      try {
+        // Prevent duplicate category name for the shop
+        const [existing] = await pool.query('SELECT * FROM categories WHERE shop_id = ? AND name = ? LIMIT 1', [shopId, name.trim()]);
+        if (existing.length > 0) {
+          return res.json({ status: 'success', message: 'Category already exists', data: { category: existing[0], is_existing: true } });
+        }
+
+        const [result] = await pool.query('INSERT INTO categories (shop_id, name, description) VALUES (?, ?, ?)', [
+          shopId, name.trim(), description ? description.trim() : null
+        ]);
+
+        const newCat = {
+          id: result.insertId,
+          shop_id: shopId,
+          name: name.trim(),
+          description: description ? description.trim() : null
+        };
+        return res.status(201).json({ status: 'success', message: 'Category created successfully', data: { category: newCat } });
+      } catch (e) {
+        return res.status(500).json({ status: 'error', message: e.message });
+      }
+    }
+
+    const newCat = {
+      id: memoryStore.categories.length + 1,
+      shop_id: shopId,
+      name: name.trim(),
+      description: description || null
+    };
+    memoryStore.categories.push(newCat);
+    return res.status(201).json({ status: 'success', data: { category: newCat } });
   }
 };
 
 // 8. EXPENSES CONTROLLER
 const expensesController = {
   getAll: async (req, res) => {
+    if (isDbConnected() && pool) {
+      try {
+        const [rows] = await pool.query('SELECT * FROM expenses ORDER BY expense_date DESC, id DESC LIMIT 50');
+        if (rows.length > 0) return res.json({ status: 'success', data: { expenses: rows } });
+      } catch (e) {}
+    }
     return res.json({ status: 'success', data: { expenses: memoryStore.expenses } });
   },
+
   create: async (req, res) => {
-    const { category, amount, payment_method, note } = req.body;
+    const { category, amount, payment_method, expense_date, note } = req.body;
+    const shopId = req.user?.shop_id || 1;
+    const amt = parseFloat(amount || 0);
+    const expDate = expense_date || new Date().toISOString().substring(0, 10);
+    const payMethod = payment_method || 'CASH';
+
+    if (isDbConnected() && pool) {
+      try {
+        const [result] = await pool.query('INSERT INTO expenses (shop_id, category, amount, payment_method, expense_date, note) VALUES (?, ?, ?, ?, ?, ?)', [
+          shopId, category || 'GENERAL', amt, payMethod, expDate, note || null
+        ]);
+
+        const newEx = {
+          id: result.insertId,
+          shop_id: shopId,
+          category: category || 'GENERAL',
+          amount: amt,
+          payment_method: payMethod,
+          expense_date: expDate,
+          note: note || null
+        };
+        return res.status(201).json({ status: 'success', message: 'Expense created successfully', data: { expense: newEx } });
+      } catch (e) {
+        return res.status(500).json({ status: 'error', message: e.message });
+      }
+    }
+
     const newEx = {
       id: memoryStore.expenses.length + 1,
-      shop_id: 1,
-      category: category || 'OTHER',
-      amount: parseFloat(amount || 0),
-      payment_method: payment_method || 'CASH',
-      expense_date: new Date().toISOString().substring(0, 10),
-      note: note || ''
+      shop_id: shopId,
+      category: category || 'GENERAL',
+      amount: amt,
+      payment_method: payMethod,
+      expense_date: expDate,
+      note: note || null
     };
     memoryStore.expenses.push(newEx);
     return res.status(201).json({ status: 'success', data: { expense: newEx } });
@@ -835,6 +934,48 @@ const syncController = {
                 transaction_uuid: txUuid,
                 status: 'SUCCESS',
                 server_id: custInsert.insertId
+              });
+            } else if (entityType === 'PRODUCT') {
+              const [prodInsert] = await connection.query(`
+                INSERT INTO products (shop_id, category_id, name, sku, selling_price, cost_price, current_stock)
+                VALUES (1, ?, ?, ?, ?, ?, ?)
+              `, [payload.category_id || null, payload.name || 'Product', payload.sku || null, parseFloat(payload.selling_price || 0), payload.cost_price ? parseFloat(payload.cost_price) : null, payload.current_stock || 10]);
+
+              await connection.query(`
+                INSERT INTO sync_logs (shop_id, device_id, entity_type, transaction_uuid, status, payload)
+                VALUES (1, ?, 'PRODUCT', ?, 'SUCCESS', ?)
+              `, [device_id, txUuid, JSON.stringify(payload)]);
+
+              await connection.commit();
+              connection.release();
+
+              results.push({
+                transaction_uuid: txUuid,
+                status: 'SUCCESS',
+                server_id: prodInsert.insertId
+              });
+            } else if (entityType === 'CATEGORY') {
+              let catId;
+              const [catRows] = await connection.query('SELECT id FROM categories WHERE shop_id = 1 AND name = ? LIMIT 1', [payload.name || 'Category']);
+              if (catRows.length > 0) {
+                catId = catRows[0].id;
+              } else {
+                const [catInsert] = await connection.query('INSERT INTO categories (shop_id, name, description) VALUES (1, ?, ?)', [payload.name || 'Category', payload.description || null]);
+                catId = catInsert.insertId;
+              }
+
+              await connection.query(`
+                INSERT INTO sync_logs (shop_id, device_id, entity_type, transaction_uuid, status, payload)
+                VALUES (1, ?, 'CATEGORY', ?, 'SUCCESS', ?)
+              `, [device_id, txUuid, JSON.stringify(payload)]);
+
+              await connection.commit();
+              connection.release();
+
+              results.push({
+                transaction_uuid: txUuid,
+                status: 'SUCCESS',
+                server_id: catId
               });
             } else if (entityType === 'EXPENSE') {
               const [expInsert] = await connection.query(`

@@ -97,6 +97,7 @@ router.get('/customers/:id/summary', customersController.getSummary);
 router.get('/products', productsController.getAll);
 router.post('/products', productsController.create);
 router.get('/categories', categoriesController.getAll);
+router.post('/categories', categoriesController.create);
 
 // Expenses
 router.get('/expenses', expensesController.getAll);
