@@ -143,13 +143,21 @@ const salesController = {
   create: async (req, res) => {
     const txUuid = req.body.transaction_uuid || `tx-${Date.now()}`;
     const {
+      transaction_uuid,
       sale_type = 'DETAILED',
       customer_id,
+      discount_type = 'NONE',
+      discount_value = 0.0,
       discount_amount = 0.0,
       final_amount,
       payment_method = 'CASH',
       note = '',
       bill_date = new Date().toISOString().replace('T', ' ').substring(0, 19),
+      shop_name_snapshot = 'Matoshree Collection',
+      shop_address_snapshot = 'Shop No. 4, Silk Heritage Complex, Kolhapur',
+      shop_mobile_snapshot = '+91 98765 43210',
+      shop_gstin_snapshot = '27AAAAA0000A1Z5',
+      show_gstin_snapshot = 1,
       items = []
     } = req.body;
 
@@ -226,9 +234,9 @@ const salesController = {
         }
 
         const [billInsert] = await connection.query(`
-          INSERT INTO bills (shop_id, customer_id, customer_name, customer_mobile, bill_number, transaction_uuid, sale_type, subtotal, discount_amount, final_amount, cost_amount, estimated_profit, actual_profit, profit_type, payment_method, payment_status, note, bill_date)
-          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'PAID', ?, ?)
-        `, [1, customer_id || null, customerName, customerMobile, billNumber, txUuid, sale_type, subtotal, discount_amount, finalAmt, totalCost, estimatedProfit, actualProfit, profitType, payment_method, note, bill_date]);
+          INSERT INTO bills (shop_id, customer_id, customer_name, customer_mobile, bill_number, transaction_uuid, sale_type, subtotal, discount_type, discount_value, discount_amount, final_amount, cost_amount, estimated_profit, actual_profit, profit_type, payment_method, payment_status, note, bill_date, shop_name_snapshot, shop_address_snapshot, shop_mobile_snapshot, shop_gstin_snapshot, show_gstin_snapshot)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'PAID', ?, ?, ?, ?, ?, ?, ?)
+        `, [1, customer_id || null, customerName, customerMobile, billNumber, txUuid, sale_type, subtotal, discount_type, discount_value, discount_amount, finalAmt, totalCost, estimatedProfit, actualProfit, profitType, payment_method, note, bill_date, shop_name_snapshot, shop_address_snapshot, shop_mobile_snapshot, shop_gstin_snapshot, show_gstin_snapshot ? 1 : 0]);
 
         const billId = billInsert.insertId;
 
@@ -764,6 +772,22 @@ const settingsController = {
 
   updateSettings: async (req, res) => {
     const { upi_id, upi_display_name, upi_mobile_number, show_gstin_on_bill } = req.body;
+    if (upi_id) memoryStore.shop.upi_id = upi_id;
+    if (upi_display_name) memoryStore.shop.upi_display_name = upi_display_name;
+    if (show_gstin_on_bill !== undefined) memoryStore.shop.show_gstin = show_gstin_on_bill;
+
+    if (isDbConnected() && pool) {
+      try {
+        await pool.query('UPDATE shops SET upi_id = ?, upi_display_name = ?, show_gstin = ? WHERE id = 1', [
+          upi_id || 'matoshree@upi',
+          upi_display_name || 'Matoshree Collection',
+          show_gstin_on_bill !== false ? 1 : 0
+        ]);
+      } catch (e) {
+        console.warn('[!] DB updateSettings warning:', e.message);
+      }
+    }
+
     return res.json({
       status: 'success',
       message: 'Settings updated successfully',
@@ -777,17 +801,53 @@ const settingsController = {
   },
 
   getShop: async (req, res) => {
+    if (isDbConnected() && pool) {
+      try {
+        const [rows] = await pool.query('SELECT * FROM shops WHERE id = 1 LIMIT 1');
+        if (rows.length > 0) {
+          return res.json({ status: 'success', data: { shop: rows[0] } });
+        }
+      } catch (e) {
+        // fallback
+      }
+    }
     return res.json({ status: 'success', data: { shop: memoryStore.shop } });
   },
 
   updateShop: async (req, res) => {
-    const { name, mobile, email, address, city, state, pincode, gst_number } = req.body;
+    const { name, mobile, email, address, city, state, pincode, gst_number, show_gstin, upi_id, upi_display_name, logo_data, logo_url } = req.body;
     if (name) memoryStore.shop.name = name;
     if (mobile) memoryStore.shop.mobile = mobile;
     if (email) memoryStore.shop.email = email;
     if (address) memoryStore.shop.address = address;
     if (city) memoryStore.shop.city = city;
     if (gst_number) memoryStore.shop.gst_number = gst_number;
+    if (show_gstin !== undefined) memoryStore.shop.show_gstin = show_gstin;
+    if (upi_id) memoryStore.shop.upi_id = upi_id;
+    if (upi_display_name) memoryStore.shop.upi_display_name = upi_display_name;
+    if (logo_data) memoryStore.shop.logo_data = logo_data;
+    if (logo_url) memoryStore.shop.logo_url = logo_url;
+
+    if (isDbConnected() && pool) {
+      try {
+        await pool.query(`
+          UPDATE shops SET
+            name = COALESCE(?, name),
+            mobile = COALESCE(?, mobile),
+            email = COALESCE(?, email),
+            address = COALESCE(?, address),
+            gst_number = COALESCE(?, gst_number),
+            show_gstin = COALESCE(?, show_gstin),
+            upi_id = COALESCE(?, upi_id),
+            upi_display_name = COALESCE(?, upi_display_name),
+            logo_data = COALESCE(?, logo_data),
+            logo_url = COALESCE(?, logo_url)
+          WHERE id = 1
+        `, [name || null, mobile || null, email || null, address || null, gst_number || null, show_gstin !== undefined ? (show_gstin ? 1 : 0) : null, upi_id || null, upi_display_name || null, logo_data || null, logo_url || null]);
+      } catch (e) {
+        console.warn('[!] DB updateShop warning:', e.message);
+      }
+    }
 
     return res.json({
       status: 'success',

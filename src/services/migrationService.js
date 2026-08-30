@@ -11,6 +11,11 @@ CREATE TABLE IF NOT EXISTS shops (
     mobile VARCHAR(20),
     email VARCHAR(100),
     gst_number VARCHAR(50) DEFAULT '27AAAAA0000A1Z5',
+    show_gstin TINYINT(1) DEFAULT 1,
+    upi_id VARCHAR(100) DEFAULT 'matoshree@upi',
+    upi_display_name VARCHAR(150) DEFAULT 'Matoshree Collection',
+    logo_url VARCHAR(500) DEFAULT NULL,
+    logo_data MEDIUMTEXT DEFAULT NULL,
     currency VARCHAR(10) DEFAULT 'INR',
     default_profit_margin DECIMAL(5,2) DEFAULT 25.00,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
@@ -72,6 +77,8 @@ CREATE TABLE IF NOT EXISTS bills (
     transaction_uuid VARCHAR(64) NOT NULL UNIQUE,
     sale_type VARCHAR(20) NOT NULL DEFAULT 'DETAILED',
     subtotal DECIMAL(12,2) NOT NULL DEFAULT 0.00,
+    discount_type VARCHAR(20) NOT NULL DEFAULT 'NONE',
+    discount_value DECIMAL(10,2) NOT NULL DEFAULT 0.00,
     discount_amount DECIMAL(10,2) NOT NULL DEFAULT 0.00,
     tax_amount DECIMAL(10,2) NOT NULL DEFAULT 0.00,
     final_amount DECIMAL(12,2) NOT NULL DEFAULT 0.00,
@@ -83,6 +90,11 @@ CREATE TABLE IF NOT EXISTS bills (
     payment_status VARCHAR(20) NOT NULL DEFAULT 'PAID',
     note TEXT,
     bill_date DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    shop_name_snapshot VARCHAR(255) DEFAULT 'Matoshree Collection',
+    shop_address_snapshot TEXT DEFAULT NULL,
+    shop_mobile_snapshot VARCHAR(50) DEFAULT NULL,
+    shop_gstin_snapshot VARCHAR(50) DEFAULT NULL,
+    show_gstin_snapshot TINYINT(1) DEFAULT 1,
     is_voided TINYINT(1) NOT NULL DEFAULT 0,
     void_reason TEXT,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
@@ -151,6 +163,30 @@ async function runAutoMigration() {
       await pool.query(sql);
     }
 
+    // Dynamic column additions for existing tables
+    const alterStatements = [
+      "ALTER TABLE shops ADD COLUMN IF NOT EXISTS logo_url VARCHAR(500) DEFAULT NULL",
+      "ALTER TABLE shops ADD COLUMN IF NOT EXISTS logo_data MEDIUMTEXT DEFAULT NULL",
+      "ALTER TABLE shops ADD COLUMN IF NOT EXISTS upi_id VARCHAR(100) DEFAULT 'matoshree@upi'",
+      "ALTER TABLE shops ADD COLUMN IF NOT EXISTS upi_display_name VARCHAR(150) DEFAULT 'Matoshree Collection'",
+      "ALTER TABLE shops ADD COLUMN IF NOT EXISTS show_gstin TINYINT(1) DEFAULT 1",
+      "ALTER TABLE bills ADD COLUMN IF NOT EXISTS discount_type VARCHAR(20) NOT NULL DEFAULT 'NONE'",
+      "ALTER TABLE bills ADD COLUMN IF NOT EXISTS discount_value DECIMAL(10,2) NOT NULL DEFAULT 0.00",
+      "ALTER TABLE bills ADD COLUMN IF NOT EXISTS shop_name_snapshot VARCHAR(255) DEFAULT 'Matoshree Collection'",
+      "ALTER TABLE bills ADD COLUMN IF NOT EXISTS shop_address_snapshot TEXT DEFAULT NULL",
+      "ALTER TABLE bills ADD COLUMN IF NOT EXISTS shop_mobile_snapshot VARCHAR(50) DEFAULT NULL",
+      "ALTER TABLE bills ADD COLUMN IF NOT EXISTS shop_gstin_snapshot VARCHAR(50) DEFAULT NULL",
+      "ALTER TABLE bills ADD COLUMN IF NOT EXISTS show_gstin_snapshot TINYINT(1) DEFAULT 1"
+    ];
+
+    for (const alterSql of alterStatements) {
+      try {
+        await pool.query(alterSql);
+      } catch (e) {
+        // column may already exist
+      }
+    }
+
     // Seed default shop and admin user if empty
     const [shops] = await pool.query('SELECT COUNT(*) as count FROM shops');
     if (shops[0].count === 0) {
@@ -168,7 +204,7 @@ async function runAutoMigration() {
       `);
     }
 
-    console.log('[✓] Hostinger MySQL Tables and Seed records initialized successfully!');
+    console.log('[✓] Hostinger MySQL Tables, Alters, and Seed records initialized successfully!');
     return true;
   } catch (err) {
     console.warn('[!] Auto migration warning:', err.message);
