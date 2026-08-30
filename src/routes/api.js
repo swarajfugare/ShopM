@@ -112,8 +112,10 @@ router.get('/analytics/daily', analyticsController.getDaily);
 router.get('/analytics/monthly', analyticsController.getMonthly);
 router.get('/analytics/yearly', analyticsController.getYearly);
 
-// Batch Offline Sync
+// Real-Time Multi-Device Sync & Devices
+router.get('/sync/changes', syncController.getChanges);
 router.post('/sync', syncController.syncBatch);
+router.post('/devices/register', syncController.registerDevice);
 
 // Settings & Shop
 router.get('/settings', settingsController.getSettings);

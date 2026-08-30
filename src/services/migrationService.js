@@ -165,16 +165,29 @@ CREATE TABLE IF NOT EXISTS payments (
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
-CREATE TABLE IF NOT EXISTS sync_logs (
+CREATE TABLE IF NOT EXISTS devices (
     id INT AUTO_INCREMENT PRIMARY KEY,
+    device_id VARCHAR(100) NOT NULL UNIQUE,
     shop_id INT NOT NULL DEFAULT 1,
-    device_id VARCHAR(100) DEFAULT 'android_pos',
+    device_name VARCHAR(150) DEFAULT NULL,
+    platform VARCHAR(50) DEFAULT 'Android',
+    app_version VARCHAR(50) DEFAULT '1.0.0',
+    last_seen_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+CREATE TABLE IF NOT EXISTS sync_changes (
+    id BIGINT AUTO_INCREMENT PRIMARY KEY,
+    shop_id INT NOT NULL DEFAULT 1,
     entity_type VARCHAR(50) NOT NULL,
-    transaction_uuid VARCHAR(64) NOT NULL,
-    status VARCHAR(20) NOT NULL,
-    payload TEXT,
-    error_message TEXT,
-    synced_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    entity_id BIGINT NOT NULL,
+    operation VARCHAR(20) NOT NULL,
+    transaction_uuid VARCHAR(64) DEFAULT NULL,
+    device_id VARCHAR(100) DEFAULT NULL,
+    change_version BIGINT NOT NULL DEFAULT 0,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    INDEX idx_shop_version (shop_id, id),
+    INDEX idx_entity (entity_type, entity_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 `;
 

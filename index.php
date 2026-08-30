@@ -2,6 +2,7 @@
 /**
  * Matoshree Collection — Smart Shop Manager
  * Direct Hostinger Universal API Gateway & REST Controller (PHP + MySQL PDO)
+ * Multi-Device Real-Time Sync & Authoritative Hostinger MySQL Engine
  */
 
 header('Content-Type: application/json; charset=UTF-8');
@@ -42,12 +43,52 @@ if (!empty($dbName) && !empty($dbUser)) {
     try {
         $pdo = new PDO("mysql:host={$dbHost};dbname={$dbName};charset=utf8mb4", $dbUser, $dbPass, [
             PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION,
-            PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC
+            PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC,
+            PDO::ATTR_PERSISTENT => false
         ]);
         $dbConnected = true;
+
+        // Auto-create sync tables & columns if not exist
+        $pdo->exec("
+            CREATE TABLE IF NOT EXISTS devices (
+                id INT AUTO_INCREMENT PRIMARY KEY,
+                device_id VARCHAR(100) NOT NULL UNIQUE,
+                shop_id INT NOT NULL DEFAULT 1,
+                device_name VARCHAR(150) DEFAULT NULL,
+                platform VARCHAR(50) DEFAULT 'Android',
+                app_version VARCHAR(50) DEFAULT '1.0.0',
+                last_seen_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+            CREATE TABLE IF NOT EXISTS sync_changes (
+                id BIGINT AUTO_INCREMENT PRIMARY KEY,
+                shop_id INT NOT NULL DEFAULT 1,
+                entity_type VARCHAR(50) NOT NULL,
+                entity_id BIGINT NOT NULL,
+                operation VARCHAR(20) NOT NULL,
+                transaction_uuid VARCHAR(64) DEFAULT NULL,
+                device_id VARCHAR(100) DEFAULT NULL,
+                change_version BIGINT NOT NULL DEFAULT 0,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                INDEX idx_shop_version (shop_id, id),
+                INDEX idx_entity (entity_type, entity_id)
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+        ");
     } catch (Exception $e) {
         $dbConnected = false;
     }
+}
+
+function logSyncChange($pdo, $entityType, $entityId, $operation = 'CREATE', $txUuid = null, $deviceId = null) {
+    if (!$pdo) return;
+    try {
+        $stmt = $pdo->prepare("INSERT INTO sync_changes (shop_id, entity_type, entity_id, operation, transaction_uuid, device_id, change_version) VALUES (1, ?, ?, ?, ?, ?, 0)");
+        $stmt->execute([$entityType, $entityId, $operation, $txUuid, $deviceId]);
+        $newId = $pdo->lastInsertId();
+        $upStmt = $pdo->prepare("UPDATE sync_changes SET change_version = ? WHERE id = ?");
+        $upStmt->execute([$newId, $newId]);
+    } catch (Exception $e) {}
 }
 
 $shopData = [
@@ -65,7 +106,7 @@ function sendJson($status, $message, $data = null, $code = 200) {
         'status' => $status,
         'message' => $message,
         'data' => $data,
-        'timestamp' => time()
+        'timestamp' => round(microtime(true) * 1000)
     ], JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES);
     exit();
 }
@@ -85,11 +126,21 @@ if ($cleanUri === '/') {
 
 // 2. Health check
 if ($cleanUri === '/api/v1/health') {
+    $changesCount = 0;
+    $devicesCount = 0;
+    if ($dbConnected && $pdo) {
+        try {
+            $changesCount = intval($pdo->query("SELECT COUNT(*) FROM sync_changes")->fetchColumn());
+            $devicesCount = intval($pdo->query("SELECT COUNT(*) FROM devices")->fetchColumn());
+        } catch (Exception $e) {}
+    }
     sendJson('success', 'Matoshree Collection Backend REST API is operational on Hostinger', [
         'service' => 'Matoshree Collection Backend Gateway',
         'version' => '1.0.0',
         'database_status' => $dbConnected ? 'CONNECTED' : 'STANDALONE_READY',
-        'host' => $_SERVER['HTTP_HOST'] ?? 'blueviolet-ibis-158713.hostingersite.com'
+        'host' => $_SERVER['HTTP_HOST'] ?? 'blueviolet-ibis-158713.hostingersite.com',
+        'sync_changes_count' => $changesCount,
+        'active_devices_count' => $devicesCount
     ]);
 }
 
@@ -110,7 +161,23 @@ if ($cleanUri === '/api/v1/db-status') {
     ]);
 }
 
-// 4. Auth Login
+// 4. Device Registration
+if ($cleanUri === '/api/v1/devices/register' && $method === 'POST') {
+    $input = json_decode(file_get_contents('php://input'), true) ?? [];
+    $devId = $input['device_id'] ?? ($_SERVER['HTTP_X_DEVICE_ID'] ?? 'unknown_device');
+    $devName = $input['device_name'] ?? 'Android Phone';
+    $appVer = $input['app_version'] ?? '1.0.0';
+
+    if ($dbConnected && $pdo) {
+        try {
+            $stmt = $pdo->prepare("INSERT INTO devices (device_id, shop_id, device_name, platform, app_version, last_seen_at) VALUES (?, 1, ?, 'Android', ?, NOW()) ON DUPLICATE KEY UPDATE device_name = VALUES(device_name), app_version = VALUES(app_version), last_seen_at = NOW()");
+            $stmt->execute([$devId, $devName, $appVer]);
+        } catch (Exception $e) {}
+    }
+    sendJson('success', 'Device registered successfully', ['device_id' => $devId]);
+}
+
+// 5. Auth Login
 if ($cleanUri === '/api/v1/auth/login') {
     if ($method === 'GET') {
         sendJson('info', 'Authentication endpoint requires a POST request with JSON credentials.', [
@@ -130,6 +197,7 @@ if ($cleanUri === '/api/v1/auth/login') {
 
     $token = base64_encode(json_encode([
         'user_id' => 1,
+        'shop_id' => 1,
         'name' => 'Matoshree Admin',
         'role' => 'OWNER',
         'exp' => time() + (90 * 86400)
@@ -149,7 +217,7 @@ if ($cleanUri === '/api/v1/auth/login') {
     ]);
 }
 
-// 5. Auth Me
+// 6. Auth Me
 if ($cleanUri === '/api/v1/auth/me' && $method === 'GET') {
     sendJson('success', 'User profile retrieved', [
         'id' => 1,
@@ -162,44 +230,48 @@ if ($cleanUri === '/api/v1/auth/me' && $method === 'GET') {
     ]);
 }
 
-// 6. Dashboard Summary
+// 7. Dashboard Summary
 if ($cleanUri === '/api/v1/dashboard' && $method === 'GET') {
-    $todaySales = 18450.00;
-    $todayBillsCount = 5;
-    $todayProfit = 4612.50;
+    $today = date('Y-m-d');
+    $todaySales = 0.0;
+    $billsCount = 0;
+    $custCount = 0;
+    $prodCount = 0;
+    $cashSales = 0.0;
+    $upiSales = 0.0;
 
     if ($dbConnected && $pdo) {
         try {
-            $today = date('Y-m-d');
-            $stmt = $pdo->prepare("SELECT COUNT(*) as total_bills, COALESCE(SUM(final_amount), 0.0) as total_sales, COALESCE(SUM(estimated_profit + actual_profit), 0.0) as total_profit FROM bills WHERE bill_date LIKE ? AND is_voided = 0");
-            $stmt->execute(["$today%"]);
-            $stats = $stmt->fetch();
-            if ($stats && $stats['total_bills'] > 0) {
-                $todaySales = floatval($stats['total_sales']);
-                $todayBillsCount = intval($stats['total_bills']);
-                $todayProfit = floatval($stats['total_profit']);
-            }
+            $stmt = $pdo->query("SELECT COUNT(*) as bills, COALESCE(SUM(final_amount), 0) as sales, COALESCE(SUM(CASE WHEN payment_method='CASH' THEN final_amount ELSE 0 END), 0) as cash, COALESCE(SUM(CASE WHEN payment_method='UPI' THEN final_amount ELSE 0 END), 0) as upi FROM bills WHERE DATE(bill_date) = '$today' AND is_voided = 0");
+            $res = $stmt->fetch();
+            $todaySales = floatval($res['sales']);
+            $billsCount = intval($res['bills']);
+            $cashSales = floatval($res['cash']);
+            $upiSales = floatval($res['upi']);
+
+            $custCount = intval($pdo->query("SELECT COUNT(*) FROM customers WHERE shop_id = 1")->fetchColumn());
+            $prodCount = intval($pdo->query("SELECT COUNT(*) FROM products WHERE shop_id = 1")->fetchColumn());
         } catch (Exception $e) {}
     }
 
-    sendJson('success', 'Dashboard retrieved', [
+    sendJson('success', 'Dashboard summary retrieved', [
         'today' => [
-            'sales' => $todaySales,
-            'bills_count' => $todayBillsCount,
-            'profit' => $todayProfit,
-            'avg_order' => $todayBillsCount > 0 ? round($todaySales / $todayBillsCount, 2) : 0.00,
-            'profit_margin' => 25.0
+            'total_sales' => $todaySales,
+            'total_bills' => $billsCount,
+            'average_bill' => $billsCount > 0 ? round($todaySales / $billsCount, 2) : 0.0,
+            'cash_sales' => $cashSales,
+            'upi_sales' => $upiSales
         ],
-        'monthly' => [
-            'sales' => 125500.00,
-            'target' => 500000.00,
-            'target_progress_percent' => 25.1
+        'counts' => [
+            'total_customers' => $custCount,
+            'total_products' => $prodCount
         ]
     ]);
 }
 
-// 7. Customers (GET & POST)
+// 8. Customers (GET & POST)
 if ($cleanUri === '/api/v1/customers') {
+    $devId = $_SERVER['HTTP_X_DEVICE_ID'] ?? null;
     if ($method === 'POST') {
         $input = json_decode(file_get_contents('php://input'), true) ?? [];
         $name = trim($input['name'] ?? '');
@@ -226,6 +298,8 @@ if ($cleanUri === '/api/v1/customers') {
                 $stmt = $pdo->prepare("INSERT INTO customers (shop_id, name, mobile, email, address, total_bills, lifetime_spend, tier) VALUES (1, ?, ?, ?, ?, 0, 0.00, 'REGULAR')");
                 $stmt->execute([$name, $cleanMobile, $email ?: null, $address ?: null]);
                 $newId = $pdo->lastInsertId();
+
+                logSyncChange($pdo, 'CUSTOMER', $newId, 'CREATE', null, $devId);
 
                 sendJson('success', 'Customer created successfully', [
                     'customer' => [
@@ -264,21 +338,17 @@ if ($cleanUri === '/api/v1/customers') {
         $customersList = [];
         if ($dbConnected && $pdo) {
             try {
-                $stmt = $pdo->query("SELECT * FROM customers ORDER BY lifetime_spend DESC, id DESC LIMIT 50");
+                $stmt = $pdo->query("SELECT * FROM customers ORDER BY lifetime_spend DESC, id DESC LIMIT 200");
                 $customersList = $stmt->fetchAll();
             } catch (Exception $e) {}
-        }
-        if (empty($customersList)) {
-            $customersList = [
-                ['id' => 1, 'name' => 'Priya Sharma', 'mobile' => '+91 98765 43210', 'total_bills' => 4, 'lifetime_spend' => 38450.00, 'tier' => 'VIP']
-            ];
         }
         sendJson('success', 'Customers retrieved', ['customers' => $customersList]);
     }
 }
 
-// 8. Categories (GET & POST)
+// 9. Categories (GET & POST)
 if ($cleanUri === '/api/v1/categories') {
+    $devId = $_SERVER['HTTP_X_DEVICE_ID'] ?? null;
     if ($method === 'POST') {
         $input = json_decode(file_get_contents('php://input'), true) ?? [];
         $name = trim($input['name'] ?? '');
@@ -300,6 +370,8 @@ if ($cleanUri === '/api/v1/categories') {
                 $stmt = $pdo->prepare("INSERT INTO categories (shop_id, name, description) VALUES (1, ?, ?)");
                 $stmt->execute([$name, $description ?: null]);
                 $newId = $pdo->lastInsertId();
+
+                logSyncChange($pdo, 'CATEGORY', $newId, 'CREATE', null, $devId);
 
                 sendJson('success', 'Category created successfully', [
                     'category' => [
@@ -336,8 +408,9 @@ if ($cleanUri === '/api/v1/categories') {
     }
 }
 
-// 9. Products (GET & POST)
+// 10. Products (GET & POST)
 if ($cleanUri === '/api/v1/products') {
+    $devId = $_SERVER['HTTP_X_DEVICE_ID'] ?? null;
     if ($method === 'POST') {
         $input = json_decode(file_get_contents('php://input'), true) ?? [];
         $name = trim($input['name'] ?? '');
@@ -356,6 +429,8 @@ if ($cleanUri === '/api/v1/products') {
                 $stmt = $pdo->prepare("INSERT INTO products (shop_id, category_id, name, sku, selling_price, cost_price, current_stock) VALUES (1, ?, ?, ?, ?, ?, ?)");
                 $stmt->execute([$catId, $name, $sku ?: null, $price, $cost, $stock]);
                 $newId = $pdo->lastInsertId();
+
+                logSyncChange($pdo, 'PRODUCT', $newId, 'CREATE', null, $devId);
 
                 sendJson('success', 'Product created successfully', [
                     'product' => [
@@ -392,7 +467,7 @@ if ($cleanUri === '/api/v1/products') {
         $productsList = [];
         if ($dbConnected && $pdo) {
             try {
-                $stmt = $pdo->query("SELECT * FROM products ORDER BY id DESC LIMIT 50");
+                $stmt = $pdo->query("SELECT * FROM products ORDER BY id DESC LIMIT 200");
                 $productsList = $stmt->fetchAll();
             } catch (Exception $e) {}
         }
@@ -400,8 +475,9 @@ if ($cleanUri === '/api/v1/products') {
     }
 }
 
-// 10. Expenses (GET & POST)
+// 11. Expenses (GET & POST)
 if ($cleanUri === '/api/v1/expenses') {
+    $devId = $_SERVER['HTTP_X_DEVICE_ID'] ?? null;
     if ($method === 'POST') {
         $input = json_decode(file_get_contents('php://input'), true) ?? [];
         $category = trim($input['category'] ?? 'GENERAL');
@@ -415,6 +491,8 @@ if ($cleanUri === '/api/v1/expenses') {
                 $stmt = $pdo->prepare("INSERT INTO expenses (shop_id, category, amount, payment_method, expense_date, note) VALUES (1, ?, ?, ?, ?, ?)");
                 $stmt->execute([$category, $amount, $payMethod, $expDate, $note ?: null]);
                 $newId = $pdo->lastInsertId();
+
+                logSyncChange($pdo, 'EXPENSE', $newId, 'CREATE', null, $devId);
 
                 sendJson('success', 'Expense created successfully', [
                     'expense' => [
@@ -444,12 +522,23 @@ if ($cleanUri === '/api/v1/expenses') {
             ]
         ], 201);
     }
+
+    if ($method === 'GET') {
+        $expList = [];
+        if ($dbConnected && $pdo) {
+            try {
+                $expList = $pdo->query("SELECT * FROM expenses ORDER BY expense_date DESC LIMIT 100")->fetchAll();
+            } catch (Exception $e) {}
+        }
+        sendJson('success', 'Expenses retrieved', ['expenses' => $expList]);
+    }
 }
 
-// 11. Sales (POST)
+// 12. Sales (POST)
 if ($cleanUri === '/api/v1/sales' && $method === 'POST') {
     $input = json_decode(file_get_contents('php://input'), true) ?? [];
     $txUuid = $input['transaction_uuid'] ?? ('tx-' . uniqid());
+    $devId = $_SERVER['HTTP_X_DEVICE_ID'] ?? ($input['device_id'] ?? null);
     $finalAmt = floatval($input['final_amount'] ?? 0);
     $payMethod = $input['payment_method'] ?? 'CASH';
     $saleType = $input['sale_type'] ?? 'DETAILED';
@@ -462,7 +551,7 @@ if ($cleanUri === '/api/v1/sales' && $method === 'POST') {
         try {
             $pdo->beginTransaction();
 
-            // Idempotency
+            // Idempotency check
             $checkStmt = $pdo->prepare("SELECT id, bill_number FROM bills WHERE transaction_uuid = ? LIMIT 1");
             $checkStmt->execute([$txUuid]);
             $existing = $checkStmt->fetch();
@@ -494,7 +583,7 @@ if ($cleanUri === '/api/v1/sales' && $method === 'POST') {
                     $itemStmt->execute([
                         $newBillId,
                         $it['product_id'] ?? null,
-                        $it['name'] ?? 'Item',
+                        $it['name'] ?? ($it['product_name_snapshot'] ?? 'Item'),
                         intval($it['quantity'] ?? 1),
                         floatval($it['selling_price'] ?? 0),
                         floatval($it['cost_price'] ?? 0),
@@ -512,7 +601,10 @@ if ($cleanUri === '/api/v1/sales' && $method === 'POST') {
             if ($custId) {
                 $custStmt = $pdo->prepare("UPDATE customers SET total_bills = total_bills + 1, lifetime_spend = lifetime_spend + ? WHERE id = ?");
                 $custStmt->execute([$finalAmt, $custId]);
+                logSyncChange($pdo, 'CUSTOMER', $custId, 'UPDATE', null, $devId);
             }
+
+            logSyncChange($pdo, 'BILL', $newBillId, 'CREATE', $txUuid, $devId);
 
             $pdo->commit();
 
@@ -548,7 +640,7 @@ if ($cleanUri === '/api/v1/sales' && $method === 'POST') {
     ], 201);
 }
 
-// 11b. Bills (GET & VOID)
+// 13. Bills (GET & VOID)
 if ($cleanUri === '/api/v1/bills' && $method === 'GET') {
     $bills = [];
     if ($dbConnected && $pdo) {
@@ -564,6 +656,7 @@ if (preg_match('#^/api/v1/bills/([0-9]+)/void$#', $cleanUri, $matches) && $metho
     $billId = intval($matches[1]);
     $input = json_decode(file_get_contents('php://input'), true) ?? [];
     $reason = $input['reason'] ?? 'Voided by manager';
+    $devId = $_SERVER['HTTP_X_DEVICE_ID'] ?? null;
 
     if ($dbConnected && $pdo) {
         try {
@@ -576,16 +669,264 @@ if (preg_match('#^/api/v1/bills/([0-9]+)/void$#', $cleanUri, $matches) && $metho
                 if (!empty($bill['customer_id'])) {
                     $custStmt = $pdo->prepare("UPDATE customers SET total_bills = GREATEST(0, total_bills - 1), lifetime_spend = GREATEST(0.00, lifetime_spend - ?) WHERE id = ?");
                     $custStmt->execute([floatval($bill['final_amount']), $bill['customer_id']]);
+                    logSyncChange($pdo, 'CUSTOMER', $bill['customer_id'], 'UPDATE', null, $devId);
                 }
+                logSyncChange($pdo, 'BILL', $billId, 'VOID', null, $devId);
             }
         } catch (Exception $e) {}
     }
     sendJson('success', 'Bill voided successfully', null);
 }
 
-// 12. Offline Batch Sync (POST)
+// 14. Settings (GET & PUT)
+if ($cleanUri === '/api/v1/settings') {
+    if ($method === 'GET') {
+        $shop = $shopData;
+        if ($dbConnected && $pdo) {
+            try {
+                $row = $pdo->query("SELECT * FROM shops WHERE id = 1 LIMIT 1")->fetch();
+                if ($row) $shop = $row;
+            } catch (Exception $e) {}
+        }
+        sendJson('success', 'Settings retrieved', [
+            'shop' => $shop,
+            'payment' => [
+                'upi_id' => $shop['upi_id'] ?? 'matoshree@upi',
+                'upi_display_name' => $shop['upi_display_name'] ?? 'Matoshree Collection',
+                'upi_mobile_number' => $shop['mobile'] ?? '+91 98765 43210'
+            ],
+            'billing' => [
+                'show_gstin_on_bill' => !empty($shop['show_gstin']),
+                'default_profit_margin' => floatval($shop['default_profit_margin'] ?? 25.0),
+                'bill_prefix' => 'MC'
+            ]
+        ]);
+    }
+    if ($method === 'PUT') {
+        $input = json_decode(file_get_contents('php://input'), true) ?? [];
+        $devId = $_SERVER['HTTP_X_DEVICE_ID'] ?? null;
+        $upiId = $input['upi_id'] ?? null;
+        $upiName = $input['upi_display_name'] ?? null;
+        $showGstin = isset($input['show_gstin_on_bill']) ? ($input['show_gstin_on_bill'] ? 1 : 0) : null;
+        $shopName = $input['name'] ?? null;
+        $address = $input['address'] ?? null;
+        $mobile = $input['mobile'] ?? null;
+        $gstNumber = $input['gst_number'] ?? null;
+        $logoData = $input['logo_data'] ?? null;
+
+        if ($dbConnected && $pdo) {
+            try {
+                $updates = [];
+                $params = [];
+                if ($upiId !== null) { $updates[] = "upi_id = ?"; $params[] = $upiId; }
+                if ($upiName !== null) { $updates[] = "upi_display_name = ?"; $params[] = $upiName; }
+                if ($showGstin !== null) { $updates[] = "show_gstin = ?"; $params[] = $showGstin; }
+                if ($shopName !== null) { $updates[] = "name = ?"; $params[] = $shopName; }
+                if ($address !== null) { $updates[] = "address = ?"; $params[] = $address; }
+                if ($mobile !== null) { $updates[] = "mobile = ?"; $params[] = $mobile; }
+                if ($gstNumber !== null) { $updates[] = "gst_number = ?"; $params[] = $gstNumber; }
+                if ($logoData !== null) { $updates[] = "logo_data = ?"; $params[] = $logoData; }
+
+                if (!empty($updates)) {
+                    $sql = "UPDATE shops SET " . implode(', ', $updates) . " WHERE id = 1";
+                    $stmt = $pdo->prepare($sql);
+                    $stmt->execute($params);
+                    logSyncChange($pdo, 'SETTINGS', 1, 'UPDATE', null, $devId);
+                }
+            } catch (Exception $e) {}
+        }
+        sendJson('success', 'Settings updated successfully', ['updated' => true]);
+    }
+}
+
+// 15. Real-Time Sync Changes Feed (GET /api/v1/sync/changes)
+if ($cleanUri === '/api/v1/sync/changes' && $method === 'GET') {
+    $cursor = isset($_GET['cursor']) ? intval($_GET['cursor']) : 0;
+    $limit = isset($_GET['limit']) ? min(500, max(1, intval($_GET['limit']))) : 200;
+    $deviceId = $_GET['device_id'] ?? ($_SERVER['HTTP_X_DEVICE_ID'] ?? null);
+
+    if ($dbConnected && $pdo) {
+        try {
+            if ($deviceId) {
+                try {
+                    $devStmt = $pdo->prepare("INSERT INTO devices (device_id, shop_id, last_seen_at) VALUES (?, 1, NOW()) ON DUPLICATE KEY UPDATE last_seen_at = NOW()");
+                    $devStmt->execute([$deviceId]);
+                } catch (Exception $e) {}
+            }
+
+            $maxStmt = $pdo->query("SELECT COALESCE(MAX(id), 0) as max_id FROM sync_changes WHERE shop_id = 1");
+            $maxRow = $maxStmt->fetch();
+            $maxCursor = intval($maxRow['max_id'] ?? 0);
+
+            if ($cursor === 0) {
+                // INITIAL SYNC: Fetch complete snapshot
+                $cats = $pdo->query("SELECT * FROM categories WHERE shop_id = 1 ORDER BY name ASC")->fetchAll();
+                $prods = $pdo->query("SELECT * FROM products WHERE shop_id = 1 ORDER BY id ASC")->fetchAll();
+                $custs = $pdo->query("SELECT * FROM customers WHERE shop_id = 1 ORDER BY id ASC")->fetchAll();
+                $bills = $pdo->query("SELECT * FROM bills WHERE shop_id = 1 ORDER BY id ASC LIMIT 500")->fetchAll();
+                
+                $billIds = array_map(function($b) { return intval($b['id']); }, $bills);
+                $items = [];
+                $payments = [];
+                if (!empty($billIds)) {
+                    $inClause = implode(',', $billIds);
+                    $items = $pdo->query("SELECT * FROM bill_items WHERE bill_id IN ($inClause)")->fetchAll();
+                    $payments = $pdo->query("SELECT * FROM payments WHERE bill_id IN ($inClause)")->fetchAll();
+                }
+
+                $itemsByBill = [];
+                foreach ($items as $it) {
+                    $itemsByBill[intval($it['bill_id'])][] = $it;
+                }
+                $payByBill = [];
+                foreach ($payments as $p) {
+                    $payByBill[intval($p['bill_id'])][] = $p;
+                }
+
+                $formattedBills = [];
+                foreach ($bills as $b) {
+                    $bId = intval($b['id']);
+                    $b['items'] = $itemsByBill[$bId] ?? [];
+                    $b['payments'] = $payByBill[$bId] ?? [];
+                    $formattedBills[] = $b;
+                }
+
+                $exps = $pdo->query("SELECT * FROM expenses WHERE shop_id = 1 ORDER BY id ASC LIMIT 200")->fetchAll();
+                $closings = $pdo->query("SELECT * FROM daily_closings WHERE shop_id = 1 ORDER BY id ASC LIMIT 100")->fetchAll();
+                $shopRow = $pdo->query("SELECT * FROM shops WHERE id = 1 LIMIT 1")->fetch();
+
+                sendJson('success', 'Initial sync data retrieved', [
+                    'cursor' => $maxCursor,
+                    'server_timestamp' => round(microtime(true) * 1000),
+                    'categories' => $cats,
+                    'products' => $prods,
+                    'customers' => $custs,
+                    'bills' => $formattedBills,
+                    'expenses' => $exps,
+                    'daily_closings' => $closings,
+                    'settings' => $shopRow ?: $shopData
+                ]);
+            } else {
+                // DELTA SYNC
+                $chgStmt = $pdo->prepare("SELECT * FROM sync_changes WHERE shop_id = 1 AND id > ? ORDER BY id ASC LIMIT ?");
+                $chgStmt->execute([$cursor, $limit]);
+                $changes = $chgStmt->fetchAll();
+
+                if (empty($changes)) {
+                    sendJson('success', 'No new changes', [
+                        'cursor' => $cursor,
+                        'server_timestamp' => round(microtime(true) * 1000),
+                        'categories' => [],
+                        'products' => [],
+                        'customers' => [],
+                        'bills' => [],
+                        'expenses' => [],
+                        'daily_closings' => [],
+                        'settings' => null
+                    ]);
+                }
+
+                $newCursor = $cursor;
+                $entityGroups = [];
+                foreach ($changes as $c) {
+                    $cId = intval($c['id']);
+                    if ($cId > $newCursor) $newCursor = $cId;
+                    $entityGroups[$c['entity_type']][] = intval($c['entity_id']);
+                }
+
+                $deltaCategories = [];
+                if (!empty($entityGroups['CATEGORY'])) {
+                    $in = implode(',', array_unique($entityGroups['CATEGORY']));
+                    $deltaCategories = $pdo->query("SELECT * FROM categories WHERE id IN ($in)")->fetchAll();
+                }
+
+                $deltaProducts = [];
+                if (!empty($entityGroups['PRODUCT'])) {
+                    $in = implode(',', array_unique($entityGroups['PRODUCT']));
+                    $deltaProducts = $pdo->query("SELECT * FROM products WHERE id IN ($in)")->fetchAll();
+                }
+
+                $deltaCustomers = [];
+                if (!empty($entityGroups['CUSTOMER'])) {
+                    $in = implode(',', array_unique($entityGroups['CUSTOMER']));
+                    $deltaCustomers = $pdo->query("SELECT * FROM customers WHERE id IN ($in)")->fetchAll();
+                }
+
+                $deltaBills = [];
+                if (!empty($entityGroups['BILL'])) {
+                    $in = implode(',', array_unique($entityGroups['BILL']));
+                    $bRows = $pdo->query("SELECT * FROM bills WHERE id IN ($in)")->fetchAll();
+                    $bIds = array_map(function($b) { return intval($b['id']); }, $bRows);
+                    $items = [];
+                    $payments = [];
+                    if (!empty($bIds)) {
+                        $inB = implode(',', $bIds);
+                        $items = $pdo->query("SELECT * FROM bill_items WHERE bill_id IN ($inB)")->fetchAll();
+                        $payments = $pdo->query("SELECT * FROM payments WHERE bill_id IN ($inB)")->fetchAll();
+                    }
+                    $itemsByBill = [];
+                    foreach ($items as $it) { $itemsByBill[intval($it['bill_id'])][] = $it; }
+                    $payByBill = [];
+                    foreach ($payments as $p) { $payByBill[intval($p['bill_id'])][] = $p; }
+                    foreach ($bRows as $b) {
+                        $bId = intval($b['id']);
+                        $b['items'] = $itemsByBill[$bId] ?? [];
+                        $b['payments'] = $payByBill[$bId] ?? [];
+                        $deltaBills[] = $b;
+                    }
+                }
+
+                $deltaExpenses = [];
+                if (!empty($entityGroups['EXPENSE'])) {
+                    $in = implode(',', array_unique($entityGroups['EXPENSE']));
+                    $deltaExpenses = $pdo->query("SELECT * FROM expenses WHERE id IN ($in)")->fetchAll();
+                }
+
+                $deltaClosings = [];
+                if (!empty($entityGroups['DAILY_CLOSING'])) {
+                    $in = implode(',', array_unique($entityGroups['DAILY_CLOSING']));
+                    $deltaClosings = $pdo->query("SELECT * FROM daily_closings WHERE id IN ($in)")->fetchAll();
+                }
+
+                $deltaSettings = null;
+                if (!empty($entityGroups['SETTINGS'])) {
+                    $deltaSettings = $pdo->query("SELECT * FROM shops WHERE id = 1 LIMIT 1")->fetch() ?: null;
+                }
+
+                sendJson('success', 'Delta changes retrieved', [
+                    'cursor' => $newCursor,
+                    'server_timestamp' => round(microtime(true) * 1000),
+                    'categories' => $deltaCategories,
+                    'products' => $deltaProducts,
+                    'customers' => $deltaCustomers,
+                    'bills' => $deltaBills,
+                    'expenses' => $deltaExpenses,
+                    'daily_closings' => $deltaClosings,
+                    'settings' => $deltaSettings
+                ]);
+            }
+        } catch (Exception $e) {
+            sendJson('error', $e->getMessage(), null, 500);
+        }
+    }
+
+    sendJson('success', 'Standalone sync empty', [
+        'cursor' => $cursor,
+        'server_timestamp' => round(microtime(true) * 1000),
+        'categories' => [],
+        'products' => [],
+        'customers' => [],
+        'bills' => [],
+        'expenses' => [],
+        'daily_closings' => [],
+        'settings' => null
+    ]);
+}
+
+// 16. Offline Batch Sync (POST)
 if ($cleanUri === '/api/v1/sync' && $method === 'POST') {
     $input = json_decode(file_get_contents('php://input'), true) ?? [];
+    $devId = $input['device_id'] ?? ($_SERVER['HTTP_X_DEVICE_ID'] ?? 'android_pos');
     $items = $input['sync_items'] ?? [];
     $results = [];
 
@@ -614,13 +955,22 @@ if ($cleanUri === '/api/v1/sync' && $method === 'POST') {
                     $payMethod = $payload['payment_method'] ?? 'CASH';
                     $billNumber = $payload['bill_number'] ?? ('MC-' . date('Y') . '-' . str_pad(rand(100, 999999), 6, '0', STR_PAD_LEFT));
                     $billDate = $payload['bill_date'] ?? date('Y-m-d H:i:s');
+                    $custId = isset($payload['customer_id']) ? intval($payload['customer_id']) : null;
 
-                    $stmt = $pdo->prepare("INSERT INTO bills (shop_id, bill_number, transaction_uuid, sale_type, subtotal, final_amount, cost_amount, estimated_profit, profit_type, payment_method, payment_status, bill_date) VALUES (1, ?, ?, 'QUICK', ?, ?, ?, ?, 'ESTIMATED', ?, 'PAID', ?)");
-                    $stmt->execute([$billNumber, $txUuid, $finalAmt, $finalAmt, $finalAmt * 0.75, $finalAmt * 0.25, $payMethod, $billDate]);
+                    $stmt = $pdo->prepare("INSERT INTO bills (shop_id, customer_id, bill_number, transaction_uuid, sale_type, subtotal, final_amount, cost_amount, estimated_profit, profit_type, payment_method, payment_status, bill_date) VALUES (1, ?, ?, ?, 'QUICK', ?, ?, ?, ?, 'ESTIMATED', ?, 'PAID', ?)");
+                    $stmt->execute([$custId, $billNumber, $txUuid, $finalAmt, $finalAmt, $finalAmt * 0.75, $finalAmt * 0.25, $payMethod, $billDate]);
                     $newBillId = $pdo->lastInsertId();
 
                     $payStmt = $pdo->prepare("INSERT INTO payments (bill_id, shop_id, payment_method, amount, payment_status) VALUES (?, 1, ?, ?, 'PAID')");
                     $payStmt->execute([$newBillId, $payMethod, $finalAmt]);
+
+                    if ($custId) {
+                        $custStmt = $pdo->prepare("UPDATE customers SET total_bills = total_bills + 1, lifetime_spend = lifetime_spend + ? WHERE id = ?");
+                        $custStmt->execute([$finalAmt, $custId]);
+                        logSyncChange($pdo, 'CUSTOMER', $custId, 'UPDATE', null, $devId);
+                    }
+
+                    logSyncChange($pdo, 'BILL', $newBillId, 'CREATE', $txUuid, $devId);
 
                     $results[] = [
                         'transaction_uuid' => $txUuid,
@@ -631,34 +981,46 @@ if ($cleanUri === '/api/v1/sync' && $method === 'POST') {
                 } else if ($entityType === 'CUSTOMER') {
                     $stmt = $pdo->prepare("INSERT INTO customers (shop_id, name, mobile, email, address, total_bills, lifetime_spend, tier) VALUES (1, ?, ?, ?, ?, 0, 0.00, 'REGULAR')");
                     $stmt->execute([$payload['name'] ?? 'Customer', $payload['mobile'] ?? '', $payload['email'] ?? null, $payload['address'] ?? null]);
+                    $newCustId = $pdo->lastInsertId();
+                    logSyncChange($pdo, 'CUSTOMER', $newCustId, 'CREATE', $txUuid, $devId);
+
                     $results[] = [
                         'transaction_uuid' => $txUuid,
                         'status' => 'SUCCESS',
-                        'server_id' => intval($pdo->lastInsertId())
+                        'server_id' => intval($newCustId)
                     ];
                 } else if ($entityType === 'PRODUCT') {
                     $stmt = $pdo->prepare("INSERT INTO products (shop_id, category_id, name, sku, selling_price, cost_price, current_stock) VALUES (1, ?, ?, ?, ?, ?, ?)");
                     $stmt->execute([$payload['category_id'] ?? null, $payload['name'] ?? 'Product', $payload['sku'] ?? null, floatval($payload['selling_price'] ?? 0), isset($payload['cost_price']) ? floatval($payload['cost_price']) : null, intval($payload['current_stock'] ?? 10)]);
+                    $newProdId = $pdo->lastInsertId();
+                    logSyncChange($pdo, 'PRODUCT', $newProdId, 'CREATE', $txUuid, $devId);
+
                     $results[] = [
                         'transaction_uuid' => $txUuid,
                         'status' => 'SUCCESS',
-                        'server_id' => intval($pdo->lastInsertId())
+                        'server_id' => intval($newProdId)
                     ];
                 } else if ($entityType === 'CATEGORY') {
                     $stmt = $pdo->prepare("INSERT INTO categories (shop_id, name, description) VALUES (1, ?, ?)");
                     $stmt->execute([$payload['name'] ?? 'Category', $payload['description'] ?? null]);
+                    $newCatId = $pdo->lastInsertId();
+                    logSyncChange($pdo, 'CATEGORY', $newCatId, 'CREATE', $txUuid, $devId);
+
                     $results[] = [
                         'transaction_uuid' => $txUuid,
                         'status' => 'SUCCESS',
-                        'server_id' => intval($pdo->lastInsertId())
+                        'server_id' => intval($newCatId)
                     ];
                 } else if ($entityType === 'EXPENSE') {
                     $stmt = $pdo->prepare("INSERT INTO expenses (shop_id, category, amount, payment_method, expense_date, note) VALUES (1, ?, ?, ?, ?, ?)");
                     $stmt->execute([$payload['category'] ?? 'GENERAL', floatval($payload['amount'] ?? 0), $payload['payment_method'] ?? 'CASH', $payload['expense_date'] ?? date('Y-m-d'), $payload['note'] ?? null]);
+                    $newExpId = $pdo->lastInsertId();
+                    logSyncChange($pdo, 'EXPENSE', $newExpId, 'CREATE', $txUuid, $devId);
+
                     $results[] = [
                         'transaction_uuid' => $txUuid,
                         'status' => 'SUCCESS',
-                        'server_id' => intval($pdo->lastInsertId())
+                        'server_id' => intval($newExpId)
                     ];
                 } else {
                     $results[] = [

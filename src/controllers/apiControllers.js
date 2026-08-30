@@ -4,6 +4,20 @@ const { memoryStore } = require('../services/storeService');
 const { calculateItemFinancials, calculateQuickSaleFinancials } = require('../services/financialService');
 const { JWT_SECRET } = require('../middleware/auth');
 
+async function logSyncChange(connOrPool, entityType, entityId, operation = 'CREATE', txUuid = null, deviceId = null) {
+  if (!isDbConnected() || !connOrPool) return;
+  try {
+    const [res] = await connOrPool.query(`
+      INSERT INTO sync_changes (shop_id, entity_type, entity_id, operation, transaction_uuid, device_id, change_version)
+      VALUES (1, ?, ?, ?, ?, ?, 0)
+    `, [entityType, entityId, operation, txUuid, deviceId]);
+    const newId = res.insertId;
+    await connOrPool.query('UPDATE sync_changes SET change_version = ? WHERE id = ?', [newId, newId]);
+  } catch (e) {
+    console.warn('[!] logSyncChange notice:', e.message);
+  }
+}
+
 // 1. AUTH CONTROLLER
 const authController = {
   login: async (req, res) => {
@@ -259,6 +273,11 @@ const salesController = {
           VALUES (1, ?, 'SALE', ?, 'SUCCESS', ?)
         `, [req.body.device_id || 'android_pos', txUuid, JSON.stringify(req.body)]);
 
+        await logSyncChange(connection, 'BILL', billId, 'CREATE', txUuid, req.body.device_id || req.headers['x-device-id']);
+        if (customer_id) {
+          await logSyncChange(connection, 'CUSTOMER', customer_id, 'UPDATE', null, req.body.device_id || req.headers['x-device-id']);
+        }
+
         await connection.commit();
         connection.release();
 
@@ -382,7 +401,9 @@ const billsController = {
           await pool.query('UPDATE bills SET is_voided = 1, payment_status = "VOID", void_reason = ? WHERE id = ?', [reason, id]);
           if (b.customer_id) {
             await pool.query('UPDATE customers SET total_bills = GREATEST(0, total_bills - 1), lifetime_spend = GREATEST(0.00, lifetime_spend - ?) WHERE id = ?', [b.final_amount, b.customer_id]);
+            await logSyncChange(pool, 'CUSTOMER', b.customer_id, 'UPDATE', null, req.body.device_id || req.headers['x-device-id']);
           }
+          await logSyncChange(pool, 'BILL', id, 'VOID', null, req.body.device_id || req.headers['x-device-id']);
           return res.json({ status: 'success', message: 'Bill voided successfully' });
         }
       } catch (e) {
@@ -455,6 +476,8 @@ const customersController = {
           VALUES (?, ?, ?, ?, ?, 0, 0.00, 'REGULAR')
         `, [shopId, name.trim(), cleanMobile, email ? email.trim() : null, address ? address.trim() : null]);
         
+        await logSyncChange(pool, 'CUSTOMER', result.insertId, 'CREATE', null, req.body.device_id || req.headers['x-device-id']);
+
         const newCust = {
           id: result.insertId,
           shop_id: shopId,
@@ -599,6 +622,8 @@ const productsController = {
           VALUES (?, ?, ?, ?, ?, ?, ?)
         `, [shopId, category_id || null, name.trim(), sku ? sku.trim() : null, parseFloat(selling_price), cost_price ? parseFloat(cost_price) : null, current_stock || 10]);
 
+        await logSyncChange(pool, 'PRODUCT', result.insertId, 'CREATE', null, req.body.device_id || req.headers['x-device-id']);
+
         const newProd = {
           id: result.insertId,
           shop_id: shopId,
@@ -659,6 +684,8 @@ const categoriesController = {
           shopId, name.trim(), description ? description.trim() : null
         ]);
 
+        await logSyncChange(pool, 'CATEGORY', result.insertId, 'CREATE', null, req.body.device_id || req.headers['x-device-id']);
+
         const newCat = {
           id: result.insertId,
           shop_id: shopId,
@@ -706,6 +733,8 @@ const expensesController = {
         const [result] = await pool.query('INSERT INTO expenses (shop_id, category, amount, payment_method, expense_date, note) VALUES (?, ?, ?, ?, ?, ?)', [
           shopId, category || 'GENERAL', amt, payMethod, expDate, note || null
         ]);
+
+        await logSyncChange(pool, 'EXPENSE', result.insertId, 'CREATE', null, req.body.device_id || req.headers['x-device-id']);
 
         const newEx = {
           id: result.insertId,
@@ -1048,6 +1077,240 @@ const syncController = {
         results
       }
     });
+  },
+
+  registerDevice: async (req, res) => {
+    const { device_id, device_name = 'Android Phone', app_version = '1.0.0' } = req.body;
+    const devId = device_id || req.headers['x-device-id'] || 'unknown_device';
+
+    if (isDbConnected() && pool) {
+      try {
+        await pool.query(`
+          INSERT INTO devices (device_id, shop_id, device_name, platform, app_version, last_seen_at)
+          VALUES (?, 1, ?, 'Android', ?, NOW())
+          ON DUPLICATE KEY UPDATE device_name = VALUES(device_name), app_version = VALUES(app_version), last_seen_at = NOW()
+        `, [devId, device_name, app_version]);
+      } catch (e) {
+        console.warn('[!] DB registerDevice warning:', e.message);
+      }
+    }
+
+    return res.json({
+      status: 'success',
+      message: 'Device registered successfully',
+      data: { device_id: devId }
+    });
+  },
+
+  getChanges: async (req, res) => {
+    const cursor = parseInt(req.query.cursor || '0', 10);
+    const limit = Math.min(500, Math.max(1, parseInt(req.query.limit || '200', 10)));
+    const deviceId = req.query.device_id || req.headers['x-device-id'] || null;
+
+    if (isDbConnected() && pool) {
+      try {
+        if (deviceId) {
+          try {
+            await pool.query(`
+              INSERT INTO devices (device_id, shop_id, last_seen_at)
+              VALUES (?, 1, NOW())
+              ON DUPLICATE KEY UPDATE last_seen_at = NOW()
+            `, [deviceId]);
+          } catch (e) {}
+        }
+
+        const [maxRows] = await pool.query('SELECT COALESCE(MAX(id), 0) as max_id FROM sync_changes WHERE shop_id = 1');
+        const maxCursor = maxRows[0] ? maxRows[0].max_id : 0;
+
+        if (cursor === 0) {
+          // INITIAL SYNC
+          const [cats] = await pool.query('SELECT * FROM categories WHERE shop_id = 1 ORDER BY name ASC');
+          const [prods] = await pool.query('SELECT * FROM products WHERE shop_id = 1 ORDER BY id ASC');
+          const [custs] = await pool.query('SELECT * FROM customers WHERE shop_id = 1 ORDER BY id ASC');
+          const [bills] = await pool.query('SELECT * FROM bills WHERE shop_id = 1 ORDER BY id ASC LIMIT 500');
+
+          const billIds = bills.map(b => b.id);
+          let items = [];
+          let payments = [];
+          if (billIds.length > 0) {
+            const inClause = billIds.join(',');
+            const [itRows] = await pool.query(`SELECT * FROM bill_items WHERE bill_id IN (${inClause})`);
+            const [payRows] = await pool.query(`SELECT * FROM payments WHERE bill_id IN (${inClause})`);
+            items = itRows;
+            payments = payRows;
+          }
+
+          const itemsByBill = {};
+          items.forEach(it => {
+            if (!itemsByBill[it.bill_id]) itemsByBill[it.bill_id] = [];
+            itemsByBill[it.bill_id].push(it);
+          });
+          const payByBill = {};
+          payments.forEach(p => {
+            if (!payByBill[p.bill_id]) payByBill[p.bill_id] = [];
+            payByBill[p.bill_id].push(p);
+          });
+
+          const formattedBills = bills.map(b => ({
+            ...b,
+            items: itemsByBill[b.id] || [],
+            payments: payByBill[b.id] || []
+          }));
+
+          const [exps] = await pool.query('SELECT * FROM expenses WHERE shop_id = 1 ORDER BY id ASC LIMIT 200');
+          const [closings] = await pool.query('SELECT * FROM daily_closings WHERE shop_id = 1 ORDER BY id ASC LIMIT 100');
+          const [shops] = await pool.query('SELECT * FROM shops WHERE id = 1 LIMIT 1');
+
+          return res.json({
+            status: 'success',
+            data: {
+              cursor: maxCursor,
+              server_timestamp: Date.now(),
+              categories: cats,
+              products: prods,
+              customers: custs,
+              bills: formattedBills,
+              expenses: exps,
+              daily_closings: closings,
+              settings: shops[0] || memoryStore.shop
+            }
+          });
+        } else {
+          // DELTA SYNC
+          const [changes] = await pool.query('SELECT * FROM sync_changes WHERE shop_id = 1 AND id > ? ORDER BY id ASC LIMIT ?', [cursor, limit]);
+
+          if (changes.length === 0) {
+            return res.json({
+              status: 'success',
+              data: {
+                cursor,
+                server_timestamp: Date.now(),
+                categories: [],
+                products: [],
+                customers: [],
+                bills: [],
+                expenses: [],
+                daily_closings: [],
+                settings: null
+              }
+            });
+          }
+
+          let newCursor = cursor;
+          const entityGroups = {};
+          changes.forEach(c => {
+            if (c.id > newCursor) newCursor = c.id;
+            if (!entityGroups[c.entity_type]) entityGroups[c.entity_type] = [];
+            entityGroups[c.entity_type].push(c.entity_id);
+          });
+
+          let deltaCategories = [];
+          if (entityGroups['CATEGORY'] && entityGroups['CATEGORY'].length > 0) {
+            const inC = [...new Set(entityGroups['CATEGORY'])].join(',');
+            const [rows] = await pool.query(`SELECT * FROM categories WHERE id IN (${inC})`);
+            deltaCategories = rows;
+          }
+
+          let deltaProducts = [];
+          if (entityGroups['PRODUCT'] && entityGroups['PRODUCT'].length > 0) {
+            const inP = [...new Set(entityGroups['PRODUCT'])].join(',');
+            const [rows] = await pool.query(`SELECT * FROM products WHERE id IN (${inP})`);
+            deltaProducts = rows;
+          }
+
+          let deltaCustomers = [];
+          if (entityGroups['CUSTOMER'] && entityGroups['CUSTOMER'].length > 0) {
+            const inCust = [...new Set(entityGroups['CUSTOMER'])].join(',');
+            const [rows] = await pool.query(`SELECT * FROM customers WHERE id IN (${inCust})`);
+            deltaCustomers = rows;
+          }
+
+          let deltaBills = [];
+          if (entityGroups['BILL'] && entityGroups['BILL'].length > 0) {
+            const inB = [...new Set(entityGroups['BILL'])].join(',');
+            const [bRows] = await pool.query(`SELECT * FROM bills WHERE id IN (${inB})`);
+            const bIds = bRows.map(b => b.id);
+            let items = [];
+            let payments = [];
+            if (bIds.length > 0) {
+              const inBIds = bIds.join(',');
+              const [itRows] = await pool.query(`SELECT * FROM bill_items WHERE bill_id IN (${inBIds})`);
+              const [payRows] = await pool.query(`SELECT * FROM payments WHERE bill_id IN (${inBIds})`);
+              items = itRows;
+              payments = payRows;
+            }
+            const itemsByBill = {};
+            items.forEach(it => {
+              if (!itemsByBill[it.bill_id]) itemsByBill[it.bill_id] = [];
+              itemsByBill[it.bill_id].push(it);
+            });
+            const payByBill = {};
+            payments.forEach(p => {
+              if (!payByBill[p.bill_id]) payByBill[p.bill_id] = [];
+              payByBill[p.bill_id].push(p);
+            });
+            deltaBills = bRows.map(b => ({
+              ...b,
+              items: itemsByBill[b.id] || [],
+              payments: payByBill[b.id] || []
+            }));
+          }
+
+          let deltaExpenses = [];
+          if (entityGroups['EXPENSE'] && entityGroups['EXPENSE'].length > 0) {
+            const inE = [...new Set(entityGroups['EXPENSE'])].join(',');
+            const [rows] = await pool.query(`SELECT * FROM expenses WHERE id IN (${inE})`);
+            deltaExpenses = rows;
+          }
+
+          let deltaClosings = [];
+          if (entityGroups['DAILY_CLOSING'] && entityGroups['DAILY_CLOSING'].length > 0) {
+            const inDC = [...new Set(entityGroups['DAILY_CLOSING'])].join(',');
+            const [rows] = await pool.query(`SELECT * FROM daily_closings WHERE id IN (${inDC})`);
+            deltaClosings = rows;
+          }
+
+          let deltaSettings = null;
+          if (entityGroups['SETTINGS']) {
+            const [shops] = await pool.query('SELECT * FROM shops WHERE id = 1 LIMIT 1');
+            deltaSettings = shops[0] || null;
+          }
+
+          return res.json({
+            status: 'success',
+            data: {
+              cursor: newCursor,
+              server_timestamp: Date.now(),
+              categories: deltaCategories,
+              products: deltaProducts,
+              customers: deltaCustomers,
+              bills: deltaBills,
+              expenses: deltaExpenses,
+              daily_closings: deltaClosings,
+              settings: deltaSettings
+            }
+          });
+        }
+      } catch (err) {
+        return res.status(500).json({ status: 'error', message: err.message });
+      }
+    }
+
+    // Fallback
+    return res.json({
+      status: 'success',
+      data: {
+        cursor,
+        server_timestamp: Date.now(),
+        categories: memoryStore.categories || [],
+        products: memoryStore.products || [],
+        customers: memoryStore.customers || [],
+        bills: memoryStore.bills || [],
+        expenses: memoryStore.expenses || [],
+        daily_closings: [],
+        settings: memoryStore.shop
+      }
+    });
   }
 };
 
@@ -1085,6 +1348,7 @@ const settingsController = {
           upi_display_name || 'Matoshree Collection',
           show_gstin_on_bill !== false ? 1 : 0
         ]);
+        await logSyncChange(pool, 'SETTINGS', 1, 'UPDATE', null, req.body.device_id || req.headers['x-device-id']);
       } catch (e) {
         console.warn('[!] DB updateSettings warning:', e.message);
       }
