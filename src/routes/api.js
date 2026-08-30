@@ -33,6 +33,23 @@ router.get('/health', (req, res) => {
 // Public Auth routes
 router.post('/auth/login', authController.login);
 
+// Friendly handler for browser GET requests on /auth/login
+router.get('/auth/login', (req, res) => {
+  res.json({
+    status: 'info',
+    message: 'Authentication endpoint requires a POST request with JSON credentials.',
+    method: 'POST',
+    endpoint: '/api/v1/auth/login',
+    sample_request: {
+      headers: { 'Content-Type': 'application/json' },
+      body: {
+        mobile: '+919876543210',
+        pin: '1234'
+      }
+    }
+  });
+});
+
 // Protected routes (JWT required)
 router.use(authenticateToken);
 

@@ -104,7 +104,18 @@ if ($cleanUri === '/api/v1/health') {
 }
 
 // 3. Auth Login
-if ($cleanUri === '/api/v1/auth/login' && $method === 'POST') {
+if ($cleanUri === '/api/v1/auth/login') {
+    if ($method === 'GET') {
+        sendJson('info', 'Authentication endpoint requires a POST request with JSON credentials.', [
+            'method' => 'POST',
+            'endpoint' => '/api/v1/auth/login',
+            'sample_payload' => [
+                'mobile' => '+919876543210',
+                'pin' => '1234'
+            ]
+        ]);
+    }
+
     $input = json_decode(file_get_contents('php://input'), true) ?? $_POST;
     $mobile = $input['mobile'] ?? '';
     $pin = $input['pin'] ?? '';
