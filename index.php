@@ -975,9 +975,16 @@ if ($cleanUri === '/api/v1/sync/changes' && $method === 'GET') {
                     $deltaClosings = $pdo->query("SELECT * FROM daily_closings WHERE id IN ($in)")->fetchAll();
                 }
 
-                $deltaSettings = null;
-                if (!empty($entityGroups['SETTINGS'])) {
-                    $deltaSettings = $pdo->query("SELECT * FROM shops WHERE id = 1 LIMIT 1")->fetch() ?: null;
+                $deletions = [];
+                foreach ($changes as $c) {
+                    $op = strtoupper($c['operation'] ?? '');
+                    if ($op === 'ARCHIVE' || $op === 'VOID' || $op === 'DELETE') {
+                        $deletions[] = [
+                            'entity_type' => $c['entity_type'],
+                            'entity_id' => intval($c['entity_id']),
+                            'operation' => $op
+                        ];
+                    }
                 }
 
                 sendJson('success', 'Delta changes retrieved', [
@@ -989,7 +996,8 @@ if ($cleanUri === '/api/v1/sync/changes' && $method === 'GET') {
                     'bills' => $deltaBills,
                     'expenses' => $deltaExpenses,
                     'daily_closings' => $deltaClosings,
-                    'settings' => $deltaSettings
+                    'settings' => $deltaSettings,
+                    'deletions' => $deletions
                 ]);
             }
         } catch (Exception $e) {
@@ -1006,7 +1014,38 @@ if ($cleanUri === '/api/v1/sync/changes' && $method === 'GET') {
         'bills' => [],
         'expenses' => [],
         'daily_closings' => [],
-        'settings' => null
+        'settings' => null,
+        'deletions' => []
+    ]);
+}
+
+// 15b. Diagnostics (Server vs Room Audit)
+if ($cleanUri === '/api/v1/sync/diagnostics' && $method === 'GET') {
+    $serverCursor = 0;
+    $custCount = 0;
+    $prodCount = 0;
+    $billCount = 0;
+    $expCount = 0;
+
+    if ($dbConnected && $pdo) {
+        try {
+            $serverCursor = intval($pdo->query("SELECT COALESCE(MAX(id), 0) FROM sync_changes")->fetchColumn());
+            $custCount = intval($pdo->query("SELECT COUNT(*) FROM customers WHERE shop_id = 1 AND is_active = 1")->fetchColumn());
+            $prodCount = intval($pdo->query("SELECT COUNT(*) FROM products WHERE shop_id = 1 AND is_active = 1")->fetchColumn());
+            $billCount = intval($pdo->query("SELECT COUNT(*) FROM bills WHERE shop_id = 1 AND is_voided = 0")->fetchColumn());
+            $expCount = intval($pdo->query("SELECT COUNT(*) FROM expenses WHERE shop_id = 1")->fetchColumn());
+        } catch (Exception $e) {}
+    }
+
+    sendJson('success', 'Server diagnostics retrieved', [
+        'server_cursor' => $serverCursor,
+        'server_timestamp' => round(microtime(true) * 1000),
+        'counts' => [
+            'customers' => $custCount,
+            'products' => $prodCount,
+            'bills' => $billCount,
+            'expenses' => $expCount
+        ]
     ]);
 }
 

@@ -120,6 +120,7 @@ router.get('/analytics/yearly', analyticsController.getYearly);
 
 // Real-Time Multi-Device Sync & Devices
 router.get('/sync/changes', syncController.getChanges);
+router.get('/sync/diagnostics', syncController.getDiagnostics);
 router.post('/sync', syncController.syncBatch);
 router.post('/devices/register', syncController.registerDevice);
 

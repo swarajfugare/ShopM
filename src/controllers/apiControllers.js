@@ -1385,6 +1385,18 @@ const syncController = {
             deltaSettings = shops[0] || null;
           }
 
+          const deletions = [];
+          changes.forEach(c => {
+            const op = String(c.operation || '').toUpperCase();
+            if (op === 'ARCHIVE' || op === 'VOID' || op === 'DELETE') {
+              deletions.push({
+                entity_type: c.entity_type,
+                entity_id: c.entity_id,
+                operation: op
+              });
+            }
+          });
+
           return res.json({
             status: 'success',
             data: {
@@ -1396,7 +1408,8 @@ const syncController = {
               bills: deltaBills,
               expenses: deltaExpenses,
               daily_closings: deltaClosings,
-              settings: deltaSettings
+              settings: deltaSettings,
+              deletions
             }
           });
         }
@@ -1417,7 +1430,52 @@ const syncController = {
         bills: memoryStore.bills || [],
         expenses: memoryStore.expenses || [],
         daily_closings: [],
-        settings: memoryStore.shop
+        settings: memoryStore.shop,
+        deletions: []
+      }
+    });
+  },
+
+  getDiagnostics: async (req, res) => {
+    try {
+      if (pool) {
+        try {
+          const [cursorRows] = await pool.query('SELECT COALESCE(MAX(id), 0) as max_id FROM sync_changes');
+          const [custRows] = await pool.query('SELECT COUNT(*) as count FROM customers WHERE shop_id = 1 AND is_active = 1');
+          const [prodRows] = await pool.query('SELECT COUNT(*) as count FROM products WHERE shop_id = 1 AND is_active = 1');
+          const [billRows] = await pool.query('SELECT COUNT(*) as count FROM bills WHERE shop_id = 1 AND is_voided = 0');
+          const [expRows] = await pool.query('SELECT COUNT(*) as count FROM expenses WHERE shop_id = 1');
+
+          return res.json({
+            status: 'success',
+            data: {
+              server_cursor: cursorRows[0]?.max_id || 0,
+              server_timestamp: Date.now(),
+              counts: {
+                customers: custRows[0]?.count || 0,
+                products: prodRows[0]?.count || 0,
+                bills: billRows[0]?.count || 0,
+                expenses: expRows[0]?.count || 0
+              }
+            }
+          });
+        } catch (dbErr) {
+          // Fall back to memory store below
+        }
+      }
+    } catch (err) {}
+
+    return res.json({
+      status: 'success',
+      data: {
+        server_cursor: 0,
+        server_timestamp: Date.now(),
+        counts: {
+          customers: (memoryStore.customers || []).filter(c => c.is_active !== 0).length,
+          products: (memoryStore.products || []).filter(p => p.is_active !== 0).length,
+          bills: (memoryStore.bills || []).filter(b => b.is_voided !== 1).length,
+          expenses: (memoryStore.expenses || []).length
+        }
       }
     });
   }
