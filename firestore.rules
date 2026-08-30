@@ -1,0 +1,46 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    
+    // Matoshree Collection Shop Structure Security Rules
+    match /shops/{shopId} {
+      allow read, write: if request.auth != null && shopId == 'matoshree_collection';
+
+      match /customers/{customerId} {
+        allow read, write: if request.auth != null && shopId == 'matoshree_collection';
+      }
+
+      match /products/{productId} {
+        allow read, write: if request.auth != null && shopId == 'matoshree_collection';
+      }
+
+      match /categories/{categoryId} {
+        allow read, write: if request.auth != null && shopId == 'matoshree_collection';
+      }
+
+      match /bills/{billId} {
+        allow read, write: if request.auth != null && shopId == 'matoshree_collection';
+
+        match /items/{itemId} {
+          allow read, write: if request.auth != null && shopId == 'matoshree_collection';
+        }
+
+        match /payments/{paymentId} {
+          allow read, write: if request.auth != null && shopId == 'matoshree_collection';
+        }
+      }
+
+      match /expenses/{expenseId} {
+        allow read, write: if request.auth != null && shopId == 'matoshree_collection';
+      }
+
+      match /dailyClosings/{closingId} {
+        allow read, write: if request.auth != null && shopId == 'matoshree_collection';
+      }
+
+      match /security/{securityDoc} {
+        allow read, write: if request.auth != null && shopId == 'matoshree_collection';
+      }
+    }
+  }
+}
