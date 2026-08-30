@@ -141,7 +141,6 @@ const dashboardController = {
 // 3. SALES CONTROLLER (Full Real MySQL Transaction + Snapshot Persistence)
 const salesController = {
   create: async (req, res) => {
-    const txUuid = req.body.transaction_uuid || `tx-${Date.now()}`;
     const {
       transaction_uuid,
       sale_type = 'DETAILED',
