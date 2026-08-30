@@ -153,6 +153,29 @@ CREATE TABLE IF NOT EXISTS settings (
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     UNIQUE KEY unique_shop_setting (shop_id, setting_key)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+CREATE TABLE IF NOT EXISTS payments (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    bill_id INT,
+    shop_id INT NOT NULL DEFAULT 1,
+    payment_method VARCHAR(20) NOT NULL DEFAULT 'CASH',
+    amount DECIMAL(12,2) NOT NULL,
+    payment_status VARCHAR(20) NOT NULL DEFAULT 'PAID',
+    transaction_reference VARCHAR(100) DEFAULT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+CREATE TABLE IF NOT EXISTS sync_logs (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    shop_id INT NOT NULL DEFAULT 1,
+    device_id VARCHAR(100) DEFAULT 'android_pos',
+    entity_type VARCHAR(50) NOT NULL,
+    transaction_uuid VARCHAR(64) NOT NULL,
+    status VARCHAR(20) NOT NULL,
+    payload TEXT,
+    error_message TEXT,
+    synced_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 `;
 
 async function runAutoMigration() {
