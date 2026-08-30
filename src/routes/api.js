@@ -73,8 +73,10 @@ router.get('/auth/login', (req, res) => {
 // Protected routes (JWT required)
 router.use(authenticateToken);
 
-// Auth Me
+// Auth Me & PIN Management
 router.get('/auth/me', authController.me);
+router.post('/auth/pin/change', authController.changePin);
+router.post('/auth/pin/recover', authController.recoverPin);
 
 // Dashboard
 router.get('/dashboard', dashboardController.getSummary);
@@ -90,12 +92,16 @@ router.post('/bills/:id/void', billsController.voidBill);
 // Customers
 router.get('/customers', customersController.getAll);
 router.post('/customers', customersController.create);
+router.post('/customers/:id/archive', customersController.archive);
+router.delete('/customers/:id', customersController.archive);
 router.get('/customers/:id/bills', customersController.getBills);
 router.get('/customers/:id/summary', customersController.getSummary);
 
 // Products & Categories
 router.get('/products', productsController.getAll);
 router.post('/products', productsController.create);
+router.post('/products/:id/archive', productsController.archive);
+router.delete('/products/:id', productsController.archive);
 router.get('/categories', categoriesController.getAll);
 router.post('/categories', categoriesController.create);
 

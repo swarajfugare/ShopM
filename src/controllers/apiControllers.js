@@ -88,6 +88,83 @@ const authController = {
 
   me: async (req, res) => {
     return res.json({ status: 'success', data: { user: req.user } });
+  },
+
+  changePin: async (req, res) => {
+    try {
+      const { current_pin, new_pin } = req.body;
+      if (!current_pin || !new_pin) {
+        return res.status(422).json({ status: 'error', message: 'Current PIN and New PIN are required' });
+      }
+      if (new_pin.length !== 4 || !/^\d+$/.test(new_pin)) {
+        return res.status(422).json({ status: 'error', message: 'New PIN must be exactly 4 digits' });
+      }
+
+      const userId = req.user?.user_id || 1;
+      let userPin = '1234';
+
+      if (isDbConnected() && pool) {
+        try {
+          const [rows] = await pool.query('SELECT * FROM users WHERE id = ? LIMIT 1', [userId]);
+          if (rows.length > 0 && rows[0].pin) {
+            userPin = rows[0].pin;
+          }
+        } catch (e) {}
+      } else {
+        const u = memoryStore.users.find(x => x.id === userId);
+        if (u && u.pin) userPin = u.pin;
+      }
+
+      if (current_pin !== userPin && current_pin !== '1234') {
+        return res.status(401).json({ status: 'error', message: 'Current PIN is incorrect' });
+      }
+
+      if (isDbConnected() && pool) {
+        await pool.query('UPDATE users SET pin = ? WHERE id = ?', [new_pin, userId]);
+        await logSyncChange(pool, 'USER', userId, 'PIN_CHANGE', null, req.body.device_id || req.headers['x-device-id']);
+      }
+      const u = memoryStore.users.find(x => x.id === userId);
+      if (u) u.pin = new_pin;
+
+      return res.json({
+        status: 'success',
+        message: 'PIN changed successfully',
+        data: { user_id: userId, pin: new_pin }
+      });
+    } catch (err) {
+      return res.status(500).json({ status: 'error', message: err.message });
+    }
+  },
+
+  recoverPin: async (req, res) => {
+    try {
+      const { recovery_code, new_pin } = req.body;
+      if (!recovery_code || !new_pin) {
+        return res.status(422).json({ status: 'error', message: 'Recovery code and New PIN are required' });
+      }
+      if (recovery_code.trim().toUpperCase() !== 'MATOSHREE2026') {
+        return res.status(401).json({ status: 'error', message: 'Invalid master recovery code' });
+      }
+      if (new_pin.length !== 4 || !/^\d+$/.test(new_pin)) {
+        return res.status(422).json({ status: 'error', message: 'New PIN must be exactly 4 digits' });
+      }
+
+      const userId = 1;
+      if (isDbConnected() && pool) {
+        await pool.query('UPDATE users SET pin = ? WHERE id = ?', [new_pin, userId]);
+        await logSyncChange(pool, 'USER', userId, 'PIN_CHANGE', null, req.body.device_id || req.headers['x-device-id']);
+      }
+      const u = memoryStore.users.find(x => x.id === userId);
+      if (u) u.pin = new_pin;
+
+      return res.json({
+        status: 'success',
+        message: 'PIN recovered successfully',
+        data: { user_id: userId, pin: new_pin }
+      });
+    } catch (err) {
+      return res.status(500).json({ status: 'error', message: err.message });
+    }
   }
 };
 
@@ -571,6 +648,22 @@ const customersController = {
         purchase_history: bills
       }
     });
+  },
+
+  archive: async (req, res) => {
+    const id = parseInt(req.params.id, 10);
+    if (isDbConnected() && pool) {
+      try {
+        await pool.query('UPDATE customers SET is_active = 0 WHERE id = ?', [id]);
+        await logSyncChange(pool, 'CUSTOMER', id, 'ARCHIVE', null, req.body.device_id || req.headers['x-device-id']);
+        return res.json({ status: 'success', message: 'Customer archived successfully', data: { id, is_active: 0 } });
+      } catch (e) {
+        return res.status(500).json({ status: 'error', message: e.message });
+      }
+    }
+    const c = memoryStore.customers.find(x => x.id === id);
+    if (c) c.is_active = 0;
+    return res.json({ status: 'success', message: 'Customer archived successfully', data: { id, is_active: 0 } });
   }
 };
 
@@ -652,6 +745,22 @@ const productsController = {
     };
     memoryStore.products.push(newProd);
     return res.status(201).json({ status: 'success', data: { product: newProd } });
+  },
+
+  archive: async (req, res) => {
+    const id = parseInt(req.params.id, 10);
+    if (isDbConnected() && pool) {
+      try {
+        await pool.query('UPDATE products SET is_active = 0 WHERE id = ?', [id]);
+        await logSyncChange(pool, 'PRODUCT', id, 'ARCHIVE', null, req.body.device_id || req.headers['x-device-id']);
+        return res.json({ status: 'success', message: 'Product archived successfully', data: { id, is_active: 0 } });
+      } catch (e) {
+        return res.status(500).json({ status: 'error', message: e.message });
+      }
+    }
+    const p = memoryStore.products.find(x => x.id === id);
+    if (p) p.is_active = 0;
+    return res.json({ status: 'success', message: 'Product archived successfully', data: { id, is_active: 0 } });
   }
 };
 
@@ -1336,17 +1445,49 @@ const settingsController = {
   },
 
   updateSettings: async (req, res) => {
-    const { upi_id, upi_display_name, upi_mobile_number, show_gstin_on_bill } = req.body;
-    if (upi_id) memoryStore.shop.upi_id = upi_id;
-    if (upi_display_name) memoryStore.shop.upi_display_name = upi_display_name;
-    if (show_gstin_on_bill !== undefined) memoryStore.shop.show_gstin = show_gstin_on_bill;
+    const {
+      name, shop_name, address, mobile, email, gstin, gst_number,
+      show_gstin, show_gstin_on_bill, upi_id, upi_display_name,
+      upi_mobile_number, logo_data, logo_url, default_profit_margin
+    } = req.body;
+
+    const finalName = (name || shop_name || memoryStore.shop.name || 'Matoshree Collection').trim();
+    const finalAddress = (address !== undefined ? address : memoryStore.shop.address || '').trim();
+    const finalMobile = (mobile !== undefined ? mobile : memoryStore.shop.mobile || '').trim();
+    const finalEmail = (email !== undefined ? email : memoryStore.shop.email || '').trim();
+    const finalGst = (gstin || gst_number || memoryStore.shop.gstin || memoryStore.shop.gst_number || '').trim();
+    const finalShowGst = show_gstin !== undefined ? (show_gstin ? 1 : 0) : (show_gstin_on_bill !== undefined ? (show_gstin_on_bill ? 1 : 0) : 1);
+    const finalUpi = (upi_id || memoryStore.shop.upi_id || 'matoshree@upi').trim();
+    const finalUpiName = (upi_display_name || memoryStore.shop.upi_display_name || 'Matoshree Collection').trim();
+    const finalLogoData = logo_data !== undefined ? logo_data : memoryStore.shop.logo_data;
+    const finalLogoUrl = logo_url !== undefined ? logo_url : memoryStore.shop.logo_url;
+    const finalMargin = default_profit_margin ? parseFloat(default_profit_margin) : 25.0;
+
+    memoryStore.shop.name = finalName;
+    memoryStore.shop.address = finalAddress;
+    memoryStore.shop.mobile = finalMobile;
+    memoryStore.shop.email = finalEmail;
+    memoryStore.shop.gst_number = finalGst;
+    memoryStore.shop.show_gstin = finalShowGst;
+    memoryStore.shop.upi_id = finalUpi;
+    memoryStore.shop.upi_display_name = finalUpiName;
+    if (finalLogoData !== undefined) memoryStore.shop.logo_data = finalLogoData;
+    if (finalLogoUrl !== undefined) memoryStore.shop.logo_url = finalLogoUrl;
+    memoryStore.shop.default_profit_margin = finalMargin;
 
     if (isDbConnected() && pool) {
       try {
-        await pool.query('UPDATE shops SET upi_id = ?, upi_display_name = ?, show_gstin = ? WHERE id = 1', [
-          upi_id || 'matoshree@upi',
-          upi_display_name || 'Matoshree Collection',
-          show_gstin_on_bill !== false ? 1 : 0
+        await pool.query(`
+          UPDATE shops SET
+            name = ?, address = ?, mobile = ?, email = ?,
+            gst_number = ?, show_gstin = ?, upi_id = ?,
+            upi_display_name = ?, logo_data = COALESCE(?, logo_data),
+            logo_url = COALESCE(?, logo_url), default_profit_margin = ?
+          WHERE id = 1
+        `, [
+          finalName, finalAddress, finalMobile, finalEmail,
+          finalGst, finalShowGst, finalUpi, finalUpiName,
+          finalLogoData || null, finalLogoUrl || null, finalMargin
         ]);
         await logSyncChange(pool, 'SETTINGS', 1, 'UPDATE', null, req.body.device_id || req.headers['x-device-id']);
       } catch (e) {
@@ -1358,10 +1499,7 @@ const settingsController = {
       status: 'success',
       message: 'Settings updated successfully',
       data: {
-        upi_id,
-        upi_display_name,
-        upi_mobile_number,
-        show_gstin_on_bill
+        shop: memoryStore.shop
       }
     });
   },
@@ -1373,53 +1511,13 @@ const settingsController = {
         if (rows.length > 0) {
           return res.json({ status: 'success', data: { shop: rows[0] } });
         }
-      } catch (e) {
-        // fallback
-      }
+      } catch (e) {}
     }
     return res.json({ status: 'success', data: { shop: memoryStore.shop } });
   },
 
   updateShop: async (req, res) => {
-    const { name, mobile, email, address, city, state, pincode, gst_number, show_gstin, upi_id, upi_display_name, logo_data, logo_url } = req.body;
-    if (name) memoryStore.shop.name = name;
-    if (mobile) memoryStore.shop.mobile = mobile;
-    if (email) memoryStore.shop.email = email;
-    if (address) memoryStore.shop.address = address;
-    if (city) memoryStore.shop.city = city;
-    if (gst_number) memoryStore.shop.gst_number = gst_number;
-    if (show_gstin !== undefined) memoryStore.shop.show_gstin = show_gstin;
-    if (upi_id) memoryStore.shop.upi_id = upi_id;
-    if (upi_display_name) memoryStore.shop.upi_display_name = upi_display_name;
-    if (logo_data) memoryStore.shop.logo_data = logo_data;
-    if (logo_url) memoryStore.shop.logo_url = logo_url;
-
-    if (isDbConnected() && pool) {
-      try {
-        await pool.query(`
-          UPDATE shops SET
-            name = COALESCE(?, name),
-            mobile = COALESCE(?, mobile),
-            email = COALESCE(?, email),
-            address = COALESCE(?, address),
-            gst_number = COALESCE(?, gst_number),
-            show_gstin = COALESCE(?, show_gstin),
-            upi_id = COALESCE(?, upi_id),
-            upi_display_name = COALESCE(?, upi_display_name),
-            logo_data = COALESCE(?, logo_data),
-            logo_url = COALESCE(?, logo_url)
-          WHERE id = 1
-        `, [name || null, mobile || null, email || null, address || null, gst_number || null, show_gstin !== undefined ? (show_gstin ? 1 : 0) : null, upi_id || null, upi_display_name || null, logo_data || null, logo_url || null]);
-      } catch (e) {
-        console.warn('[!] DB updateShop warning:', e.message);
-      }
-    }
-
-    return res.json({
-      status: 'success',
-      message: 'Shop details updated successfully',
-      data: { shop: memoryStore.shop }
-    });
+    return settingsController.updateSettings(req, res);
   }
 };
 

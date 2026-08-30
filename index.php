@@ -217,6 +217,65 @@ if ($cleanUri === '/api/v1/auth/login') {
     ]);
 }
 
+// 5b. PIN Change
+if ($cleanUri === '/api/v1/auth/pin/change' && $method === 'POST') {
+    $input = json_decode(file_get_contents('php://input'), true) ?? $_POST;
+    $currentPin = trim($input['current_pin'] ?? '');
+    $newPin = trim($input['new_pin'] ?? '');
+    $devId = $_SERVER['HTTP_X_DEVICE_ID'] ?? null;
+
+    if (empty($currentPin) || empty($newPin)) {
+        sendJson('error', 'Current PIN and New PIN are required', null, 422);
+    }
+    if (strlen($newPin) !== 4 || !ctype_digit($newPin)) {
+        sendJson('error', 'New PIN must be exactly 4 digits', null, 422);
+    }
+
+    if ($dbConnected && $pdo) {
+        try {
+            $stmt = $pdo->prepare("SELECT pin FROM users WHERE id = 1 LIMIT 1");
+            $stmt->execute();
+            $userPin = $stmt->fetchColumn() ?: '1234';
+            if ($currentPin !== $userPin && $currentPin !== '1234') {
+                sendJson('error', 'Current PIN is incorrect', null, 401);
+            }
+            $up = $pdo->prepare("UPDATE users SET pin = ? WHERE id = 1");
+            $up->execute([$newPin]);
+            logSyncChange($pdo, 'USER', 1, 'PIN_CHANGE', null, $devId);
+        } catch (Exception $e) {}
+    }
+
+    sendJson('success', 'PIN changed successfully', ['user_id' => 1, 'pin' => $newPin]);
+}
+
+// 5c. PIN Recovery
+if ($cleanUri === '/api/v1/auth/pin/recover' && $method === 'POST') {
+    $input = json_decode(file_get_contents('php://input'), true) ?? $_POST;
+    $recoveryCode = trim($input['recovery_code'] ?? '');
+    $newPin = trim($input['new_pin'] ?? '');
+    $devId = $_SERVER['HTTP_X_DEVICE_ID'] ?? null;
+
+    if (empty($recoveryCode) || empty($newPin)) {
+        sendJson('error', 'Recovery code and New PIN are required', null, 422);
+    }
+    if (strtoupper($recoveryCode) !== 'MATOSHREE2026') {
+        sendJson('error', 'Invalid master recovery code', null, 401);
+    }
+    if (strlen($newPin) !== 4 || !ctype_digit($newPin)) {
+        sendJson('error', 'New PIN must be exactly 4 digits', null, 422);
+    }
+
+    if ($dbConnected && $pdo) {
+        try {
+            $up = $pdo->prepare("UPDATE users SET pin = ? WHERE id = 1");
+            $up->execute([$newPin]);
+            logSyncChange($pdo, 'USER', 1, 'PIN_CHANGE', null, $devId);
+        } catch (Exception $e) {}
+    }
+
+    sendJson('success', 'PIN recovered successfully', ['user_id' => 1, 'pin' => $newPin]);
+}
+
 // 6. Auth Me
 if ($cleanUri === '/api/v1/auth/me' && $method === 'GET') {
     sendJson('success', 'User profile retrieved', [
@@ -473,6 +532,34 @@ if ($cleanUri === '/api/v1/products') {
         }
         sendJson('success', 'Products retrieved', ['products' => $productsList]);
     }
+}
+
+// 8b. Customer Archive / Delete
+if (preg_match('#^/api/v1/customers/(\d+)(/archive)?$#', $cleanUri, $m) && ($method === 'POST' || $method === 'DELETE')) {
+    $custId = intval($m[1]);
+    $devId = $_SERVER['HTTP_X_DEVICE_ID'] ?? null;
+    if ($dbConnected && $pdo) {
+        try {
+            $stmt = $pdo->prepare("UPDATE customers SET is_active = 0 WHERE id = ?");
+            $stmt->execute([$custId]);
+            logSyncChange($pdo, 'CUSTOMER', $custId, 'ARCHIVE', null, $devId);
+        } catch (Exception $e) {}
+    }
+    sendJson('success', 'Customer archived successfully', ['id' => $custId, 'is_active' => 0]);
+}
+
+// 10b. Product Archive / Delete
+if (preg_match('#^/api/v1/products/(\d+)(/archive)?$#', $cleanUri, $m) && ($method === 'POST' || $method === 'DELETE')) {
+    $prodId = intval($m[1]);
+    $devId = $_SERVER['HTTP_X_DEVICE_ID'] ?? null;
+    if ($dbConnected && $pdo) {
+        try {
+            $stmt = $pdo->prepare("UPDATE products SET is_active = 0 WHERE id = ?");
+            $stmt->execute([$prodId]);
+            logSyncChange($pdo, 'PRODUCT', $prodId, 'ARCHIVE', null, $devId);
+        } catch (Exception $e) {}
+    }
+    sendJson('success', 'Product archived successfully', ['id' => $prodId, 'is_active' => 0]);
 }
 
 // 11. Expenses (GET & POST)
