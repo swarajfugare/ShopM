@@ -132,6 +132,15 @@ CREATE TABLE IF NOT EXISTS daily_closings (
     is_closed TINYINT(1) DEFAULT 1,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+CREATE TABLE IF NOT EXISTS settings (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    shop_id INT NOT NULL DEFAULT 1,
+    setting_key VARCHAR(100) NOT NULL,
+    setting_value TEXT,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE KEY unique_shop_setting (shop_id, setting_key)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 `;
 
 async function runAutoMigration() {

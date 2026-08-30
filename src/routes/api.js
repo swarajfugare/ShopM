@@ -13,7 +13,8 @@ const {
   closingController,
   analyticsController,
   syncController,
-  settingsController
+  settingsController,
+  diagnosticsController
 } = require('../controllers/apiControllers');
 
 // Health Check
@@ -29,6 +30,9 @@ router.get('/health', (req, res) => {
     }
   });
 });
+
+// Database Safe Diagnostics (Zero Secrets Exposed)
+router.get('/db-status', diagnosticsController.getDbStatus);
 
 // Database Auto-Setup / Migration endpoint
 router.get('/setup-db', async (req, res) => {
@@ -86,6 +90,8 @@ router.post('/bills/:id/void', billsController.voidBill);
 // Customers
 router.get('/customers', customersController.getAll);
 router.post('/customers', customersController.create);
+router.get('/customers/:id/bills', customersController.getBills);
+router.get('/customers/:id/summary', customersController.getSummary);
 
 // Products & Categories
 router.get('/products', productsController.getAll);
@@ -103,11 +109,15 @@ router.post('/daily-closing', closingController.submit);
 // Analytics
 router.get('/analytics/daily', analyticsController.getDaily);
 router.get('/analytics/monthly', analyticsController.getMonthly);
+router.get('/analytics/yearly', analyticsController.getYearly);
 
 // Batch Offline Sync
 router.post('/sync', syncController.syncBatch);
 
-// Settings
+// Settings & Shop
 router.get('/settings', settingsController.getSettings);
+router.put('/settings', settingsController.updateSettings);
+router.get('/shop', settingsController.getShop);
+router.put('/shop', settingsController.updateShop);
 
 module.exports = router;
