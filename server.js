@@ -4,7 +4,7 @@ const cors = require('cors');
 const apiRoutes = require('./src/routes/api');
 
 const app = express();
-const PORT = process.env.PORT || 5000;
+const DEFAULT_PORT = parseInt(process.env.PORT || '8080', 10);
 
 // Enable CORS
 app.use(cors({
@@ -57,15 +57,30 @@ app.use((err, req, res, next) => {
   });
 });
 
+// Function to start server with automatic port retry if busy (e.g. macOS AirPlay on 5000)
+function startServer(port = DEFAULT_PORT, attempts = 0) {
+  const server = app.listen(port, '0.0.0.0', () => {
+    console.log(`\n====================================================`);
+    console.log(`✨ Matoshree Collection Shop Manager Backend Running ✨`);
+    console.log(`🚀 Server listening on: http://localhost:${port}`);
+    console.log(`📡 Health Check URL:   http://localhost:${port}/api/v1/health`);
+    console.log(`====================================================\n`);
+  });
+
+  server.on('error', (err) => {
+    if (err.code === 'EADDRINUSE' && attempts < 5) {
+      const nextPort = port + 1;
+      console.warn(`[!] Port ${port} is currently busy (e.g. macOS AirPlay). Automatically trying port ${nextPort}...`);
+      startServer(nextPort, attempts + 1);
+    } else {
+      console.error('[Server Error]', err);
+    }
+  });
+}
+
 // Start Server when run directly
 if (require.main === module) {
-  app.listen(PORT, '0.0.0.0', () => {
-    console.log(`====================================================`);
-    console.log(`✨ Matoshree Collection Shop Manager Backend Running ✨`);
-    console.log(`🚀 Server listening on: http://0.0.0.0:${PORT}`);
-    console.log(`📡 Health Check URL:   http://localhost:${PORT}/api/v1/health`);
-    console.log(`====================================================`);
-  });
+  startServer(DEFAULT_PORT);
 }
 
 module.exports = app;
