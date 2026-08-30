@@ -376,9 +376,18 @@ const billsController = {
 
     if (isDbConnected()) {
       try {
-        await pool.query('UPDATE bills SET is_voided = 1, payment_status = "VOID", void_reason = ? WHERE id = ?', [reason, id]);
-        return res.json({ status: 'success', message: 'Bill voided successfully' });
-      } catch (e) {}
+        const [bills] = await pool.query('SELECT * FROM bills WHERE id = ? LIMIT 1', [id]);
+        if (bills.length > 0) {
+          const b = bills[0];
+          await pool.query('UPDATE bills SET is_voided = 1, payment_status = "VOID", void_reason = ? WHERE id = ?', [reason, id]);
+          if (b.customer_id) {
+            await pool.query('UPDATE customers SET total_bills = GREATEST(0, total_bills - 1), lifetime_spend = GREATEST(0.00, lifetime_spend - ?) WHERE id = ?', [b.final_amount, b.customer_id]);
+          }
+          return res.json({ status: 'success', message: 'Bill voided successfully' });
+        }
+      } catch (e) {
+        console.warn('DB void error:', e.message);
+      }
     }
 
     const bill = memoryStore.bills.find(b => b.id === id);

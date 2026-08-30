@@ -548,6 +548,41 @@ if ($cleanUri === '/api/v1/sales' && $method === 'POST') {
     ], 201);
 }
 
+// 11b. Bills (GET & VOID)
+if ($cleanUri === '/api/v1/bills' && $method === 'GET') {
+    $bills = [];
+    if ($dbConnected && $pdo) {
+        try {
+            $stmt = $pdo->query("SELECT * FROM bills ORDER BY bill_date DESC, id DESC LIMIT 100");
+            $bills = $stmt->fetchAll();
+        } catch (Exception $e) {}
+    }
+    sendJson('success', 'Bills retrieved', ['bills' => $bills]);
+}
+
+if (preg_match('#^/api/v1/bills/([0-9]+)/void$#', $cleanUri, $matches) && $method === 'POST') {
+    $billId = intval($matches[1]);
+    $input = json_decode(file_get_contents('php://input'), true) ?? [];
+    $reason = $input['reason'] ?? 'Voided by manager';
+
+    if ($dbConnected && $pdo) {
+        try {
+            $stmt = $pdo->prepare("SELECT * FROM bills WHERE id = ? LIMIT 1");
+            $stmt->execute([$billId]);
+            $bill = $stmt->fetch();
+            if ($bill) {
+                $upStmt = $pdo->prepare("UPDATE bills SET is_voided = 1, payment_status = 'VOID', void_reason = ? WHERE id = ?");
+                $upStmt->execute([$reason, $billId]);
+                if (!empty($bill['customer_id'])) {
+                    $custStmt = $pdo->prepare("UPDATE customers SET total_bills = GREATEST(0, total_bills - 1), lifetime_spend = GREATEST(0.00, lifetime_spend - ?) WHERE id = ?");
+                    $custStmt->execute([floatval($bill['final_amount']), $bill['customer_id']]);
+                }
+            }
+        } catch (Exception $e) {}
+    }
+    sendJson('success', 'Bill voided successfully', null);
+}
+
 // 12. Offline Batch Sync (POST)
 if ($cleanUri === '/api/v1/sync' && $method === 'POST') {
     $input = json_decode(file_get_contents('php://input'), true) ?? [];
