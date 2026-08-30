@@ -1,0 +1,31 @@
+{
+  "name": "matoshree-shop-manager-backend",
+  "version": "1.0.0",
+  "description": "Production REST API for Matoshree Collection — Smart Shop Manager (Node.js + Express + Hostinger MySQL)",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node --watch server.js",
+    "migrate": "node src/migrations/migrate.js"
+  },
+  "keywords": [
+    "pos",
+    "shop-manager",
+    "boutique",
+    "retail",
+    "hostinger",
+    "mysql",
+    "express",
+    "rest-api"
+  ],
+  "author": "Matoshree Collection",
+  "license": "ISC",
+  "dependencies": {
+    "bcryptjs": "^2.4.3",
+    "cors": "^2.8.5",
+    "dotenv": "^16.4.7",
+    "express": "^4.21.2",
+    "jsonwebtoken": "^9.0.2",
+    "mysql2": "^3.11.5"
+  }
+}
