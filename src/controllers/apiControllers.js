@@ -17,8 +17,17 @@ const authController = {
       let shop = memoryStore.shop;
 
       if (isDbConnected()) {
-        const [rows] = await pool.query('SELECT u.*, s.name as shop_name, s.currency FROM users u JOIN shops s ON s.id = u.shop_id WHERE u.mobile = ? LIMIT 1', [mobile]);
-        if (rows.length > 0) user = rows[0];
+        try {
+          const [rows] = await pool.query('SELECT u.*, s.name as shop_name, s.currency FROM users u JOIN shops s ON s.id = u.shop_id WHERE u.mobile = ? LIMIT 1', [mobile]);
+          if (rows.length > 0) user = rows[0];
+        } catch (dbErr) {
+          console.warn('[!] DB query notice during login:', dbErr.message);
+          try {
+            const { runAutoMigration } = require('../services/migrationService');
+            await runAutoMigration();
+          } catch (mErr) {}
+          user = memoryStore.users.find(u => u.mobile === mobile || u.mobile === `+91${mobile}` || u.mobile === mobile.replace(/\s+/g, ''));
+        }
       } else {
         user = memoryStore.users.find(u => u.mobile === mobile || u.mobile === `+91${mobile}` || u.mobile === mobile.replace(/\s+/g, ''));
       }

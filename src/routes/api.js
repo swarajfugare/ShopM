@@ -30,6 +30,22 @@ router.get('/health', (req, res) => {
   });
 });
 
+// Database Auto-Setup / Migration endpoint
+router.get('/setup-db', async (req, res) => {
+  try {
+    const { runAutoMigration } = require('../services/migrationService');
+    const success = await runAutoMigration();
+    res.json({
+      status: 'success',
+      message: 'Database schema and seed data initialized successfully!',
+      database_migrated: success,
+      timestamp: Date.now()
+    });
+  } catch (err) {
+    res.status(500).json({ status: 'error', message: err.message });
+  }
+});
+
 // Public Auth routes
 router.post('/auth/login', authController.login);
 

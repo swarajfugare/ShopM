@@ -20,14 +20,22 @@ try {
   pool = mysql.createPool(dbConfig);
   // Test connection
   pool.getConnection()
-    .then(conn => {
+    .then(async (conn) => {
       isConnected = true;
       console.log(`[✓] MySQL Database Connected successfully: ${dbConfig.database}@${dbConfig.host}`);
       conn.release();
+
+      // Automatically create database tables if fresh database
+      try {
+        const { runAutoMigration } = require('../services/migrationService');
+        await runAutoMigration();
+      } catch (migErr) {
+        console.warn(`[!] Auto-migration notice: ${migErr.message}`);
+      }
     })
     .catch(err => {
       isConnected = false;
-      console.warn(`[!] MySQL Connection Note: ${err.message}. Running in Mock/In-Memory Mode for local testing until Hostinger credentials are provided.`);
+      console.warn(`[!] MySQL Connection Note: ${err.message}. Running in Mock/In-Memory Mode.`);
     });
 } catch (e) {
   console.warn(`[!] Failed to initialize MySQL pool: ${e.message}`);

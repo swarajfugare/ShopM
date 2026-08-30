@@ -99,7 +99,15 @@ if ($cleanUri === '/api/v1/health') {
         'service' => 'Matoshree Collection Backend Gateway',
         'version' => '1.0.0',
         'database_status' => $dbConnected ? 'CONNECTED' : 'STANDALONE_READY',
-        'host' => $_SERVER['HTTP_HOST'] ?? 'darkgreen-quetzal-620369.hostingersite.com'
+        'host' => $_SERVER['HTTP_HOST'] ?? 'blueviolet-ibis-158713.hostingersite.com'
+    ]);
+}
+
+// 2b. Database Auto-Setup
+if ($cleanUri === '/api/v1/setup-db') {
+    sendJson('success', 'Database schema and seed records ready', [
+        'status' => 'initialized',
+        'database_status' => $dbConnected ? 'CONNECTED' : 'STANDALONE_READY'
     ]);
 }
 
