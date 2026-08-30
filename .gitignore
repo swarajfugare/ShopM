@@ -1,0 +1,33 @@
+# Environment secrets & credentials
+.env
+.env.local
+*.key
+*.pem
+
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+._*
+
+# Stitch ZIP & Raw extracted archives
+*.zip
+stitch_design/
+
+# Android build outputs & IDE
+.gradle/
+build/
+app/build/
+.idea/
+*.iml
+local.properties
+.cxx/
+
+# Vendor & Dependencies
+vendor/
+node_modules/
+
+# Logs & Temporary files
+*.log
+tmp/
+scratch/

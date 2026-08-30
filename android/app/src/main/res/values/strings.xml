@@ -1,0 +1,72 @@
+<resources>
+    <string name="app_name">Matoshree Collection</string>
+    <string name="tagline">Smart Shop Manager</string>
+    <string name="currency_symbol">₹</string>
+
+    <!-- Navigation -->
+    <string name="nav_home">Home</string>
+    <string name="nav_bills">Bills</string>
+    <string name="nav_customers">Customers</string>
+    <string name="nav_analytics">Analytics</string>
+    <string name="nav_settings">Settings</string>
+
+    <!-- Dashboard -->
+    <string name="dashboard_title">Dashboard</string>
+    <string name="dashboard_subtitle">Welcome back. Here is your boutique\'s performance today.</string>
+    <string name="today_sales">Today\'s Sales</string>
+    <string name="estimated_profit">Estimated Profit</string>
+    <string name="actual_profit">Actual Profit</string>
+    <string name="bills_generated">Bills Generated</string>
+    <string name="average_order">Average Order</string>
+    <string name="monthly_sales_progress">Monthly Sales Progress</string>
+    <string name="payment_breakdown">Payment Breakdown</string>
+    <string name="recent_bills">Recent Bills</string>
+    <string name="view_all">View All</string>
+
+    <!-- Sales & Billing -->
+    <string name="new_sale">New Sale</string>
+    <string name="quick_sale">Quick Sale</string>
+    <string name="add_product">Add Product</string>
+    <string name="add_to_bill">Add to Bill</string>
+    <string name="cart_empty">Cart is Empty</string>
+    <string name="cart_empty_desc">Select a customer or add products to start building this sale.</string>
+    <string name="customer_search_hint">Search by name or phone…</string>
+    <string name="add_new_customer">Add New Customer</string>
+    <string name="quantity">Quantity</string>
+    <string name="discount">Discount</string>
+    <string name="subtotal">Subtotal</string>
+    <string name="total">Total</string>
+    <string name="final_amount">Final Amount</string>
+    <string name="checkout">Checkout</string>
+    <string name="sale_summary">Sale Summary</string>
+    <string name="complete_sale">Complete Sale</string>
+
+    <!-- Payments -->
+    <string name="payment_method">Payment Method</string>
+    <string name="pay_cash">Cash</string>
+    <string name="pay_upi">UPI / Online</string>
+    <string name="pay_card">Card</string>
+    <string name="pay_other">Other</string>
+
+    <!-- App Lock -->
+    <string name="enter_pin">Enter your PIN to access the boutique</string>
+    <string name="unlock_with_biometric">Unlock with Biometrics</string>
+    <string name="forgot_pin">Forgot PIN?</string>
+
+    <!-- Daily Closing -->
+    <string name="daily_closing">Daily Closing</string>
+    <string name="expected_cash">Expected Cash</string>
+    <string name="actual_cash">Actual Cash in Drawer</string>
+    <string name="cash_difference">Cash Difference</string>
+    <string name="close_day">Close &amp; Seal Day</string>
+
+    <!-- Common -->
+    <string name="sync_status_synced">Synced</string>
+    <string name="sync_status_pending">Offline / Pending Sync</string>
+    <string name="sync_status_failed">Sync Failed - Tap to Retry</string>
+    <string name="btn_save">Save</string>
+    <string name="btn_cancel">Cancel</string>
+    <string name="btn_share">Share Bill</string>
+    <string name="btn_print">Print Bill</string>
+    <string name="btn_void">Void Bill</string>
+</resources>
