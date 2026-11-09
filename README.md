@@ -1,95 +1,49 @@
-# Matoshree Collection — Smart Shop Manager Backend
+# Matoshree Collection — Smart Shop Manager (Version 1.0)
 
-Production REST API for **Matoshree Collection** Indian clothing/fashion boutique.
-
-## 🚀 Quick Start (Local & Hostinger)
-
-### 1. Installation
-```bash
-npm install
-```
-
-### 2. Environment Configuration
-Copy `.env.example` to `.env` and fill in your database credentials:
-```bash
-cp .env.example .env
-```
-
-### 3. Start the Server
-```bash
-npm start
-```
-The server will be live at `http://localhost:5000`.
+A native Android application designed specifically for **Matoshree Collection** for billing, product management, customer directory with WhatsApp-style lists, Udhari (Credit) ledger tracking, barcode thermal label printing, and multi-device cloud synchronization.
 
 ---
 
-## 📡 API Endpoints Reference
+## 🌟 Key Features
 
-### 1. Health Check (Public)
-```bash
-curl -X GET http://localhost:5000/api/v1/health
-```
+1. **POS Billing & Checkout**:
+   - Quick Bill (instant walk-in sales) and Detailed Bill modes.
+   - Continuous rapid barcode scanning for fast cart building.
+   - Dynamic UPI QR code generation and Marathi/English localized receipts.
 
-### 2. Authentication (Public)
-Login with default boutique credentials:
-```bash
-curl -X POST http://localhost:5000/api/v1/auth/login \
-  -H "Content-Type: application/json" \
-  -d '{
-    "mobile": "+919876543210",
-    "pin": "1234"
-  }'
-```
-*Returns JWT token to use in `Authorization: Bearer <token>` for all endpoints below.*
+2. **Customer & Udhari Management**:
+   - Customer profile with lifetime spend, total bills, and balance tracking.
+   - Direct Udhari / Old Balance entry (`+ उधारी जोडा`) with instant receipt generation.
+   - WhatsApp HD statement image sharing and thermal receipt printing.
+   - WhatsApp Business style list management (Tags, Group filters, Multi-select bulk actions).
 
-### 3. Dashboard Summary (Protected)
-```bash
-curl -X GET http://localhost:5000/api/v1/dashboard \
-  -H "Authorization: Bearer YOUR_TOKEN"
-```
+3. **Product Catalog & Thermal Labels**:
+   - 5-digit numeric SKU generation for narrow 50mm × 38mm thermal stickers.
+   - Category filtering, inventory stock tracking, and bulk barcode label printing.
 
-### 4. Create Sale (Detailed / Quick)
-```bash
-curl -X POST http://localhost:5000/api/v1/sales \
-  -H "Authorization: Bearer YOUR_TOKEN" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "sale_type": "QUICK",
-    "final_amount": 18450.00,
-    "payment_method": "UPI",
-    "note": "Festival purchase"
-  }'
-```
+4. **Bluetooth Thermal Printing**:
+   - 58mm Bluetooth thermal printer integration for bills and sticky product labels.
+   - Custom shop logo branding and QR payment integration.
 
-### 5. Customer Directory & Autocomplete
-```bash
-curl -X GET "http://localhost:5000/api/v1/customers?search=Priya" \
-  -H "Authorization: Bearer YOUR_TOKEN"
-```
+5. **Cloud Synchronization & Offline-First**:
+   - Realtime multi-device sync via Cloud Firestore and Firebase Storage.
+   - Sub-second local SQLite persistent caching for uninterrupted offline billing and operations.
 
-### 6. Catalog Products
-```bash
-curl -X GET http://localhost:5000/api/v1/products \
-  -H "Authorization: Bearer YOUR_TOKEN"
-```
+---
 
-### 7. Daily Closing Reconciliation
-```bash
-curl -X GET http://localhost:5000/api/v1/daily-closing \
-  -H "Authorization: Bearer YOUR_TOKEN"
-```
+## 📱 Tech Stack
+- **Language**: Kotlin
+- **UI Framework**: Jetpack Compose & Material 3
+- **Architecture**: MVVM + Clean Architecture Flow
+- **Cloud Backend**: Google Cloud Firestore & Firebase Auth
+- **Local Persistence**: Room SQLite Database & Firestore Offline Persistence
+- **Hardware Integration**: Bluetooth ESC/POS Thermal Printing & AndroidX CameraX (ML Kit Barcode Scanning)
 
-### 8. Batch Offline Sync Ingestion
-```bash
-curl -X POST http://localhost:5000/api/v1/sync \
-  -H "Authorization: Bearer YOUR_TOKEN" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "sync_items": [
-      {
-        "transaction_uuid": "tx-12345",
-        "entity_type": "SALE"
-      }
-    ]
-  }'
-```
+---
+
+## 🚀 Building and Running
+
+1. Open the `android` folder in **Android Studio**.
+2. Sync Gradle dependencies.
+3. Connect your Android device or start an emulator.
+4. Run `./gradlew assembleDebug` to build the APK.
