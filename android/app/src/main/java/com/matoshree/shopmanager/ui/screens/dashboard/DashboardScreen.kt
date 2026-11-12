@@ -141,9 +141,11 @@ class DashboardViewModel(
                 }
 
                 // Task 1: Most recently added bills on top. Show today's bills only; if none, show this week's bills only
-                val sortedActiveBills = activeBills.sortedWith(
-                    compareByDescending<Bill> { it.billDate }.thenByDescending { it.id }
-                )
+                val sortedActiveBills = activeBills
+                    .distinctBy { if (it.transactionUuid.isNotBlank()) it.transactionUuid else it.billNumber }
+                    .sortedWith(
+                        compareByDescending<Bill> { it.billDate }.thenByDescending { it.id }
+                    )
                 val todayBillsOnly = sortedActiveBills.filter { DateUtils.isToday(it.billDate) }
                 val weekBillsOnly = sortedActiveBills.filter { DateUtils.isThisWeek(it.billDate) }
 

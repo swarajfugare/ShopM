@@ -175,7 +175,7 @@ class CustomerViewModel(
                     val mobMatches = (custCleanMobile.length == 10 && bCleanMob.length == 10 && bCleanMob == custCleanMobile)
                     val nameMatches = (custName.isNotBlank() && b.customerName != null && b.customerName.trim().equals(custName, ignoreCase = true))
                     idMatches || mobMatches || nameMatches
-                }
+                }.distinctBy { if (it.transactionUuid.isNotBlank()) it.transactionUuid else it.billNumber }
                 
                 val voidedBillIds = allBills.filter { it.isVoided }.map { it.id }.toSet()
                 val voidedBillNumbers = allBills.filter { it.isVoided && it.billNumber.isNotBlank() }.map { it.billNumber }.toSet()
@@ -190,7 +190,7 @@ class CustomerViewModel(
                     val mobMatches = (custCleanMobile.length == 10 && txCleanMob.length == 10 && txCleanMob == custCleanMobile)
                     val nameMatches = (custName.isNotBlank() && tx.customerName.trim().equals(custName, ignoreCase = true))
                     idMatches || mobMatches || nameMatches
-                }
+                }.distinctBy { if (it.transactionUuid.isNotBlank()) it.transactionUuid else "${it.id}_${it.billId}" }
 
                 if (customerBills.value != customerSpecificBills) {
                     customerBills.value = customerSpecificBills
@@ -936,6 +936,9 @@ fun CustomersListScreen(
                 else -> cust.listTags.contains(selectedTagFilter)
             }
             matchesSearch && matchesTag
+        }.distinctBy { cust ->
+            val clean = PhoneUtils.clean10DigitMobileInput(cust.mobile)
+            if (clean.length == 10) clean else "cust_${cust.id}_${cust.name.trim().lowercase()}"
         }
         filtered.sortedWith { c1, c2 ->
             AlphabetUtils.compareAlphabetically(c1.name, c2.name)

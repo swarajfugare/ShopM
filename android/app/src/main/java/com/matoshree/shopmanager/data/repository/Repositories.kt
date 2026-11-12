@@ -173,8 +173,12 @@ class BillRepository(
             // 1. Observe Room reactively - whenever ANY bill is added/changed locally, emit immediately!
             val roomJob = kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.IO).launch {
                 try {
+                    try { database.billDao().deduplicateBillRows() } catch (_: Exception) {}
                     database.billDao().getAllBills(limit).distinctUntilChanged().collect { entities ->
                         val domainBills = entities.map { it.toDomain() }
+                            .distinctBy { b ->
+                                if (b.transactionUuid.isNotBlank()) b.transactionUuid else b.billNumber
+                            }
                         trySend(domainBills)
                     }
                 } catch (e: Exception) {
@@ -503,8 +507,13 @@ class CustomerRepository(
             // 1. Observe Room reactively - authoritative local store with stable persistent IDs
             val roomJob = kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.IO).launch {
                 try {
+                    try { database.customerDao().deduplicateCustomerRows() } catch (_: Exception) {}
                     database.customerDao().getAllCustomers().distinctUntilChanged().collect { entities ->
                         val domainCustomers = entities.map { it.toDomain() }
+                            .distinctBy { cust ->
+                                val clean = com.matoshree.shopmanager.utils.PhoneUtils.clean10DigitMobileInput(cust.mobile)
+                                if (clean.length == 10) clean else "cust_${cust.id}_${cust.name.trim().lowercase()}"
+                            }
                         trySend(domainCustomers)
                     }
                 } catch (e: Exception) {

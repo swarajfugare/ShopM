@@ -38,6 +38,9 @@ interface BillDao {
     @Query("SELECT * FROM bills WHERE id = :id LIMIT 1")
     suspend fun getBillById(id: Long): BillWithItems?
 
+    @Query("DELETE FROM bills WHERE id NOT IN (SELECT MIN(id) FROM bills GROUP BY CASE WHEN transactionUuid IS NOT NULL AND transactionUuid != '' THEN transactionUuid ELSE billNumber END)")
+    suspend fun deduplicateBillRows()
+
     @Transaction
     @Query("SELECT * FROM bills WHERE serverId = :serverId LIMIT 1")
     suspend fun getBillByServerId(serverId: Long): BillWithItems?
@@ -115,8 +118,10 @@ interface BillDao {
 
     @Transaction
     suspend fun upsertServerBill(bill: BillEntity, items: List<BillItemEntity>) {
-        val existing = (if (bill.transactionUuid.isNotBlank()) getBillByUuid(bill.transactionUuid) else null)
-            ?: (if (bill.serverId != null && bill.serverId > 0) getBillByServerId(bill.serverId) else null)
+        val existingByUuid = if (bill.transactionUuid.isNotBlank()) getBillByUuid(bill.transactionUuid) else null
+        val existingByServer = if (existingByUuid == null && bill.serverId != null && bill.serverId > 0) getBillByServerId(bill.serverId) else null
+        val existingByNumber = if (existingByUuid == null && existingByServer == null && bill.billNumber.isNotBlank()) getBillByNumber(bill.billNumber) else null
+        val existing = existingByUuid ?: existingByServer ?: existingByNumber
 
         if (existing != null) {
             // Update existing bill with its existing local Room ID only if data changed
@@ -189,6 +194,15 @@ interface CustomerDao {
     @Query("SELECT * FROM customers WHERE serverId = :serverId LIMIT 1")
     suspend fun getCustomerByServerId(serverId: Long): CustomerEntity?
 
+    @Query("SELECT * FROM customers WHERE LOWER(TRIM(name)) = LOWER(TRIM(:name)) AND isActive = 1 LIMIT 1")
+    suspend fun getCustomerByName(name: String): CustomerEntity?
+
+    @Query("SELECT * FROM customers WHERE (mobile = :mobile OR mobile LIKE '%' || :cleanMobile) AND isActive = 1 LIMIT 1")
+    suspend fun getCustomerByMobileFuzzy(mobile: String, cleanMobile: String): CustomerEntity?
+
+    @Query("DELETE FROM customers WHERE id NOT IN (SELECT MIN(id) FROM customers WHERE isActive = 1 GROUP BY CASE WHEN mobile IS NOT NULL AND LENGTH(TRIM(mobile)) >= 10 THEN SUBSTR(TRIM(mobile), -10) ELSE LOWER(TRIM(name)) END)")
+    suspend fun deduplicateCustomerRows()
+
     @Query("SELECT * FROM customers WHERE mobile = :mobile AND isActive = 1 LIMIT 1")
     suspend fun getCustomerByMobile(mobile: String): CustomerEntity?
 
@@ -236,9 +250,11 @@ interface CustomerDao {
 
     @Transaction
     suspend fun upsertServerCustomer(customer: CustomerEntity) {
-        val existingByServer = if (customer.serverId != null) getCustomerByServerId(customer.serverId) else null
-        val existingByMobile = if (existingByServer == null && customer.mobile.isNotBlank()) getCustomerByMobile(customer.mobile) else null
-        val existing = existingByServer ?: existingByMobile
+        val cleanMob = com.matoshree.shopmanager.utils.PhoneUtils.clean10DigitMobileInput(customer.mobile)
+        val existingByServer = if (customer.serverId != null && customer.serverId > 0) getCustomerByServerId(customer.serverId) else null
+        val existingByMobile = if (existingByServer == null && cleanMob.length == 10) getCustomerByMobileFuzzy(customer.mobile, cleanMob) else null
+        val existingByName = if (existingByServer == null && existingByMobile == null && customer.name.isNotBlank()) getCustomerByName(customer.name) else null
+        val existing = existingByServer ?: existingByMobile ?: existingByName
 
         if (existing != null) {
             // Only update Room if fields actually changed (avoids invalidation loops and list jitter)
@@ -249,11 +265,19 @@ interface CustomerDao {
                 Math.abs(existing.lifetimeSpend - customer.lifetimeSpend) > 0.01 ||
                 existing.isActive != customer.isActive
             ) {
-                val updated = customer.copy(id = existing.id, serverId = existing.serverId ?: customer.serverId)
+                val updated = customer.copy(
+                    id = existing.id,
+                    serverId = existing.serverId ?: customer.serverId,
+                    mobile = if (cleanMob.length == 10) cleanMob else existing.mobile
+                )
                 insertCustomer(updated)
             }
         } else {
-            insertCustomer(customer.copy(id = 0))
+            val normalized = customer.copy(
+                id = 0,
+                mobile = if (cleanMob.length == 10) cleanMob else customer.mobile
+            )
+            insertCustomer(normalized)
         }
     }
 

@@ -72,12 +72,29 @@ class UdhariViewModel(
     ) { customers, bills, transactions ->
         Triple(customers, bills, transactions)
     }.debounce(200).map { (customers, bills, transactions) ->
-        val activeBills = bills.filter { !it.isVoided }
-        val validTxs = transactions.filter { !it.isReversed }
+        val activeBills = bills.filter { !it.isVoided }.distinctBy { if (it.transactionUuid.isNotBlank()) it.transactionUuid else it.billNumber }
+        val validTxs = transactions.filter { !it.isReversed }.distinctBy { if (it.transactionUuid.isNotBlank()) it.transactionUuid else "${it.id}_${it.billId}" }
+        val uniqueCustomers = customers.distinctBy { cust ->
+            val clean = com.matoshree.shopmanager.utils.PhoneUtils.clean10DigitMobileInput(cust.mobile)
+            if (clean.length == 10) clean else "cust_${cust.id}_${cust.name.trim().lowercase()}"
+        }
 
-        customers.map { customer ->
-            val custBills = activeBills.filter { it.customerId == customer.id || (customer.mobile.isNotBlank() && it.customerMobile == customer.mobile) }
-            val custTxs = validTxs.filter { it.customerId == customer.id || (customer.mobile.isNotBlank() && it.customerMobile == customer.mobile) }
+        uniqueCustomers.map { customer ->
+            val cleanCustMob = com.matoshree.shopmanager.utils.PhoneUtils.clean10DigitMobileInput(customer.mobile)
+            val custName = customer.name.trim()
+
+            val custBills = activeBills.filter { b ->
+                val bCleanMob = com.matoshree.shopmanager.utils.PhoneUtils.clean10DigitMobileInput(b.customerMobile ?: "")
+                b.customerId == customer.id ||
+                (cleanCustMob.length == 10 && bCleanMob == cleanCustMob) ||
+                (custName.isNotBlank() && b.customerName != null && b.customerName.trim().equals(custName, ignoreCase = true))
+            }
+            val custTxs = validTxs.filter { tx ->
+                val txCleanMob = com.matoshree.shopmanager.utils.PhoneUtils.clean10DigitMobileInput(tx.customerMobile)
+                tx.customerId == customer.id ||
+                (cleanCustMob.length == 10 && txCleanMob == cleanCustMob) ||
+                (custName.isNotBlank() && tx.customerName.trim().equals(custName, ignoreCase = true))
+            }
 
             val manualCredits = custTxs.filter { it.billId == 0L && it.type == UdhariTransactionType.PURCHASE_CREDIT }.sumOf { it.amount }
             val custPayments = custTxs.filter { it.type == UdhariTransactionType.PAYMENT }.sumOf { it.amount }
@@ -129,10 +146,14 @@ class UdhariViewModel(
         _selectedFilter,
         _selectedSort
     ) { list, query, filter, sort ->
+        val distinctList = list.distinctBy { summary ->
+            val clean = com.matoshree.shopmanager.utils.PhoneUtils.clean10DigitMobileInput(summary.customer.mobile)
+            if (clean.length == 10) clean else "cust_${summary.customer.id}_${summary.customer.name.trim().lowercase()}"
+        }
         val todayIso = DateUtils.todayDate()
 
         // Filter
-        val filtered = list.filter { summary ->
+        val filtered = distinctList.filter { summary ->
             val matchesQuery = query.isBlank() ||
                     summary.customer.name.contains(query, ignoreCase = true) ||
                     summary.customer.mobile.contains(query) ||
@@ -293,6 +314,13 @@ fun UdhariScreen(
     val customerList by viewModel.customerSummaries.collectAsState()
     val searchQuery by viewModel.searchQuery.collectAsState()
     val selectedFilter by viewModel.selectedFilter.collectAsState()
+
+    val uniqueCustomerList = remember(customerList) {
+        customerList.distinctBy { summary ->
+            val clean = com.matoshree.shopmanager.utils.PhoneUtils.clean10DigitMobileInput(summary.customer.mobile)
+            if (clean.length == 10) clean else "cust_${summary.customer.id}_${summary.customer.name.trim().lowercase()}"
+        }
+    }
 
     var activePaymentCustomer by remember { mutableStateOf<CustomerUdhariSummary?>(null) }
     var showPaymentDialog by remember { mutableStateOf(false) }
@@ -485,7 +513,7 @@ fun UdhariScreen(
             }
 
             // 4. CUSTOMER UDHARI CARDS
-            if (customerList.isEmpty()) {
+            if (uniqueCustomerList.isEmpty()) {
                 item {
                     Box(
                         modifier = Modifier
@@ -509,9 +537,13 @@ fun UdhariScreen(
                 }
             } else {
                 items(
-                    items = customerList,
-                    key = { if (it.customer.mobile.isNotBlank()) it.customer.mobile else "cust_${it.customer.id}_${it.customer.name}" }
-                ) { summary ->
+                    count = uniqueCustomerList.size,
+                    key = { index ->
+                        val item = uniqueCustomerList[index]
+                        "udhari_${item.customer.id}_${item.customer.mobile}_$index"
+                    }
+                ) { index ->
+                    val summary = uniqueCustomerList[index]
                     UdhariCustomerCard(
                         summary = summary,
                         onClick = { onCustomerClick(summary.customer.id) },

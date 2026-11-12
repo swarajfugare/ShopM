@@ -224,7 +224,9 @@ fun BillsHistoryScreen(
             }
 
             matchesSearch && matchesFilter
-        }.sortedWith(compareByDescending<Bill> { it.billDate }.thenByDescending { it.id })
+        }
+        .distinctBy { if (it.transactionUuid.isNotBlank()) it.transactionUuid else it.billNumber }
+        .sortedWith(compareByDescending<Bill> { it.billDate }.thenByDescending { it.id })
     }
 
     if (showBulkDeleteDialog) {

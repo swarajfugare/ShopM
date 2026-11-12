@@ -263,7 +263,10 @@ class FirestoreCustomerRepository {
             debounceJob = launch {
                 kotlinx.coroutines.delay(100)
                 val combined = (rootMap.values + shopMap.values)
-                    .distinctBy { if (it.mobile.isNotBlank()) it.mobile else it.id.toString() }
+                    .distinctBy { cust ->
+                        val clean = com.matoshree.shopmanager.utils.PhoneUtils.clean10DigitMobileInput(cust.mobile)
+                        if (clean.length == 10) clean else "cust_${cust.id}_${cust.name.trim().lowercase()}"
+                    }
                     .sortedByDescending { it.id }
                 trySend(combined)
             }
