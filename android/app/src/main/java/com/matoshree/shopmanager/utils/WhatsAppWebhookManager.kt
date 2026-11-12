@@ -41,6 +41,10 @@ object WhatsAppWebhookManager {
     private const val KEY_REMINDER_TEMPLATE_NAME = "whatsapp_reminder_template_name"
     private const val KEY_CLEARED_TEMPLATE_NAME = "whatsapp_cleared_template_name"
 
+    // Official Permanently Secured Webhook URL and API Key for Matoshree Collection
+    private const val PERMANENT_WEBHOOK_URL = "https://wa-crm.refixer.in/api/webhooks/shop-bills"
+    private const val PERMANENT_API_KEY = "wacrm_live_WRVM4c_qnLH4x7jlQ_wWGj4jUd5WKgcvVYNEFjXJW3U"
+
     private val httpClient: OkHttpClient by lazy {
         OkHttpClient.Builder()
             .connectTimeout(12, TimeUnit.SECONDS)
@@ -55,36 +59,31 @@ object WhatsAppWebhookManager {
     }
 
     fun isConfigured(context: Context): Boolean {
-        return getWebhookUrl(context).isNotBlank()
+        return true
     }
 
     fun isAutoSendEnabled(context: Context): Boolean {
-        val prefs = getPrefs(context)
-        return if (prefs.contains(KEY_ENABLED)) {
-            prefs.getBoolean(KEY_ENABLED, true)
-        } else {
-            getWebhookUrl(context).isNotBlank()
-        }
+        return false // Permanently disabled: Do NOT send auto WhatsApp after bill
     }
 
     fun setAutoSendEnabled(context: Context, enabled: Boolean) {
-        getPrefs(context).edit().putBoolean(KEY_ENABLED, enabled).apply()
+        // Disabled per user policy
     }
 
     fun getWebhookUrl(context: Context): String {
-        return getPrefs(context).getString(KEY_WEBHOOK_URL, "") ?: ""
+        return PERMANENT_WEBHOOK_URL
     }
 
     fun setWebhookUrl(context: Context, url: String) {
-        getPrefs(context).edit().putString(KEY_WEBHOOK_URL, url.trim()).apply()
+        // Permanent in code
     }
 
     fun getApiKey(context: Context): String {
-        return getPrefs(context).getString(KEY_API_KEY, "") ?: ""
+        return PERMANENT_API_KEY
     }
 
     fun setApiKey(context: Context, key: String) {
-        getPrefs(context).edit().putString(KEY_API_KEY, key.trim()).apply()
+        // Permanent in code
     }
 
     const val DEFAULT_REMINDER_PAYLOAD = "{\n  \"to\": \"{phone}\",\n  \"action\": \"udhari_reminder\",\n  \"template_name\": \"udhari_reminder\",\n  \"customerName\": \"{customerName}\",\n  \"amount\": \"{outstandingDue}\",\n  \"dueDate\": \"{dueDate}\",\n  \"shopName\": \"{shopName}\",\n  \"message\": \"{message}\"\n}"
@@ -192,47 +191,9 @@ object WhatsAppWebhookManager {
         templateTypeOverride: String? = null,
         settings: PrintShareHelper.ShopSettingsSnapshot = PrintShareHelper.ShopSettingsSnapshot()
     ): Result<String> = withContext(Dispatchers.IO) {
-        try {
-            // User requirement: Only send udhari reminder message, do NOT send bill messages.
-            if (bill.pendingAmount <= 0.01) {
-                Log.d(TAG, "Paid bill with 0 balance. WhatsApp bill messages are disabled (only udhari reminders enabled).")
-                return@withContext Result.success("Paid bill - no message sent")
-            }
-
-            if (!isAutoSendEnabled(context)) {
-                Log.d(TAG, "WhatsApp auto-send is disabled.")
-                return@withContext Result.failure(IllegalStateException("WhatsApp auto-send is disabled."))
-            }
-
-            var rawMobile = bill.customerMobile
-            if (rawMobile.isNullOrBlank() && bill.customerId != null && bill.customerId > 0) {
-                try {
-                    rawMobile = com.matoshree.shopmanager.data.local.AppDatabase.getInstance(context)
-                        .customerDao()
-                        .getCustomerById(bill.customerId)?.mobile
-                } catch (_: Exception) {}
-            }
-
-            if (rawMobile.isNullOrBlank() || !PhoneUtils.isValidIndianMobile(rawMobile)) {
-                Log.d(TAG, "Customer has no valid 10-digit mobile number (${rawMobile}). Skipping WhatsApp reminder.")
-                return@withContext Result.failure(IllegalArgumentException("Customer has no valid 10-digit mobile number."))
-            }
-
-            val customerName = (bill.customerName?.takeIf { it.isNotBlank() } ?: "ग्राहक")
-
-            // Send exclusively via the Udhari Reminder template
-            sendUdhariReminderWhatsApp(
-                context = context,
-                customerName = customerName,
-                customerMobile = rawMobile,
-                outstandingDue = bill.pendingAmount,
-                dueDate = bill.dueDate,
-                settings = settings
-            )
-        } catch (e: Exception) {
-            Log.e(TAG, "WhatsApp auto-send reminder exception: ${e.message}", e)
-            Result.failure(e)
-        }
+        // Automatic message dispatch immediately after billing is permanently turned OFF per user policy
+        Log.d(TAG, "Automatic WhatsApp message dispatch after bill creation is disabled per user policy.")
+        Result.success("Auto bill WhatsApp disabled")
     }
 
     /**

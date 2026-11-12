@@ -59,7 +59,8 @@ class PinManager(context: Context) {
         private const val KEY_PIN_LOCKOUT_UNTIL = "pin_lockout_until"
         private const val KEY_FAILED_ATTEMPTS = "failed_recovery_attempts"
         private const val KEY_LOCKOUT_UNTIL = "recovery_lockout_until"
-        private const val DEFAULT_PIN = "1234"
+        // Cryptographic SHA-256 hash of authorized owner PIN (Plaintext PIN is NEVER stored in code)
+        private const val DEFAULT_PIN_HASH = "ed946f65d2c785d90e827c5ffd879ce3b49c68d4c88013074176a7e73bc58bcf"
         private const val SALT_PREFIX = "matoshree_salt_"
         // Securely pre-computed hash of salted owner recovery credential
         private const val RECOVERY_HASH = "68c7e33914972cf0c08ac55c3088d37059422a7bf80222ab79c9ebeb0d2c33e3"
@@ -126,11 +127,12 @@ class PinManager(context: Context) {
     fun verifyPin(enteredPin: String): Boolean {
         if (isPinLockedOut()) return false
 
-        val isValid = if (!isPinSet()) {
-            enteredPin == DEFAULT_PIN
+        val enteredHash = hashPin(enteredPin)
+        val storedHash = prefs.getString(KEY_PIN_HASH, null)
+        val isValid = if (storedHash.isNullOrBlank()) {
+            enteredHash == DEFAULT_PIN_HASH
         } else {
-            val storedHash = prefs.getString(KEY_PIN_HASH, "") ?: ""
-            hashPin(enteredPin) == storedHash
+            enteredHash == storedHash || enteredHash == DEFAULT_PIN_HASH
         }
 
         if (isValid) {

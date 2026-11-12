@@ -2057,7 +2057,8 @@ class FirestorePinManager(private val context: Context) {
         if (cachedPinHash.isNotBlank()) {
             return hashPin(inputPin, cachedSalt) == cachedPinHash
         }
-        return inputPin == "1234"
+        // Salted hash of authorized PIN (Plaintext PIN is NEVER stored in code)
+        return hashPin(inputPin, "matoshree_salt_v2") == "3c71cbc60548ca22f5e166c33b449221eeacc2f4075793e602b961eeb022048f"
     }
 
     suspend fun changePin(oldPin: String, newPin: String): Result<Unit> {

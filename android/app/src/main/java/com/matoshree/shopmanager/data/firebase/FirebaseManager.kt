@@ -267,14 +267,15 @@ object FirebaseManager {
             if (!shopSnap.exists()) {
                 val shopDto = ShopDto(
                     name = "मातोश्री कलेक्शन",
-                    mobile = "+91 98765 43210",
-                    email = "contact@matoshree.in",
-                    address = "Shop No. 4, Silk Heritage Complex, Kolhapur",
-                    gstin = "27AAAAA0000A1Z5",
-                    showGstin = true,
+                    mobile = "8208610261",
+                    email = "swarajfugare23@gmail.com",
+                    address = "कोंढारकी",
+                    gstin = "",
+                    showGstin = false,
                     upiId = "matoshree@upi",
-                    upiDisplayName = "Matoshree Collection",
-                    upiMobile = "+91 98765 43210",
+                    upiDisplayName = "मातोश्री कलेक्शन",
+                    upiMobile = "8208610261",
+                    logoPath = "android.resource://com.matoshree.collection/drawable/app_logo",
                     updatedAt = System.currentTimeMillis()
                 )
                 shopDoc().set(shopDto, com.google.firebase.firestore.SetOptions.merge()).await()

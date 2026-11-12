@@ -11,6 +11,7 @@ import android.util.Base64
 import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -29,6 +30,7 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
@@ -75,21 +77,20 @@ class SettingsViewModel(
 
     val pendingSyncCount = MutableStateFlow(0)
     val isBiometricEnabled = MutableStateFlow(pinManager.isBiometricEnabled())
-    val profitMargin = MutableStateFlow(25.0)
 
-    // Shop Settings State
-    val shopName = MutableStateFlow("Matoshree Collection")
-    val shopMobile = MutableStateFlow("+91 98765 43210")
-    val shopEmail = MutableStateFlow("contact@matoshree.in")
-    val shopAddress = MutableStateFlow("Shop No. 4, Silk Heritage Complex, Kolhapur")
-    val shopGstin = MutableStateFlow("27AAAAA0000A1Z5")
-    val showGstinOnBill = MutableStateFlow(true)
-    val logoPath = MutableStateFlow<String?>(null)
+    // Shop Settings State (Default Official Matoshree Collection Profile)
+    val shopName = MutableStateFlow("मातोश्री कलेक्शन")
+    val shopMobile = MutableStateFlow("8208610261")
+    val shopEmail = MutableStateFlow("swarajfugare23@gmail.com")
+    val shopAddress = MutableStateFlow("कोंढारकी")
+    val shopGstin = MutableStateFlow("")
+    val showGstinOnBill = MutableStateFlow(false)
+    val logoPath = MutableStateFlow<String?>("android.resource://com.matoshree.collection/drawable/app_logo")
 
-    // Payment Settings State
+    // Payment Settings State (Default Official UPI Profile)
     val upiId = MutableStateFlow("matoshree@upi")
-    val upiDisplayName = MutableStateFlow("Matoshree Collection")
-    val upiMobile = MutableStateFlow("+919876543210")
+    val upiDisplayName = MutableStateFlow("मातोश्री कलेक्शन")
+    val upiMobile = MutableStateFlow("8208610261")
 
     private val firestoreSettingsRepo = com.matoshree.shopmanager.data.firebase.FirestoreSettingsRepository()
 
@@ -347,7 +348,6 @@ fun SettingsScreen(
     val context = LocalContext.current
     val pendingSync by viewModel.pendingSyncCount.collectAsState()
     val biometricEnabled by viewModel.isBiometricEnabled.collectAsState()
-    val margin by viewModel.profitMargin.collectAsState()
 
     val currentShopName by viewModel.shopName.collectAsState()
     val currentShopMobile by viewModel.shopMobile.collectAsState()
@@ -370,32 +370,21 @@ fun SettingsScreen(
 
     var showEditShopDialog by remember { mutableStateOf(false) }
     var showEditUpiDialog by remember { mutableStateOf(false) }
-    var showChangePinDialog by remember { mutableStateOf(false) }
-    var showForgotPinDialog by remember { mutableStateOf(false) }
     var showPrinterSelectionDialog by remember { mutableStateOf(false) }
     var isTestingPrint by remember { mutableStateOf(false) }
 
-    var waAutoSendEnabled by remember { mutableStateOf(WhatsAppWebhookManager.isAutoSendEnabled(context)) }
     var waUdhariReminderEnabled by remember { mutableStateOf(WhatsAppWebhookManager.isUdhariReminderEnabled(context)) }
-    var waWebhookUrl by remember { mutableStateOf(WhatsAppWebhookManager.getWebhookUrl(context)) }
-    var waApiKey by remember { mutableStateOf(WhatsAppWebhookManager.getApiKey(context)) }
-    var waHeaderName by remember { mutableStateOf(WhatsAppWebhookManager.getHeaderName(context)) }
-    var waPayloadTemplate by remember { mutableStateOf(WhatsAppWebhookManager.getPayloadTemplate(context)) }
-    var waBillTemplate by remember { mutableStateOf(WhatsAppWebhookManager.getBillPayloadTemplate(context)) }
-    var waReminderTemplate by remember { mutableStateOf(WhatsAppWebhookManager.getReminderPayloadTemplate(context)) }
-    var waClearedTemplate by remember { mutableStateOf(WhatsAppWebhookManager.getClearedPayloadTemplate(context)) }
-    var waBillTemplateName by remember { mutableStateOf(WhatsAppWebhookManager.getBillTemplateName(context)) }
-    var waReminderTemplateName by remember { mutableStateOf(WhatsAppWebhookManager.getReminderTemplateName(context)) }
-    var waClearedTemplateName by remember { mutableStateOf(WhatsAppWebhookManager.getClearedTemplateName(context)) }
-    var selectedBillTemplateOption by remember { mutableStateOf(WhatsAppWebhookManager.getSelectedBillTemplateType(context)) }
-    var selectedTemplateTab by remember { mutableStateOf(0) } // 0: Bill, 1: Reminder, 2: Cleared
     var isSendingBulkReminders by remember { mutableStateOf(false) }
     var showBulkReminderConfirmDialog by remember { mutableStateOf(false) }
     var bulkReminderStatusText by remember { mutableStateOf("") }
-    var showWaTestDialog by remember { mutableStateOf(false) }
-    var showActionTestDialog by remember { mutableStateOf<String?>(null) }
-    var isTestingWaWebhook by remember { mutableStateOf(false) }
-    var waTestPhone by remember { mutableStateOf("") }
+
+    // Advanced App Controls Preferences
+    val appControlPrefs = remember { context.getSharedPreferences("matoshree_app_controls", Context.MODE_PRIVATE) }
+    var defaultQuickSalePaymentMethod by remember { mutableStateOf(appControlPrefs.getString("default_payment_method", "CASH") ?: "CASH") }
+    var receiptCopiesCount by remember { mutableIntStateOf(appControlPrefs.getInt("receipt_copies_count", 1)) }
+    var audioHapticFeedbackEnabled by remember { mutableStateOf(appControlPrefs.getBoolean("audio_haptic_feedback", true)) }
+    var lowStockThreshold by remember { mutableIntStateOf(appControlPrefs.getInt("low_stock_threshold", 5)) }
+    var allowZeroStockSale by remember { mutableStateOf(appControlPrefs.getBoolean("allow_zero_stock_sale", true)) }
 
     var multiDeviceAlertsEnabled by remember { mutableStateOf(true) }
     var udhariRemindersEnabled by remember { mutableStateOf(true) }
@@ -856,273 +845,99 @@ fun SettingsScreen(
         }
         val renderWhatsAppWebhookCard: @Composable () -> Unit = {
             MatoshreeCard(hasGoldTopBorder = true) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Icon(Icons.Default.Send, contentDescription = null, tint = DeepEmerald, modifier = Modifier.size(22.dp))
-                            Spacer(modifier = Modifier.width(8.dp))
-                            Text(
-                                "स्वयंचलित व्हॉट्सॲप (WhatsApp Webhook API)",
-                                style = MaterialTheme.typography.titleMedium.copy(color = DeepEmerald, fontWeight = FontWeight.Bold)
-                            )
-                        }
-                        Surface(
-                            color = if (waAutoSendEnabled) ChampagneGoldContainer.copy(alpha = 0.5f) else OutlineVariantGrey.copy(alpha = 0.2f),
-                            shape = RoundedCornerShape(4.dp)
-                        ) {
-                            Text(
-                                if (waAutoSendEnabled) "सक्रिय" else "बंद",
-                                fontSize = 10.sp,
-                                fontWeight = FontWeight.Bold,
-                                color = if (waAutoSendEnabled) DeepEmerald else MutedCharcoal,
-                                modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
-                            )
-                        }
-                    }
-
-                    Spacer(modifier = Modifier.height(6.dp))
-                    Text(
-                        "बिल तयार झाल्यावर ग्राहकांच्या मोबाईल नंबरवर स्वयंचलित मेसेज पाठवा (Zero Server / Direct API).",
-                        style = MaterialTheme.typography.bodySmall.copy(color = MutedCharcoal)
-                    )
-
-                    Spacer(modifier = Modifier.height(14.dp))
-
-                    // Auto Send Toggle
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Column(modifier = Modifier.weight(1f)) {
-                            Text("बिल झाल्यावर आपोआप मेसेज पाठवा", fontWeight = FontWeight.Bold, fontSize = 14.sp)
-                            Text("१०-अंकी ग्राहक नंबरवर थेट API द्वारे मेसेज जाईल", style = MaterialTheme.typography.bodySmall.copy(color = MutedCharcoal))
-                        }
-                        Switch(
-                            checked = waAutoSendEnabled,
-                            onCheckedChange = {
-                                waAutoSendEnabled = it
-                                WhatsAppWebhookManager.setAutoSendEnabled(context, it)
-                                Toast.makeText(context, if (it) "व्हॉट्सॲप ऑटो-सेंड सक्रिय केले" else "व्हॉट्सॲप ऑटो-सेंड बंद केले", Toast.LENGTH_SHORT).show()
-                            },
-                            colors = SwitchDefaults.colors(checkedThumbColor = WarmWhite, checkedTrackColor = DeepEmerald)
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Icon(Icons.Default.Send, contentDescription = null, tint = DeepEmerald, modifier = Modifier.size(22.dp))
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text(
+                            "व्हॉट्सॲप उधारी स्मरण (WhatsApp Reminders)",
+                            style = MaterialTheme.typography.titleMedium.copy(color = DeepEmerald, fontWeight = FontWeight.Bold)
                         )
                     }
-
-                    Spacer(modifier = Modifier.height(10.dp))
-
-                    // Auto Udhari Due Reminder Toggle
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Column(modifier = Modifier.weight(1f)) {
-                            Text("उधारी मुदतीची आठवण (Auto Udhari Due Reminder)", fontWeight = FontWeight.Bold, fontSize = 14.sp)
-                            Text("ठरलेल्या मुदत तारखेला ग्राहकाला आपोआप व्हॉट्सॲपवर आठवण जाईल", style = MaterialTheme.typography.bodySmall.copy(color = MutedCharcoal))
-                        }
-                        Switch(
-                            checked = waUdhariReminderEnabled,
-                            onCheckedChange = {
-                                waUdhariReminderEnabled = it
-                                WhatsAppWebhookManager.setUdhariReminderEnabled(context, it)
-                                Toast.makeText(context, if (it) "उधारी आठवण ऑटो-सेंड सक्रिय केले" else "उधारी आठवण ऑटो-सेंड बंद केले", Toast.LENGTH_SHORT).show()
-                            },
-                            colors = SwitchDefaults.colors(checkedThumbColor = WarmWhite, checkedTrackColor = DeepEmerald)
-                        )
-                    }
-
-                    HorizontalDivider(modifier = Modifier.padding(vertical = 12.dp), color = OutlineVariantGrey.copy(alpha = 0.2f))
-
-                    // Webhook URL Input
-                    OutlinedTextField(
-                        value = waWebhookUrl,
-                        onValueChange = { waWebhookUrl = it },
-                        label = { Text("Webhook URL / Gateway Endpoint") },
-                        placeholder = { Text("https://your-api-gateway.com/send-message") },
-                        modifier = Modifier.fillMaxWidth(),
-                        shape = RoundedCornerShape(8.dp),
-                        singleLine = true,
-                        colors = OutlinedTextFieldDefaults.colors(
-                            focusedBorderColor = DeepEmerald,
-                            unfocusedBorderColor = OutlineVariantGrey
-                        )
-                    )
-
-                    Spacer(modifier = Modifier.height(10.dp))
-
-                    // API Key / Token Input
-                    OutlinedTextField(
-                        value = waApiKey,
-                        onValueChange = { waApiKey = it },
-                        label = { Text("API Key / Bearer Token (पर्यायी)") },
-                        placeholder = { Text("API Authorization Token") },
-                        modifier = Modifier.fillMaxWidth(),
-                        shape = RoundedCornerShape(8.dp),
-                        singleLine = true,
-                        colors = OutlinedTextFieldDefaults.colors(
-                            focusedBorderColor = DeepEmerald,
-                            unfocusedBorderColor = OutlineVariantGrey
-                        )
-                    )
-
-                    Spacer(modifier = Modifier.height(10.dp))
-
-                    // Header Name (Optional)
-                    OutlinedTextField(
-                        value = waHeaderName,
-                        onValueChange = { waHeaderName = it },
-                        label = { Text("Header नाव (डिफॉल्ट: Authorization)") },
-                        modifier = Modifier.fillMaxWidth(),
-                        shape = RoundedCornerShape(8.dp),
-                        singleLine = true,
-                        colors = OutlinedTextFieldDefaults.colors(
-                            focusedBorderColor = DeepEmerald,
-                            unfocusedBorderColor = OutlineVariantGrey
-                        )
-                    )
-
-                    Spacer(modifier = Modifier.height(10.dp))
-
-                    // Udhari Reminder Template Config (Only template active in the app)
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
+                    Surface(
+                        color = ChampagneGoldContainer.copy(alpha = 0.5f),
+                        shape = RoundedCornerShape(4.dp)
                     ) {
                         Text(
-                            "उधारी आठवण व्हॉट्सॲप टेम्पलेट (WACRM / Webhook)",
+                            "CRM जोडलेले 🔒",
+                            fontSize = 10.sp,
                             fontWeight = FontWeight.Bold,
-                            fontSize = 13.sp,
-                            color = DeepEmerald
+                            color = DeepEmerald,
+                            modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
                         )
-                        TextButton(
-                            onClick = {
-                                waReminderTemplate = "{\n  \"to\": \"{phone}\",\n  \"action\": \"udhari_reminder\",\n  \"template_name\": \"$waReminderTemplateName\",\n  \"customerName\": \"{customerName}\",\n  \"amount\": \"{outstandingDue}\",\n  \"dueDate\": \"{dueDate}\",\n  \"shopName\": \"{shopName}\",\n  \"message\": \"{message}\"\n}"
-                            }
-                        ) {
-                            Text("डिफॉल्ट WACRM आठवण पेलोड भरा", fontSize = 10.sp, color = DeepEmerald)
-                        }
-                    }
-                    Text(
-                        "या ॲपमधून ग्राहकांना केवळ उधारी आठवण (Udhari Reminder) मेसेज पाठवला जातो. नवीन बिलाचा मेसेज पाठवला जात नाही.",
-                        style = MaterialTheme.typography.bodySmall.copy(color = MutedCharcoal, fontSize = 11.sp)
-                    )
-                    Spacer(modifier = Modifier.height(8.dp))
-
-                    OutlinedTextField(
-                        value = waReminderTemplateName,
-                        onValueChange = { waReminderTemplateName = it },
-                        label = { Text("WACRM टेम्पलेट नाव (उदा. udhari_reminder)") },
-                        placeholder = { Text("WACRM मधील नेमके नाव टाका...") },
-                        modifier = Modifier.fillMaxWidth(),
-                        shape = RoundedCornerShape(8.dp),
-                        singleLine = true
-                    )
-                    Spacer(modifier = Modifier.height(6.dp))
-                    OutlinedTextField(
-                        value = waReminderTemplate,
-                        onValueChange = { waReminderTemplate = it },
-                        label = { Text("उधारी आठवण JSON पेलोड (रिकामे असल्यास ऑटो WACRM)") },
-                        placeholder = { Text("WACRM नुसार JSON पेस्ट करा...") },
-                        modifier = Modifier.fillMaxWidth(),
-                        shape = RoundedCornerShape(8.dp),
-                        minLines = 3,
-                        maxLines = 6
-                    )
-                    Text(
-                        text = "उपलब्ध टॅग्ज: {phone}, {mobile}, {customerName}, {amount}, {outstandingDue}, {dueDate}, {shopName}, {message}",
-                        style = MaterialTheme.typography.bodySmall.copy(color = MutedCharcoal, fontSize = 10.sp),
-                        modifier = Modifier.padding(top = 2.dp)
-                    )
-                    Spacer(modifier = Modifier.height(6.dp))
-                    OutlinedButton(
-                        onClick = { showActionTestDialog = "REMINDER" },
-                        modifier = Modifier.fillMaxWidth(),
-                        shape = RoundedCornerShape(6.dp)
-                    ) {
-                        Icon(Icons.Default.Send, contentDescription = null, modifier = Modifier.size(14.dp), tint = DeepEmerald)
-                        Spacer(modifier = Modifier.width(6.dp))
-                        Text("उधारी आठवण मेसेज पूर्वावलोकन पाठवा", fontSize = 11.sp, color = DeepEmerald)
-                    }
-
-                    Spacer(modifier = Modifier.height(14.dp))
-
-                    // Monday Automated Reminder Action
-                    Surface(
-                        shape = RoundedCornerShape(8.dp),
-                        color = DeepEmeraldContainer.copy(alpha = 0.2f),
-                        modifier = Modifier.fillMaxWidth()
-                    ) {
-                        Column(modifier = Modifier.padding(10.dp)) {
-                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                Icon(Icons.Default.Schedule, contentDescription = null, tint = DeepEmerald, modifier = Modifier.size(18.dp))
-                                Spacer(modifier = Modifier.width(6.dp))
-                                Text("सोमवार उधारी रिमाइंडर (Weekly Monday Automation)", fontWeight = FontWeight.Bold, color = DeepEmerald, fontSize = 13.sp)
-                            }
-                            Spacer(modifier = Modifier.height(4.dp))
-                            Text(
-                                text = "दर सोमवारी सकाळी आपोआप थकबाकीदार ग्राहकांना व्हॉट्सॲपवर उधारी आठवण मेसेज जातो.",
-                                style = MaterialTheme.typography.bodySmall.copy(color = MutedCharcoal)
-                            )
-                            Spacer(modifier = Modifier.height(8.dp))
-                            Button(
-                                onClick = {
-                                    showBulkReminderConfirmDialog = true
-                                },
-                                shape = RoundedCornerShape(6.dp),
-                                colors = ButtonDefaults.buttonColors(containerColor = BoutiqueSuccess),
-                                modifier = Modifier.fillMaxWidth()
-                            ) {
-                                Icon(Icons.Default.Send, contentDescription = null, modifier = Modifier.size(16.dp))
-                                Spacer(modifier = Modifier.width(6.dp))
-                                Text("📢 सर्व उधारी ग्राहकांना आत्ताच आठवण मेसेज पाठवा", fontSize = 12.sp, fontWeight = FontWeight.Bold)
-                            }
-                        }
-                    }
-
-                    Spacer(modifier = Modifier.height(14.dp))
-
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
-                    ) {
-                        Button(
-                            onClick = {
-                                WhatsAppWebhookManager.setWebhookUrl(context, waWebhookUrl)
-                                WhatsAppWebhookManager.setApiKey(context, waApiKey)
-                                WhatsAppWebhookManager.setHeaderName(context, waHeaderName)
-                                WhatsAppWebhookManager.setReminderPayloadTemplate(context, waReminderTemplate)
-                                WhatsAppWebhookManager.setReminderTemplateName(context, waReminderTemplateName)
-                                WhatsAppWebhookManager.setAutoSendEnabled(context, waAutoSendEnabled)
-                                WhatsAppWebhookManager.setUdhariReminderEnabled(context, waUdhariReminderEnabled)
-                                Toast.makeText(context, "व्हॉट्सॲप Webhook व उधारी आठवण टेम्पलेट सेव्ह झाले!", Toast.LENGTH_SHORT).show()
-                            },
-                            colors = ButtonDefaults.buttonColors(containerColor = DeepEmerald),
-                            shape = RoundedCornerShape(8.dp),
-                            modifier = Modifier.weight(1f)
-                        ) {
-                            Icon(Icons.Default.Save, contentDescription = null, modifier = Modifier.size(16.dp))
-                            Spacer(modifier = Modifier.width(4.dp))
-                            Text("सेटिंग्ज सेव्ह करा", fontSize = 13.sp)
-                        }
-
-                        OutlinedButton(
-                            onClick = {
-                                showWaTestDialog = true
-                            },
-                            shape = RoundedCornerShape(8.dp),
-                            modifier = Modifier.weight(1f)
-                        ) {
-                            Icon(Icons.Default.Send, contentDescription = null, modifier = Modifier.size(16.dp), tint = DeepEmerald)
-                            Spacer(modifier = Modifier.width(4.dp))
-                            Text("टेस्ट मेसेज", fontSize = 13.sp, color = DeepEmerald)
-                        }
                     }
                 }
+
+                Spacer(modifier = Modifier.height(6.dp))
+                Text(
+                    "wa-crm.refixer.in API द्वारे थकबाकीदार ग्राहकांना उधारी वसुलीची थेट आठवण पाठवा.",
+                    style = MaterialTheme.typography.bodySmall.copy(color = MutedCharcoal)
+                )
+
+                Spacer(modifier = Modifier.height(14.dp))
+
+                // Auto Udhari Due Reminder Toggle
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text("सोमवार साप्ताहिक उधारी आठवण (Weekly Monday Automation)", fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                        Text("दर सोमवारी सकाळी आपोआप सर्व थकबाकीदार ग्राहकांना व्हॉट्सॲपवर आठवण मेसेज जाईल", style = MaterialTheme.typography.bodySmall.copy(color = MutedCharcoal))
+                    }
+                    Switch(
+                        checked = waUdhariReminderEnabled,
+                        onCheckedChange = {
+                            waUdhariReminderEnabled = it
+                            WhatsAppWebhookManager.setUdhariReminderEnabled(context, it)
+                            Toast.makeText(context, if (it) "उधारी आठवण ऑटो-सेंड चालू केले" else "उधारी आठवण ऑटो-सेंड बंद केले", Toast.LENGTH_SHORT).show()
+                        },
+                        colors = SwitchDefaults.colors(checkedThumbColor = WarmWhite, checkedTrackColor = DeepEmerald)
+                    )
+                }
+
+                Spacer(modifier = Modifier.height(12.dp))
+
+                // Notice on policy
+                Surface(
+                    shape = RoundedCornerShape(8.dp),
+                    color = WarmIvory,
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Row(
+                        modifier = Modifier.padding(10.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Icon(Icons.Default.CheckCircle, contentDescription = null, tint = BoutiqueSuccess, modifier = Modifier.size(16.dp))
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text(
+                            "API क्रेडेंशियल्स ॲपमध्ये सुरक्षितपणे सेव्ह आहेत. बिल बनवल्यावर आपोआप मेसेज जाणे बंद ठेवले आहे.",
+                            fontSize = 11.sp,
+                            color = DeepCharcoal
+                        )
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(14.dp))
+
+                Button(
+                    onClick = {
+                        showBulkReminderConfirmDialog = true
+                    },
+                    shape = RoundedCornerShape(8.dp),
+                    colors = ButtonDefaults.buttonColors(containerColor = BoutiqueSuccess),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Icon(Icons.Default.Send, contentDescription = null, modifier = Modifier.size(16.dp))
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text("📢 सर्व उधारी ग्राहकांना आत्ताच आठवण मेसेज पाठवा", fontSize = 13.sp, fontWeight = FontWeight.Bold)
+                }
+            }
         }
         val renderNotificationsCard: @Composable () -> Unit = {
             MatoshreeCard(hasGoldTopBorder = true) {
@@ -1201,20 +1016,25 @@ fun SettingsScreen(
                         )
                     }
 
-                    Spacer(modifier = Modifier.height(14.dp))
-
-                    Button(
-                        onClick = {
-                            com.matoshree.shopmanager.notifications.ShopNotificationManager.sendDailyClosingReminderNotification(context)
-                            Toast.makeText(context, "टेस्ट नोटिफिकेशन पाठवण्यात आले", Toast.LENGTH_SHORT).show()
-                        },
-                        colors = ButtonDefaults.buttonColors(containerColor = ChampagneGoldContainer),
+                    Spacer(modifier = Modifier.height(10.dp))
+                    Surface(
                         shape = RoundedCornerShape(8.dp),
+                        color = ChampagneGoldContainer.copy(alpha = 0.35f),
                         modifier = Modifier.fillMaxWidth()
                     ) {
-                        Icon(Icons.Default.NotificationsActive, contentDescription = null, tint = DeepEmerald, modifier = Modifier.size(16.dp))
-                        Spacer(modifier = Modifier.width(6.dp))
-                        Text("टेस्ट नोटिफिकेशन पाठवा", color = DeepEmerald, fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                        Row(
+                            modifier = Modifier.padding(10.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Icon(Icons.Default.Schedule, contentDescription = null, tint = DeepEmerald, modifier = Modifier.size(16.dp))
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text(
+                                "भारतीय प्रमाणवेळ (IST) अचूक ०९:३० PM अलार्म सक्रिय ⏰",
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = DeepEmerald
+                            )
+                        }
                     }
                 }
         }
@@ -1297,43 +1117,175 @@ fun SettingsScreen(
                         color = OutlineVariantGrey.copy(alpha = 0.2f)
                     )
 
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
+                    Surface(
+                        shape = RoundedCornerShape(8.dp),
+                        color = ChampagneGoldContainer.copy(alpha = 0.35f),
+                        modifier = Modifier.fillMaxWidth()
                     ) {
-                        Column {
-                            Text("पिन बदला", fontWeight = FontWeight.SemiBold)
-                            Text("४ अंकी सुरक्षा पिन बदला", style = MaterialTheme.typography.bodySmall.copy(color = MutedCharcoal))
-                        }
-                        OutlinedButton(
-                            onClick = { showChangePinDialog = true },
-                            shape = RoundedCornerShape(8.dp)
+                        Row(
+                            modifier = Modifier.padding(10.dp),
+                            verticalAlignment = Alignment.CenterVertically
                         ) {
-                            Icon(Icons.Default.Lock, contentDescription = null, modifier = Modifier.size(16.dp), tint = DeepEmerald)
-                            Spacer(modifier = Modifier.width(4.dp))
-                            Text("पिन बदला", color = DeepEmerald)
-                        }
-                    }
-
-                    Spacer(modifier = Modifier.height(8.dp))
-
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Column {
-                            Text("पिन रिकव्हरी", fontWeight = FontWeight.SemiBold)
-                            Text("मास्टर कोडद्वारे पिन रीसेट करा", style = MaterialTheme.typography.bodySmall.copy(color = MutedCharcoal))
-                        }
-                        TextButton(
-                            onClick = { showForgotPinDialog = true }
-                        ) {
-                            Text("पिन रिकव्हर करा", color = DeepEmerald, fontWeight = FontWeight.Bold)
+                            Icon(Icons.Default.Security, contentDescription = null, tint = DeepEmerald, modifier = Modifier.size(18.dp))
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text(
+                                "४-अंकी सिक्युरिटी पिन आणि गुगल लॉगिन सक्रिय 🔒",
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = DeepEmerald
+                            )
                         }
                     }
                 }
+        }
+        val renderAppControlsCard: @Composable () -> Unit = {
+            MatoshreeCard(hasGoldTopBorder = true) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(Icons.Default.Tune, contentDescription = null, tint = DeepEmerald, modifier = Modifier.size(22.dp))
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text(
+                        "ॲप प्रगत नियंत्रक (Advanced Controls)",
+                        style = MaterialTheme.typography.titleMedium.copy(color = DeepEmerald, fontWeight = FontWeight.Bold)
+                    )
+                }
+
+                Spacer(modifier = Modifier.height(14.dp))
+
+                // Control 1: Quick Sale Default Payment Mode
+                Text("क्विक सेल डीफॉल्ट पेमेंट पर्याय", fontWeight = FontWeight.SemiBold, fontSize = 13.sp)
+                Spacer(modifier = Modifier.height(6.dp))
+                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    listOf("CASH" to "रोख (CASH)", "UPI" to "यूपीआय (UPI)").forEach { (key, label) ->
+                        val isSelected = defaultQuickSalePaymentMethod == key
+                        OutlinedButton(
+                            onClick = {
+                                defaultQuickSalePaymentMethod = key
+                                appControlPrefs.edit().putString("default_payment_method", key).apply()
+                            },
+                            modifier = Modifier.weight(1f),
+                            shape = RoundedCornerShape(8.dp),
+                            border = BorderStroke(1.5.dp, if (isSelected) DeepEmerald else OutlineVariantGrey),
+                            colors = ButtonDefaults.outlinedButtonColors(
+                                containerColor = if (isSelected) ChampagneGoldContainer.copy(alpha = 0.4f) else Color.Transparent
+                            )
+                        ) {
+                            Text(label, fontSize = 12.sp, fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal, color = if (isSelected) DeepEmerald else MutedCharcoal)
+                        }
+                    }
+                }
+
+                HorizontalDivider(modifier = Modifier.padding(vertical = 10.dp), color = OutlineVariantGrey.copy(alpha = 0.2f))
+
+                // Control 2: Bill Receipt Copies
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text("बिल पावती प्रिंट प्रती", fontWeight = FontWeight.SemiBold, fontSize = 13.sp)
+                        Text("प्रत्येक बिलावर किती पावत्या प्रिंट व्हाव्यात", style = MaterialTheme.typography.bodySmall.copy(color = MutedCharcoal))
+                    }
+                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        listOf(1 to "१ प्रत", 2 to "२ प्रती").forEach { (count, label) ->
+                            val isSelected = receiptCopiesCount == count
+                            OutlinedButton(
+                                onClick = {
+                                    receiptCopiesCount = count
+                                    appControlPrefs.edit().putInt("receipt_copies_count", count).apply()
+                                },
+                                shape = RoundedCornerShape(8.dp),
+                                border = BorderStroke(1.dp, if (isSelected) DeepEmerald else OutlineVariantGrey),
+                                colors = ButtonDefaults.outlinedButtonColors(
+                                    containerColor = if (isSelected) ChampagneGoldContainer.copy(alpha = 0.4f) else Color.Transparent
+                                ),
+                                contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
+                                modifier = Modifier.height(34.dp)
+                            ) {
+                                Text(label, fontSize = 11.sp, fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal, color = if (isSelected) DeepEmerald else MutedCharcoal)
+                            }
+                        }
+                    }
+                }
+
+                HorizontalDivider(modifier = Modifier.padding(vertical = 10.dp), color = OutlineVariantGrey.copy(alpha = 0.2f))
+
+                // Control 3: Scanner and Billing Haptic / Audio
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text("स्कॅनर व बिलिंग बीप / व्हायब्रेशन", fontWeight = FontWeight.SemiBold, fontSize = 13.sp)
+                        Text("बारकोड स्कॅन केल्यावर आणि बिल तयार झाल्यावर फीडबॅक", style = MaterialTheme.typography.bodySmall.copy(color = MutedCharcoal))
+                    }
+                    Switch(
+                        checked = audioHapticFeedbackEnabled,
+                        onCheckedChange = {
+                            audioHapticFeedbackEnabled = it
+                            appControlPrefs.edit().putBoolean("audio_haptic_feedback", it).apply()
+                        },
+                        colors = SwitchDefaults.colors(checkedThumbColor = WarmWhite, checkedTrackColor = DeepEmerald)
+                    )
+                }
+
+                HorizontalDivider(modifier = Modifier.padding(vertical = 10.dp), color = OutlineVariantGrey.copy(alpha = 0.2f))
+
+                // Control 4: Low Stock Alert Limit
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text("कमी स्टॉक इशारा मर्यादा", fontWeight = FontWeight.SemiBold, fontSize = 13.sp)
+                        Text("स्टॉक या मर्यादेपेक्षा कमी झाल्यास अलर्ट दिसेल", style = MaterialTheme.typography.bodySmall.copy(color = MutedCharcoal))
+                    }
+                    Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                        listOf(2, 5, 10).forEach { limit ->
+                            val isSelected = lowStockThreshold == limit
+                            OutlinedButton(
+                                onClick = {
+                                    lowStockThreshold = limit
+                                    appControlPrefs.edit().putInt("low_stock_threshold", limit).apply()
+                                },
+                                shape = RoundedCornerShape(8.dp),
+                                border = BorderStroke(1.dp, if (isSelected) DeepEmerald else OutlineVariantGrey),
+                                colors = ButtonDefaults.outlinedButtonColors(
+                                    containerColor = if (isSelected) ChampagneGoldContainer.copy(alpha = 0.4f) else Color.Transparent
+                                ),
+                                contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp),
+                                modifier = Modifier.height(32.dp)
+                            ) {
+                                Text("$limit नग", fontSize = 11.sp, fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal, color = if (isSelected) DeepEmerald else MutedCharcoal)
+                            }
+                        }
+                    }
+                }
+
+                HorizontalDivider(modifier = Modifier.padding(vertical = 10.dp), color = OutlineVariantGrey.copy(alpha = 0.2f))
+
+                // Control 5: Allow Sale on Zero Stock
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text("शून्य स्टॉक असताना विक्री परवानगी", fontWeight = FontWeight.SemiBold, fontSize = 13.sp)
+                        Text("स्टॉक शून्य असला तरी बिल बनवण्याची परवानगी द्या", style = MaterialTheme.typography.bodySmall.copy(color = MutedCharcoal))
+                    }
+                    Switch(
+                        checked = allowZeroStockSale,
+                        onCheckedChange = {
+                            allowZeroStockSale = it
+                            appControlPrefs.edit().putBoolean("allow_zero_stock_sale", it).apply()
+                        },
+                        colors = SwitchDefaults.colors(checkedThumbColor = WarmWhite, checkedTrackColor = DeepEmerald)
+                    )
+                }
+            }
         }
         val renderTrashCard: @Composable () -> Unit = {
             MatoshreeCard(hasGoldTopBorder = true) {
@@ -1366,27 +1318,9 @@ fun SettingsScreen(
                     }
                 }
         }
-        val renderFinancialRulesCard: @Composable () -> Unit = {
-            MatoshreeCard {
-                    Text("नफा आणि हिशोब नियम", style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold))
-                    Spacer(modifier = Modifier.height(12.dp))
-
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Column {
-                            Text("डीफॉल्ट अंदाजे नफा मार्जिन", fontWeight = FontWeight.SemiBold)
-                            Text("खरेदी किंमत उपलब्ध नसताना लागू", style = MaterialTheme.typography.bodySmall.copy(color = MutedCharcoal))
-                        }
-                        Text("$margin%", fontWeight = FontWeight.Bold, color = DeepEmerald)
-                    }
-                }
-        }
         val renderVersionCard: @Composable () -> Unit = {
             Text(
-                text = "मातोश्री कलेक्शन शॉप मॅनेजर • Version 3.0.0 (Production Stable)\nCloud Firestore Authoritative Single Source of Truth",
+                text = "मातोश्री कलेक्शन शॉप मॅनेजर • Version 3.1.0 (Production Stable)\nCloud Firestore Authoritative Single Source of Truth",
                 style = MaterialTheme.typography.bodySmall.copy(color = MutedCharcoal),
                 modifier = Modifier
                     .fillMaxWidth()
@@ -1418,6 +1352,7 @@ fun SettingsScreen(
                             renderShopLogoCard()
                             renderShopInfoCard()
                             renderPaymentUpiCard()
+                            renderAppControlsCard()
                             renderThermalPrinterCard()
                             renderNotificationsCard()
                         }
@@ -1425,12 +1360,11 @@ fun SettingsScreen(
                             modifier = Modifier.weight(1f),
                             verticalArrangement = Arrangement.spacedBy(16.dp)
                         ) {
-                            renderDataSyncCard()
-                            renderDiagnosticsCard()
                             renderWhatsAppWebhookCard()
                             renderSecurityCard()
+                            renderDataSyncCard()
+                            renderDiagnosticsCard()
                             renderTrashCard()
-                            renderFinancialRulesCard()
                             renderVersionCard()
                         }
                     }
@@ -1439,14 +1373,14 @@ fun SettingsScreen(
                 item { renderShopLogoCard() }
                 item { renderShopInfoCard() }
                 item { renderPaymentUpiCard() }
-                item { renderDataSyncCard() }
-                item { renderDiagnosticsCard() }
+                item { renderAppControlsCard() }
                 item { renderThermalPrinterCard() }
                 item { renderWhatsAppWebhookCard() }
                 item { renderNotificationsCard() }
                 item { renderSecurityCard() }
+                item { renderDataSyncCard() }
+                item { renderDiagnosticsCard() }
                 item { renderTrashCard() }
-                item { renderFinancialRulesCard() }
                 item { renderVersionCard() }
             }
         }
@@ -1584,182 +1518,6 @@ fun SettingsScreen(
         )
     }
 
-    // Change PIN Dialog
-    if (showChangePinDialog) {
-        var currentPin by remember { mutableStateOf("") }
-        var newPin by remember { mutableStateOf("") }
-        var confirmPin by remember { mutableStateOf("") }
-        var errorMessage by remember { mutableStateOf<String?>(null) }
-
-        AlertDialog(
-            onDismissRequest = { showChangePinDialog = false },
-            title = {
-                Text("सुरक्षा पिन बदला", fontWeight = FontWeight.Bold, color = DeepEmerald)
-            },
-            text = {
-                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                    Text(
-                        text = "पिन सर्व अधिकृत डिव्हाइसेसवर अपडेट केला जाईल.",
-                        style = MaterialTheme.typography.bodySmall.copy(color = MutedCharcoal)
-                    )
-
-                    OutlinedTextField(
-                        value = currentPin,
-                        onValueChange = { if (it.length <= 4 && it.all { ch -> ch.isDigit() }) currentPin = it },
-                        label = { Text("सध्याचा पिन (४ अंक)") },
-                        singleLine = true,
-                        visualTransformation = androidx.compose.ui.text.input.PasswordVisualTransformation(),
-                        keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(keyboardType = androidx.compose.ui.text.input.KeyboardType.NumberPassword),
-                        modifier = Modifier.fillMaxWidth(),
-                        shape = RoundedCornerShape(8.dp)
-                    )
-
-                    OutlinedTextField(
-                        value = newPin,
-                        onValueChange = { if (it.length <= 4 && it.all { ch -> ch.isDigit() }) newPin = it },
-                        label = { Text("नवीन पिन (४ अंक)") },
-                        singleLine = true,
-                        visualTransformation = androidx.compose.ui.text.input.PasswordVisualTransformation(),
-                        keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(keyboardType = androidx.compose.ui.text.input.KeyboardType.NumberPassword),
-                        modifier = Modifier.fillMaxWidth(),
-                        shape = RoundedCornerShape(8.dp)
-                    )
-
-                    OutlinedTextField(
-                        value = confirmPin,
-                        onValueChange = { if (it.length <= 4 && it.all { ch -> ch.isDigit() }) confirmPin = it },
-                        label = { Text("नवीन पिन पुन्हा टाका") },
-                        singleLine = true,
-                        visualTransformation = androidx.compose.ui.text.input.PasswordVisualTransformation(),
-                        keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(keyboardType = androidx.compose.ui.text.input.KeyboardType.NumberPassword),
-                        modifier = Modifier.fillMaxWidth(),
-                        shape = RoundedCornerShape(8.dp)
-                    )
-
-                    if (errorMessage != null) {
-                        Text(
-                            text = errorMessage ?: "",
-                            color = BoutiqueError,
-                            style = MaterialTheme.typography.bodySmall
-                        )
-                    }
-                }
-            },
-            confirmButton = {
-                Button(
-                    onClick = {
-                        viewModel.changePin(currentPin, newPin, confirmPin) { err ->
-                            if (err != null) {
-                                errorMessage = err
-                            } else {
-                                showChangePinDialog = false
-                                Toast.makeText(context, "पिन यशस्वीरित्या बदलला", Toast.LENGTH_SHORT).show()
-                            }
-                        }
-                    },
-                    colors = ButtonDefaults.buttonColors(containerColor = DeepEmerald),
-                    shape = RoundedCornerShape(8.dp)
-                ) {
-                    Text("पिन बदला")
-                }
-            },
-            dismissButton = {
-                TextButton(onClick = { showChangePinDialog = false }) {
-                    Text("रद्द करा")
-                }
-            },
-            containerColor = WarmWhite,
-            shape = RoundedCornerShape(16.dp)
-        )
-    }
-
-    // Forgot PIN Recovery Dialog
-    if (showForgotPinDialog) {
-        var recoveryCode by remember { mutableStateOf("") }
-        var newPin by remember { mutableStateOf("") }
-        var confirmPin by remember { mutableStateOf("") }
-        var errorMessage by remember { mutableStateOf<String?>(null) }
-
-        AlertDialog(
-            onDismissRequest = { showForgotPinDialog = false },
-            title = {
-                Text("सुरक्षा पिन रिकव्हर करा", fontWeight = FontWeight.Bold, color = DeepEmerald)
-            },
-            text = {
-                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                    Text(
-                        text = "पिन रीसेट करण्यासाठी मास्टर रिकव्हरी कोड टाका.",
-                        style = MaterialTheme.typography.bodySmall.copy(color = MutedCharcoal)
-                    )
-
-                    OutlinedTextField(
-                        value = recoveryCode,
-                        onValueChange = { recoveryCode = it },
-                        label = { Text("मास्टर रिकव्हरी कोड") },
-                        singleLine = true,
-                        modifier = Modifier.fillMaxWidth(),
-                        shape = RoundedCornerShape(8.dp)
-                    )
-
-                    OutlinedTextField(
-                        value = newPin,
-                        onValueChange = { if (it.length <= 4 && it.all { ch -> ch.isDigit() }) newPin = it },
-                        label = { Text("नवीन पिन (४ अंक)") },
-                        singleLine = true,
-                        visualTransformation = androidx.compose.ui.text.input.PasswordVisualTransformation(),
-                        keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(keyboardType = androidx.compose.ui.text.input.KeyboardType.NumberPassword),
-                        modifier = Modifier.fillMaxWidth(),
-                        shape = RoundedCornerShape(8.dp)
-                    )
-
-                    OutlinedTextField(
-                        value = confirmPin,
-                        onValueChange = { if (it.length <= 4 && it.all { ch -> ch.isDigit() }) confirmPin = it },
-                        label = { Text("नवीन पिन पुन्हा टाका") },
-                        singleLine = true,
-                        visualTransformation = androidx.compose.ui.text.input.PasswordVisualTransformation(),
-                        keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(keyboardType = androidx.compose.ui.text.input.KeyboardType.NumberPassword),
-                        modifier = Modifier.fillMaxWidth(),
-                        shape = RoundedCornerShape(8.dp)
-                    )
-
-                    if (errorMessage != null) {
-                        Text(
-                            text = errorMessage ?: "",
-                            color = BoutiqueError,
-                            style = MaterialTheme.typography.bodySmall
-                        )
-                    }
-                }
-            },
-            confirmButton = {
-                Button(
-                    onClick = {
-                        viewModel.recoverPin(recoveryCode, newPin, confirmPin) { err ->
-                            if (err != null) {
-                                errorMessage = err
-                            } else {
-                                showForgotPinDialog = false
-                                Toast.makeText(context, "पिन यशस्वीरित्या रिकव्हर झाला", Toast.LENGTH_SHORT).show()
-                            }
-                        }
-                    },
-                    colors = ButtonDefaults.buttonColors(containerColor = DeepEmerald),
-                    shape = RoundedCornerShape(8.dp)
-                ) {
-                    Text("पिन रीसेट करा")
-                }
-            },
-            dismissButton = {
-                TextButton(onClick = { showForgotPinDialog = false }) {
-                    Text("रद्द करा")
-                }
-            },
-            containerColor = WarmWhite,
-            shape = RoundedCornerShape(16.dp)
-        )
-    }
-
     // Select Bluetooth Printer Dialog
     if (showPrinterSelectionDialog) {
         val pairedPrinters = remember { bluetoothPrinterManager.getPairedPrinters() }
@@ -1840,92 +1598,6 @@ fun SettingsScreen(
         )
     }
 
-    // WhatsApp Webhook Test Dialog
-    if (showWaTestDialog) {
-        AlertDialog(
-            onDismissRequest = { if (!isTestingWaWebhook) showWaTestDialog = false },
-            icon = {
-                Icon(Icons.Default.Send, contentDescription = null, tint = DeepEmerald, modifier = Modifier.size(32.dp))
-            },
-            title = {
-                Text("व्हॉट्सॲप API चाचणी (Test Webhook)", fontWeight = FontWeight.Bold, color = DeepEmerald)
-            },
-            text = {
-                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                    Text(
-                        "Webhook वर चाचणी मेसेज पाठवण्यासाठी १०-अंकी मोबाईल नंबर टाका:",
-                        style = MaterialTheme.typography.bodySmall.copy(color = MutedCharcoal)
-                    )
-                    OutlinedTextField(
-                        value = waTestPhone,
-                        onValueChange = { if (it.length <= 10) waTestPhone = it.filter { char -> char.isDigit() } },
-                        label = { Text("मोबाईल नंबर (१० अंक)") },
-                        placeholder = { Text("९८७६५४३२१०") },
-                        modifier = Modifier.fillMaxWidth(),
-                        shape = RoundedCornerShape(8.dp),
-                        singleLine = true
-                    )
-                    Text(
-                        "लक्ष द्या: चाचणी करण्यापूर्वी URL आणि API Key सेव्ह असल्याची खात्री करा.",
-                        style = MaterialTheme.typography.labelSmall.copy(color = MutedCharcoal)
-                    )
-                }
-            },
-            confirmButton = {
-                Button(
-                    onClick = {
-                        if (waTestPhone.length != 10) {
-                            Toast.makeText(context, "कृपया योग्य १०-अंकी मोबाईल नंबर टाका", Toast.LENGTH_SHORT).show()
-                            return@Button
-                        }
-                        if (waWebhookUrl.isBlank()) {
-                            Toast.makeText(context, "कृपया आधी Webhook URL प्रविष्ट करा", Toast.LENGTH_SHORT).show()
-                            return@Button
-                        }
-                        // Save current values first
-                        WhatsAppWebhookManager.setWebhookUrl(context, waWebhookUrl)
-                        WhatsAppWebhookManager.setApiKey(context, waApiKey)
-                        WhatsAppWebhookManager.setHeaderName(context, waHeaderName)
-
-                        coroutineScope.launch {
-                            isTestingWaWebhook = true
-                            val result = WhatsAppWebhookManager.testWebhook(context, waTestPhone)
-                            isTestingWaWebhook = false
-                            if (result.isSuccess) {
-                                Toast.makeText(context, result.getOrNull() ?: "चाचणी मेसेज यशस्वी!", Toast.LENGTH_LONG).show()
-                                showWaTestDialog = false
-                            } else {
-                                val err = result.exceptionOrNull()?.message ?: "चाचणी अयशस्वी"
-                                Toast.makeText(context, "त्रुटी: $err", Toast.LENGTH_LONG).show()
-                            }
-                        }
-                    },
-                    enabled = !isTestingWaWebhook,
-                    colors = ButtonDefaults.buttonColors(containerColor = DeepEmerald),
-                    shape = RoundedCornerShape(8.dp)
-                ) {
-                    if (isTestingWaWebhook) {
-                        CircularProgressIndicator(modifier = Modifier.size(14.dp), strokeWidth = 2.dp, color = WarmWhite)
-                        Spacer(modifier = Modifier.width(6.dp))
-                        Text("पाठवत आहे...")
-                    } else {
-                        Text("मेसेज पाठवा")
-                    }
-                }
-            },
-            dismissButton = {
-                TextButton(
-                    onClick = { showWaTestDialog = false },
-                    enabled = !isTestingWaWebhook
-                ) {
-                    Text("रद्द करा")
-                }
-            },
-            containerColor = WarmWhite,
-            shape = RoundedCornerShape(16.dp)
-        )
-    }
-
     if (showBulkReminderConfirmDialog) {
         AlertDialog(
             onDismissRequest = {
@@ -1975,10 +1647,6 @@ fun SettingsScreen(
             confirmButton = {
                 Button(
                     onClick = {
-                        if (!WhatsAppWebhookManager.isConfigured(context)) {
-                            Toast.makeText(context, "कृपया प्रथम Webhook URL आणि API Key सेट करा", Toast.LENGTH_SHORT).show()
-                            return@Button
-                        }
                         coroutineScope.launch {
                             isSendingBulkReminders = true
                             bulkReminderStatusText = "थकबाकीदार शोधून मेसेज पाठवत आहे..."
@@ -2019,90 +1687,7 @@ fun SettingsScreen(
             shape = RoundedCornerShape(16.dp)
         )
     }
-
-    if (showActionTestDialog != null) {
-        AlertDialog(
-            onDismissRequest = {
-                if (!isTestingWaWebhook) showActionTestDialog = null
-            },
-            title = {
-                Text("उधारी आठवण टेम्पलेट चाचणी (Test)", fontWeight = FontWeight.Bold, color = DeepEmerald)
-            },
-            text = {
-                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Text(
-                        text = "हा मेसेज थेट तुमच्या व्हॉट्सॲप नंबरवर पाठवून पाहण्यासाठी खाली १०-अंकी मोबाईल नंबर टाका:",
-                        style = MaterialTheme.typography.bodyMedium.copy(color = MutedCharcoal)
-                    )
-                    OutlinedTextField(
-                        value = waTestPhone,
-                        onValueChange = { waTestPhone = it },
-                        label = { Text("चाचणी मोबाईल नंबर") },
-                        placeholder = { Text("उदा. 9876543210") },
-                        singleLine = true,
-                        keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(keyboardType = androidx.compose.ui.text.input.KeyboardType.Phone),
-                        modifier = Modifier.fillMaxWidth(),
-                        shape = RoundedCornerShape(8.dp)
-                    )
-                }
-            },
-            confirmButton = {
-                Button(
-                    onClick = {
-                        val clean = PhoneUtils.clean10DigitMobileInput(waTestPhone)
-                        if (clean.length != 10) {
-                            Toast.makeText(context, "कृपया वैध १०-अंकी मोबाईल नंबर टाका", Toast.LENGTH_SHORT).show()
-                            return@Button
-                        }
-                        if (waWebhookUrl.isBlank()) {
-                            Toast.makeText(context, "कृपया आधी Webhook URL प्रविष्ट करा", Toast.LENGTH_SHORT).show()
-                            return@Button
-                        }
-                        // Persist inputs first
-                        WhatsAppWebhookManager.setWebhookUrl(context, waWebhookUrl)
-                        WhatsAppWebhookManager.setApiKey(context, waApiKey)
-                        WhatsAppWebhookManager.setHeaderName(context, waHeaderName)
-                        WhatsAppWebhookManager.setReminderPayloadTemplate(context, waReminderTemplate)
-                        WhatsAppWebhookManager.setReminderTemplateName(context, waReminderTemplateName)
-
-                        coroutineScope.launch {
-                            isTestingWaWebhook = true
-                            val result = WhatsAppWebhookManager.testActionTemplate(context, waTestPhone, "REMINDER")
-                            isTestingWaWebhook = false
-                            if (result.isSuccess) {
-                                Toast.makeText(context, result.getOrNull() ?: "चाचणी मेसेज यशस्वी!", Toast.LENGTH_LONG).show()
-                                showActionTestDialog = null
-                            } else {
-                                val err = result.exceptionOrNull()?.message ?: "चाचणी अयशस्वी"
-                                Toast.makeText(context, "त्रुटी: $err", Toast.LENGTH_LONG).show()
-                            }
-                        }
-                    },
-                    enabled = !isTestingWaWebhook,
-                    colors = ButtonDefaults.buttonColors(containerColor = DeepEmerald),
-                    shape = RoundedCornerShape(8.dp)
-                ) {
-                    if (isTestingWaWebhook) {
-                        CircularProgressIndicator(modifier = Modifier.size(14.dp), strokeWidth = 2.dp, color = WarmWhite)
-                        Spacer(modifier = Modifier.width(6.dp))
-                        Text("पाठवत आहे...")
-                    } else {
-                        Text("चाचणी पाठवा")
-                    }
-                }
-            },
-            dismissButton = {
-                TextButton(
-                    onClick = { showActionTestDialog = null },
-                    enabled = !isTestingWaWebhook
-                ) {
-                    Text("रद्द करा")
-                }
-            },
-            containerColor = WarmWhite,
-            shape = RoundedCornerShape(16.dp)
-        )
-    }
 }
+
 
 

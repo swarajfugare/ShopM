@@ -42,13 +42,13 @@ object PrintShareHelper {
     data class ShopSettingsSnapshot(
         val shopName: String = "मातोश्री कलेक्शन",
         val mobile: String = "8208610261",
-        val email: String? = null,
+        val email: String? = "swarajfugare23@gmail.com",
         val address: String = "कोंढारकी",
         val gstin: String = "",
         val showGstin: Boolean = false,
-        val upiId: String = "",
+        val upiId: String = "matoshree@upi",
         val upiDisplayName: String = "मातोश्री कलेक्शन",
-        val logoPath: String? = null
+        val logoPath: String? = "android.resource://com.matoshree.collection/drawable/app_logo"
     )
 
     suspend fun loadShopSettingsSnapshot(): ShopSettingsSnapshot {

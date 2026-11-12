@@ -82,6 +82,11 @@
             </intent-filter>
         </receiver>
 
+        <receiver
+            android:name=".notifications.DailyClosingExactAlarmReceiver"
+            android:enabled="true"
+            android:exported="false" />
+
     </application>
 
 </manifest>

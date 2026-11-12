@@ -6,16 +6,16 @@ import com.matoshree.shopmanager.domain.model.*
 
 @IgnoreExtraProperties
 data class ShopDto(
-    var name: String = "Matoshree Collection",
-    var address: String = "Shop No. 4, Silk Heritage Complex, Kolhapur",
-    var mobile: String = "+91 98765 43210",
-    var email: String = "contact@matoshree.in",
-    var gstin: String = "27AAAAA0000A1Z5",
-    var showGstin: Boolean = true,
+    var name: String = "मातोश्री कलेक्शन",
+    var address: String = "कोंढारकी",
+    var mobile: String = "8208610261",
+    var email: String = "swarajfugare23@gmail.com",
+    var gstin: String = "",
+    var showGstin: Boolean = false,
     var upiId: String = "matoshree@upi",
-    var upiDisplayName: String = "Matoshree Collection",
-    var upiMobile: String = "+91 98765 43210",
-    var logoPath: String? = null,
+    var upiDisplayName: String = "मातोश्री कलेक्शन",
+    var upiMobile: String = "8208610261",
+    var logoPath: String? = "android.resource://com.matoshree.collection/drawable/app_logo",
     var logoUrl: String? = null,
     var logoVersion: Long = 1L,
     var updatedAt: Long = System.currentTimeMillis()
