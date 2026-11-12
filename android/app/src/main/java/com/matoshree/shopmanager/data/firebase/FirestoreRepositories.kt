@@ -627,7 +627,7 @@ class FirestoreCustomerRepository {
             }
 
             batch.commit().await()
-            Log.d(TAG, "FIRESTORE_WRITE entity=CUSTOMER cascade_delete_success bills_deleted=${billsToDelete.size} custId=$customerId mobile=$cleanMobile")
+            Log.d(TAG, "FIRESTORE_WRITE entity=CUSTOMER cascade_delete_success bills_deleted=${billsToDelete.size} custId=$customerId")
         } catch (e: Exception) {
             Log.e(TAG, "FIRESTORE_WRITE entity=CUSTOMER cascade_delete_failed: ${e.message}", e)
         }
@@ -693,7 +693,7 @@ class FirestoreCustomerRepository {
 
             if (billsDeleted > 0 || txsDeleted > 0) {
                 batch.commit().await()
-                Log.d(TAG, "Purged customer history: bills=$billsDeleted txs=$txsDeleted for custId=$customerId mobile=$cleanMobile name=$cleanName")
+                Log.d(TAG, "Purged customer history: bills=$billsDeleted txs=$txsDeleted for custId=$customerId")
             }
         } catch (e: Exception) {
             Log.w(TAG, "Purge customer history error: ${e.message}")
@@ -774,7 +774,7 @@ class FirestoreCustomerRepository {
             }
 
             batch.commit().await()
-            Log.d(TAG, "PURGED specific customer permanently: $targetName / $targetMobile")
+            Log.d(TAG, "PURGED specific customer permanently")
         } catch (e: Exception) {
             Log.w(TAG, "Purge specific customer error: ${e.message}")
         }

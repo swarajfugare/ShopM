@@ -31,6 +31,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.matoshree.shopmanager.security.BiometricAuthHelper
 import com.matoshree.shopmanager.security.GoogleAuthManager
+import com.matoshree.shopmanager.security.PinAuthEngine
 import com.matoshree.shopmanager.security.PinManager
 import com.matoshree.shopmanager.ui.components.CustomKeypad
 import com.matoshree.shopmanager.ui.components.PinIndicator
@@ -90,25 +91,50 @@ class AppLockViewModel(private val pinManager: PinManager) : ViewModel() {
         }
     }
 
+    val setupErrorMessage = MutableStateFlow<String?>(null)
+
     private fun handleSetupStep() {
         viewModelScope.launch {
             if (setupStep.value == 1) {
-                firstEnteredPin = _pinState.value
+                val entered = _pinState.value
+                if (entered in PinAuthEngine.DISALLOWED_PINS) {
+                    _isError.value = true
+                    setupErrorMessage.value = "सुरक्षिततेसाठी १२३४ किंवा २५८० हा पिन वापरू नका. कृपया नवीन सुरक्षित पिन निवडा."
+                    delay(1200)
+                    _pinState.value = ""
+                    _isError.value = false
+                    setupErrorMessage.value = null
+                    return@launch
+                }
+                firstEnteredPin = entered
                 delay(200)
                 _pinState.value = ""
                 setupStep.value = 2
             } else {
                 if (_pinState.value == firstEnteredPin) {
-                    pinManager.setPin(_pinState.value)
-                    isPinSetupMode.value = false
-                    _isUnlocked.value = true
+                    try {
+                        pinManager.setPin(_pinState.value)
+                        isPinSetupMode.value = false
+                        _isUnlocked.value = true
+                    } catch (e: Exception) {
+                        _isError.value = true
+                        setupErrorMessage.value = e.message
+                        delay(1000)
+                        _pinState.value = ""
+                        _isError.value = false
+                        setupStep.value = 1
+                        firstEnteredPin = ""
+                        setupErrorMessage.value = null
+                    }
                 } else {
                     _isError.value = true
+                    setupErrorMessage.value = "पिन जुळला नाही. कृपया पुन्हा प्रयत्न करा."
                     delay(600)
                     _pinState.value = ""
                     _isError.value = false
                     setupStep.value = 1
                     firstEnteredPin = ""
+                    setupErrorMessage.value = null
                 }
             }
         }
@@ -269,17 +295,21 @@ fun AppLockScreen(
 
                 Spacer(modifier = Modifier.height(4.dp))
 
+                val setupErr by viewModel.setupErrorMessage.collectAsState()
+
                 Text(
                     text = when {
-                        isPinSetupMode && setupStep == 1 -> "नवीन ४-अंकी सुरक्षा पिन तयार करा"
+                        !setupErr.isNullOrBlank() -> setupErr!!
+                        isPinSetupMode && setupStep == 1 -> "नवीन ४-अंकी सुरक्षा पिन तयार करा\n(सुरक्षिततेसाठी १२३४ किंवा २५८० हा पिन वापरू नका)"
                         isPinSetupMode && setupStep == 2 -> "पिन निश्चित करा (पिन पुन्हा प्रविष्ट करा)"
                         else -> "दुकान अनलॉक करण्यासाठी ४ अंकी पिन टाका"
                     },
                     style = MaterialTheme.typography.bodyMedium.copy(
-                        color = if (isPinSetupMode) DeepEmerald else MutedCharcoal,
-                        fontWeight = if (isPinSetupMode) FontWeight.SemiBold else FontWeight.Normal,
+                        color = if (!setupErr.isNullOrBlank()) BoutiqueError else if (isPinSetupMode) DeepEmerald else MutedCharcoal,
+                        fontWeight = if (isPinSetupMode || !setupErr.isNullOrBlank()) FontWeight.SemiBold else FontWeight.Normal,
                         fontSize = 13.sp
-                    )
+                    ),
+                    textAlign = androidx.compose.ui.text.style.TextAlign.Center
                 )
 
                 Spacer(modifier = Modifier.height(20.dp))

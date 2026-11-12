@@ -14,11 +14,6 @@ import java.security.MessageDigest
 object AppSecurityShield {
     private const val TAG = "AppSecurityShield"
 
-    // Authorized cryptographic signature SHA-256 fingerprints of official Keystore
-    private val AUTHORIZED_SIGNATURE_SHA256 = setOf(
-        "6F03CF3AFA8C5E772980506B06EB4F17C6827ADA770B8987E1D7A5555920314A"
-    )
-
     data class SecurityStatus(
         val isSecure: Boolean,
         val isRooted: Boolean,
@@ -55,7 +50,27 @@ object AppSecurityShield {
         )
     }
 
+    /**
+     * Release Certificate SHA-256 Verification (Defence in Depth).
+     * The expected certificate fingerprint is read from keystore.properties (certSha256) at build time.
+     * In debug builds: check is skipped to enable seamless local development.
+     * In release builds: missing certificate configuration or signature mismatch fails closed (app blocked).
+     */
     fun checkAppSignature(context: Context): Boolean {
+        if (com.matoshree.shopmanager.BuildConfig.DEBUG) {
+            return true // Skip signature check in debug builds
+        }
+
+        val expectedSha256 = com.matoshree.shopmanager.BuildConfig.RELEASE_CERT_SHA256
+            .replace(":", "")
+            .trim()
+            .uppercase()
+
+        if (expectedSha256.isBlank()) {
+            Log.e(TAG, "Release build blocked: RELEASE_CERT_SHA256 is not configured.")
+            return false // Fail closed in release builds
+        }
+
         return try {
             val signatures = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
                 val packageInfo = context.packageManager.getPackageInfo(
@@ -84,22 +99,22 @@ object AppSecurityShield {
             }
 
             if (signatures == null || signatures.isEmpty()) {
-                return com.matoshree.shopmanager.BuildConfig.DEBUG
+                return false
             }
 
             val md = MessageDigest.getInstance("SHA-256")
             for (sig in signatures) {
                 val digest = md.digest(sig.toByteArray())
                 val hexString = digest.joinToString("") { "%02X".format(it) }
-                if (AUTHORIZED_SIGNATURE_SHA256.contains(hexString)) {
+                if (hexString.equals(expectedSha256, ignoreCase = true)) {
                     return true
                 }
             }
-            Log.w(TAG, "Signature verification failed! APK has been modified or re-signed.")
+            Log.w(TAG, "Signature verification failed! Signature does not match release certificate.")
             false
         } catch (e: Exception) {
             Log.w(TAG, "Signature check notice: ${e.message}")
-            com.matoshree.shopmanager.BuildConfig.DEBUG
+            false
         }
     }
 

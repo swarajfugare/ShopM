@@ -7,15 +7,15 @@ import com.matoshree.shopmanager.domain.model.*
 @IgnoreExtraProperties
 data class ShopDto(
     var name: String = "मातोश्री कलेक्शन",
-    var address: String = "कोंढारकी",
-    var mobile: String = "8208610261",
-    var email: String = "swarajfugare23@gmail.com",
+    var address: String = "",
+    var mobile: String = "",
+    var email: String = "",
     var gstin: String = "",
     var showGstin: Boolean = false,
-    var upiId: String = "matoshree@upi",
+    var upiId: String = "",
     var upiDisplayName: String = "मातोश्री कलेक्शन",
-    var upiMobile: String = "8208610261",
-    var logoPath: String? = "android.resource://com.matoshree.collection/drawable/app_logo",
+    var upiMobile: String = "",
+    var logoPath: String? = null,
     var logoUrl: String? = null,
     var logoVersion: Long = 1L,
     var updatedAt: Long = System.currentTimeMillis()

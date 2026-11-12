@@ -1,0 +1,12 @@
+{
+  "name": "matoshree-security-rules-tests",
+  "version": "1.0.0",
+  "description": "Zero-Trust Security Rules Unit Testing Suite for Matoshree Collection",
+  "scripts": {
+    "test:rules": "mocha rules-tests/*.test.js --timeout 10000 --exit"
+  },
+  "devDependencies": {
+    "@firebase/rules-unit-testing": "^3.0.4",
+    "mocha": "^11.8.0"
+  }
+}

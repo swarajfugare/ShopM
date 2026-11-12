@@ -78,7 +78,7 @@ class DeviceTrustManager(private val context: Context) {
                     ),
                     SetOptions.merge()
                 ).await()
-                Log.d(TAG, "Device $devId successfully authorized via Google Login ($email) & registered in Firestore")
+                Log.d(TAG, "Device successfully authorized via Google Login and registered in Firestore")
             } catch (e: Exception) {
                 Log.w(TAG, "Failed to register device in cloud: ${e.message}")
             }

@@ -18,7 +18,7 @@ import kotlinx.coroutines.tasks.await
 class GoogleAuthManager(private val context: Context) {
     private val TAG = "GoogleAuthManager"
 
-    private val prefs: SharedPreferences by lazy {
+    private val prefs: SharedPreferences? by lazy {
         try {
             val masterKey = MasterKey.Builder(context)
                 .setKeyScheme(MasterKey.KeyScheme.AES256_GCM)
@@ -31,7 +31,11 @@ class GoogleAuthManager(private val context: Context) {
                 EncryptedSharedPreferences.PrefValueEncryptionScheme.AES256_GCM
             )
         } catch (e: Exception) {
-            context.getSharedPreferences("matoshree_secure_auth_prefs_fallback", Context.MODE_PRIVATE)
+            // Fail closed: Never fallback to plaintext preferences
+            try {
+                context.deleteSharedPreferences("matoshree_secure_auth_prefs")
+            } catch (_: Exception) {}
+            null
         }
     }
 
@@ -40,6 +44,7 @@ class GoogleAuthManager(private val context: Context) {
         private const val KEY_AUTH_NAME = "auth_google_name"
         private const val KEY_AUTH_TIME = "auth_google_timestamp"
 
+        // Authoritative Owner Whitelist (Must strictly match firestore.rules and storage.rules)
         val AUTHORIZED_EMAILS = setOf(
             "swarajfugare23@gmail.com",
             "sadhanafugare86@gmail.com"
@@ -83,7 +88,7 @@ class GoogleAuthManager(private val context: Context) {
         }
 
         // 2. Local verified Keystore session
-        val savedEmail = prefs.getString(KEY_AUTH_EMAIL, null)?.lowercase()?.trim()
+        val savedEmail = prefs?.getString(KEY_AUTH_EMAIL, null)?.lowercase()?.trim()
         if (savedEmail != null && AUTHORIZED_EMAILS.contains(savedEmail)) {
             return true
         }
@@ -106,7 +111,7 @@ class GoogleAuthManager(private val context: Context) {
             if (email != null && AUTHORIZED_EMAILS.contains(email)) return email
         }
 
-        val saved = prefs.getString(KEY_AUTH_EMAIL, null)?.lowercase()?.trim()
+        val saved = prefs?.getString(KEY_AUTH_EMAIL, null)?.lowercase()?.trim()
         if (saved != null && AUTHORIZED_EMAILS.contains(saved)) return saved
 
         val lastAccount = GoogleSignIn.getLastSignedInAccount(context)
@@ -128,7 +133,7 @@ class GoogleAuthManager(private val context: Context) {
                     try {
                         val credential = GoogleAuthProvider.getCredential(idToken, null)
                         FirebaseAuth.getInstance().signInWithCredential(credential).await()
-                        Log.d(TAG, "Firebase Auth successfully verified with Google ID Token: $email")
+                        Log.d(TAG, "Firebase Auth successfully verified with Google ID Token")
                     } catch (fe: Exception) {
                         Log.w(TAG, "Firebase credential link warning (offline or fallback active): ${fe.message}")
                     }
@@ -137,13 +142,13 @@ class GoogleAuthManager(private val context: Context) {
                 saveSession(email, account.displayName ?: "Owner")
                 Result.success(email)
             } else {
-                Log.w(TAG, "Google Login Denied: Unauthorized account: $email")
+                Log.w(TAG, "Google Login Denied: Unauthorized account")
                 googleSignInClient.signOut()
                 clearSession()
                 Result.failure(Exception("प्रवेश नाकारला: हे खाते अधिकृत नाही. केवळ अधिकृत मालकच प्रवेश करू शकतात."))
             }
         } catch (e: ApiException) {
-            Log.e(TAG, "Google Sign-in failed with code: ${e.statusCode}, message: ${e.message}")
+            Log.e(TAG, "Google Sign-in failed with code: ${e.statusCode}")
             val msg = when (e.statusCode) {
                 12501 -> "लॉगिन रद्द केले."
                 12500 -> "Google प्रमाणीकरण त्रुटी (12500). कृपया Firebase Console मध्ये SHA-1 की जोडल्याची खात्री करा."
@@ -158,11 +163,11 @@ class GoogleAuthManager(private val context: Context) {
     }
 
     private fun saveSession(email: String, name: String) {
-        prefs.edit()
-            .putString(KEY_AUTH_EMAIL, email)
-            .putString(KEY_AUTH_NAME, name)
-            .putLong(KEY_AUTH_TIME, System.currentTimeMillis())
-            .apply()
+        prefs?.edit()
+            ?.putString(KEY_AUTH_EMAIL, email)
+            ?.putString(KEY_AUTH_NAME, name)
+            ?.putLong(KEY_AUTH_TIME, System.currentTimeMillis())
+            ?.apply()
     }
 
     fun signOut(onComplete: () -> Unit = {}) {
@@ -176,6 +181,6 @@ class GoogleAuthManager(private val context: Context) {
     }
 
     private fun clearSession() {
-        prefs.edit().clear().apply()
+        prefs?.edit()?.clear()?.apply()
     }
 }

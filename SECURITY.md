@@ -1,86 +1,119 @@
-# Matoshree Collection Shop Manager — Security Architecture & Fortification Guide (v3.3.0)
+# Matoshree Collection — Security Architecture & Operation Manual
 
-> **मातोश्री कलेक्शन (Matoshree Collection) - सुरक्षा व आर्किटेक्चर मार्गदर्शक**  
-> **Score Upgrade**: 30/100 ➔ **98/100 (Bank-Grade Zero-Trust Production Ready)**
+## 1. Overview & Access Architecture
 
----
+Matoshree Collection Shop Manager implements a multi-layered defence-in-depth model for retail shop operations, customer management, inventory, and billing.
 
-## १. क्लॉडने (Claude) पूर्वी 30/100 रेटिंग का दिले होते? (Root Cause Analysis)
-
-सार्वजनिक GitHub रेपो किंवा रिव्हर्स इंजिनिअरिंग झालेल्या APK मधून खालील संवेदनशील धोके क्लॉडला आढळले होते:
-1. **P0 - लेगसी Hostinger API ऑटो-लॉगिन**: जुन्या कोडमध्ये `9876543210` आणि `1234` पिनसह होस्टिंगर सर्व्हरवर लॉगिन कॉल जात होता.
-2. **P0 - हार्डकोडेड WhatsApp CRM Key**: कोडमध्ये थेट `wacrm_live_...` लाईव्ह API की उपलब्ध होती.
-3. **P0 - डीफॉल्ट पिन हॅश आणि मास्टर रिकव्हरी कोड**: `1234` चा MD5/SHA हॅश आणि `MATOSHREE2026` हा मास्टर पासवर्ड ॲप कोडमध्ये उघडा होता.
-4. **P1 - अनधिकृत अनामित (Anonymous) फायरबेस लॉगिन**: ॲप गुगल लॉगिन दाखवत होते, परंतु प्रत्यक्षात फायरबेसमध्ये अनामित सेशन उघडत होते, ज्यामुळे सर्व्हरवरील सुरक्षा रूल्स योग्यरित्या काम करत नव्हते.
-5. **P1 - स्क्रीन प्रोटेक्शन व ऑटो-लॉकचा अभाव**: ॲप बॅकग्राउंडमध्ये गेल्यावर लॉक न होणे आणि रीसेंट ॲप्समध्ये दुकानाची सर्व बिले व गल्ला उघडा दिसणे.
-
----
-
-## २. व्हर्जन ३.३.० मध्ये केलेले १००% अचूक बदल (Security Fortifications Applied)
-
-### [P0 - अत्यंत गंभीर (Critical)]
-- ✅ **हार्डवेअर कीस्टोअर पिन सुरक्षा (Device-Local Keystore HMAC-SHA256)**:
-  - ॲपमधून सर्व डीफॉल्ट हॅश (`DEFAULT_PIN_HASH`), मास्टर रिकव्हरी कोड (`MATOSHREE2026`) आणि फायरबेसमधील पिन पूर्णपणे नष्ट केला.
-  - पिन आता १६-बाईट यादृच्छिक (Random) सॉल्टसह Android Keystore मधील HMAC-SHA256 द्वारे सुरक्षित केला जातो.
-  - ब्रूट-फोर्स टाळण्यासाठी कॉन्स्टंट-टाइम तुलना (`MessageDigest.isEqual`) आणि प्रोग्रेसिव्ह लॉकआउट (३ चुका: ३० सेकंद, ५ चुका: ५ मिनिटे, १० चुका: १५ मिनिटे).
-  - पिन विसरल्यास बॅकडोअर पासवर्ड नाही; केवळ मालकाच्या गुगल खात्याची पुन्हा पडताळणी करूनच नवीन पिन सेट करता येतो.
-- ✅ **WhatsApp क्रेडेंशियल्स कीस्टोअर एनक्रिप्शन**:
-  - कोडमधून थेट API की आणि Webhook URL पूर्ण काढून टाकली.
-  - आता ही माहिती हार्डवेअर-एनक्रिप्टेड `EncryptedSharedPreferences` (AES256) मध्ये सेव्ह होते.
-  - ॲप सेटिंग्जमध्ये मालकाला ही की पासवर्ड स्वरूपात (`••••••••`) पाहण्याची व बदलण्याची सुविधा दिली.
-- ✅ **लेगसी Hostinger REST API थर पूर्णपणे हटवला**:
-  - `ApiClient.kt`, `MatoshreeApiService.kt`, `ApiModels.kt` आणि सर्व हार्डकोडेड फोन/पिन कॉल्स डिलीट केले.
-  - आता ॲप १००% सुरक्षित, ऑफलाइन-फर्स्ट Cloud Firestore द्वारेच चालते.
-
-### [P1 - उच्च दर्जाची सुरक्षा (High Priority)]
-- ✅ **Google ID Token द्वारे खरी Firebase Auth पडताळणी**:
-  - अनामित लॉगिन (`signInAnonymously`) पूर्णपणे काढून टाकले.
-  - गुगल लॉगिन झाल्यावर मिळालेला खरा `idToken` फायरबेस ऑथला (`GoogleAuthProvider.getCredential`) दिला जातो.
-  - `FirebaseAuth.currentUser` हाच आता ऑथेंटिकेशनचा एकमेव अधिकृत स्त्रोत आहे.
-- ✅ **सर्व्हर-साइड Firestore & Storage Zero-Trust रूल्स**:
-  - रूल्समध्ये `isAuthorizedOwner()` फंक्शन जोडले:
-    1. युझर गुगल खात्याने लॉग इन असणे बंधनकारक (`request.auth.token.firebase.sign_in_provider == 'google.com'`).
-    2. ईमेल व्हेरीफाईड असणे बंधनकारक (`email_verified == true`).
-    3. ईमेल मालकांच्या अधिकृत यादीत असणे बंधनकारक (`swarajfugare23@gmail.com`, `sadhanafugare86@gmail.com`).
-  - सर्व बाकीच्या पाथ्सवर `default deny` (`allow read, write: if false;`).
-- ✅ **प्रोसेस-वाईड ऑटो-लॉक मॅनेजर (`AppLockManager`)**:
-  - `ProcessLifecycleOwner` वापरून ॲप बॅकग्राउंडमध्ये जाताच टाइमर सुरू होतो.
-  - ३० सेकंद (डीफॉल्ट), १ मिनिट, ५ मिनिटे किंवा लगेच लॉक करण्याचे नियंत्रण सेटिंग्जमध्ये दिले.
-- ✅ **स्क्रीन व रीसेंट ॲप्स प्रिव्ह्यू प्रोटेक्शन (`FLAG_SECURE`)**:
-  - स्क्रीनशॉट आणि स्क्रीन रेकॉर्डिंग पूर्णपणे ब्लॉक.
-  - फोनच्या रिसेंट ॲप्स (मल्टीटास्किंग) मध्ये दुकानाचे आर्थिक आकडे आणि पावत्या लपवल्या जातात. सेटिंग्जमधून हे चालू/बंद करता येते.
-
-### [P2 - मध्यम/लहान सुधारणा (Hardening & Privacy)]
-- ✅ **कॅशे आणि फाईल शेअरिंग आयसोलेशन**: `file_paths.xml` मधील `path="."` काढून समर्पित `cache/receipts/`, `cache/labels/`, `cache/reports/` सब-डायरेक्टरीज केल्या.
-- ✅ **प्रायव्हेट नोटिफिकेशन्स (`VISIBILITY_PRIVATE`)**: लॉकस्क्रीनवर ग्राहकांची नावे किंवा उधारीचे आकडे न दिसता सुरक्षित सूचना दिसतात.
-- ✅ **प्रोगार्ड (R8) लॉग स्ट्रिपिंग**: रिलीज बिल्डमधून सर्व संवेदनशील डिबग लॉगिंग आपोआप काढून टाकले जाते.
+### Authentication & Authorization Flow
+1. **Google Identity Authentication**:
+   - The owner signs in using Google Sign-In.
+   - The app acquires an authenticated Google ID Token and exchanges it with Firebase Authentication using `GoogleAuthProvider.getCredential(idToken)`.
+   - `FirebaseAuth.currentUser` serves as the authoritative authentication state. Anonymous authentication is disabled.
+2. **Device-Local PIN Verification**:
+   - Following Google authentication, the user authenticates via a 4-digit PIN.
+   - The PIN is verified locally on the device using Android Keystore cryptographic signatures.
+3. **Cloud Access**:
+   - Cloud Firestore and Cloud Storage enforce access control server-side through security rules, evaluating the user's verified Google provider token against the authorized owner list.
 
 ---
 
-## ३. मालकाने करावयाच्या मॅन्युअल पायऱ्या (Owner Manual Checklist)
+## 2. Protection Mechanisms & Implementation Details
 
-1. **WhatsApp CRM API Key बदला (Rotate)**:
-   - wa-crm.refixer.in डॅशबोर्डवर जाऊन जुनी API Key रिव्होक (डिलीट) करा व नवीन API Key तयार करा.
-   - ॲप उघडा > सेटिंग्ज > "व्हॉट्सॲप उधारी स्मरण" कार्डमध्ये "बदला" बटणावर क्लिक करा आणि नवीन URL व Key सेव्ह करा.
+### Device-Local PIN Security
+- **Cryptographic Hashing**: The PIN is signed using a non-extractable HMAC-SHA256 key generated inside the `AndroidKeyStore` (`KeyProperties.PURPOSE_SIGN`). The key generator attempts StrongBox-backed hardware keystore where supported, falling back to standard hardware Keystore.
+- **Salt Generation**: A cryptographically random 16-byte salt (`SecureRandom`) is generated per installation and stored alongside the signed digest: `pin_mac = HMAC(keystoreKey, salt || pin)`.
+- **Constant-Time Comparison**: Comparison of the computed MAC and stored MAC is performed using `MessageDigest.isEqual` to prevent side-channel timing attacks.
+- **Proactive Lockout Rate Limiting**:
+  - 3 failed attempts: 30-second lockout.
+  - 5 failed attempts: 5-minute lockout.
+  - 10 failed attempts: 15-minute lockout.
+  - >10 failed attempts: 1-hour lockout.
+  - Lockout counters and expiration timestamps are stored exclusively in Keystore-backed `EncryptedSharedPreferences`.
+- **No Default PIN or Backdoors**:
+  - The application contains no default PINs, static hashes, or master recovery passwords.
+  - Insecure PIN candidates (`1234`, `2580`) are rejected during setup.
+  - PIN reset is only possible by re-authenticating with the verified Google account.
 
-2. **Firebase Console मधील तपासणी**:
-   - Firebase Console > **Authentication** > **Sign-in method** मध्ये **Google** सक्षम (Enabled) असल्याची खात्री करा.
-   - **Firestore Database** > **Rules** मध्ये प्रोजेक्टमधील नवीन `firestore.rules` अपलोड/पब्लिश करा.
-   - **Storage** > **Rules** मध्ये `storage.rules` अपलोड/पब्लिश करा.
-   *(कमांड: `firebase deploy --only firestore:rules,storage`)*
+### Storage & Session Management
+- **Hardware Encryption**: Tokens and sensitive configuration (including WhatsApp CRM credentials) are stored using `EncryptedSharedPreferences` backed by `MasterKey` (AES256-GCM / AES256-SIV).
+- **Fail-Closed Behavior**: If `EncryptedSharedPreferences` or the Android Keystore throws an exception, the app does not fall back to unencrypted storage. The corrupted keys and preferences are deleted, the local session is cleared, and re-authentication is required.
+- **Legacy Storage Purge**: All legacy unencrypted or fallback preferences are purged upon initialization.
 
-3. **Google Cloud Console API निर्बंध (API Restrictions)**:
-   - Google Cloud Console > Credentials मध्ये जा.
-   - Android API Key ला पॅकेज नाव `com.matoshree.collection` आणि SHA-1 फिंगरप्रिंट लावून सुरक्षित करा.
+### Screen & Inactivity Protection
+- **FLAG_SECURE**: WindowManager `FLAG_SECURE` is applied to prevent screen capture, screen recording, and to obscure the app's contents in the Android Recent Apps / multitasking thumbnail view. A toggle is provided in Settings.
+- **Process-Wide Auto-Lock**: `AppLockManager` monitors application lifecycle via `ProcessLifecycleOwner`. When the app remains in the background longer than the configured timeout (immediately, 30s default, 1m, or 5m), it automatically locks and requires PIN or biometric verification to resume.
+
+### Server-Side Cloud Rules
+- **Firestore Rules**:
+  - `isAuthorizedOwner()` verifies that `request.auth != null`, `sign_in_provider == 'google.com'`, `email_verified == true`, and that the token email matches the authorized owner list.
+  - Financial validation: bill documents require non-negative `finalAmount` numeric values.
+  - Customer, product, and udhari documents enforce field length and numeric boundary checks.
+  - Default deny: any unmatched collection path is explicitly denied.
+- **Storage Rules**:
+  - Branding image uploads require verified owner credentials, max 5 MB file size, and image MIME types (`image/png`, `image/jpeg`, `image/webp`).
+  - All other paths default to deny.
+
+### Privacy & Build Protections
+- **Scoped File Sharing**: `file_paths.xml` restricts `FileProvider` sharing exclusively to isolated subdirectories (`cache/receipts/`, `cache/labels/`, `cache/reports/`).
+- **Private Notifications**: All notification builders specify `NotificationCompat.VISIBILITY_PRIVATE`, hiding customer names, amounts, and balances from the lock screen.
+- **Log Stripping & Sanitization**: ProGuard / R8 rules strip debug log statements in release builds. Application logs do not output personal customer details, phone numbers, emails, tokens, or transaction amounts.
+- **Release Signing**: Release builds require a configured `keystore.properties` and verify the expected certificate fingerprint (defence in depth). If `keystore.properties` is missing, `assembleRelease` fails with an explicit error.
 
 ---
 
-## ४. बिल्ड आणि रिलीज पडताळणी
+## 3. Known Limitations
 
-- **Version Name**: `3.3.0`
-- **Version Code**: `43`
-- **APK फाईल्स**:
-  - `Matoshree-Collection-v3.3.0-Release.apk`
-  - `Matoshree-Collection-Latest.apk`
-- **Unit Tests**: `testReleaseUnitTest` (सर्व सुरक्षा व लॉजिक युनिट टेस्ट्स यशस्वी).
-- **ProGuard / R8**: Minified, Shrunk, obfuscated, debug logs stripped.
+1. **Rooted / Compromised Devices**:
+   - If the device operating system is rooted, an attacker with root privileges can inspect application memory or hook native methods. Root detection and Frida/debugger detection are present as defence in depth but cannot guarantee integrity on compromised operating systems.
+2. **Local Session Trust**:
+   - An authenticated session on an unlocked device permits offline operations. Biometric and PIN authentication protect against physical opportunistic access, but not against hardware extraction from a compromised kernel.
+3. **Unencrypted Local Room Database**:
+   - The local SQLite Room database is stored within the private Android sandbox (`/data/data/com.matoshree.collection/databases/`), protected by Linux OS UID isolation, but is not SQLCipher-encrypted at rest.
+4. **Unencrypted Offline Firestore Cache**:
+   - The Cloud Firestore offline persistence cache is stored within the private app sandbox and is unencrypted at rest.
+5. **Sideloaded Distribution**:
+   - Because the application is sideloaded rather than distributed through Google Play, Google Play Protect / Play Integrity API attestation is not available to verify device software authenticity.
+
+---
+
+## 4. Owner Manual Operations Checklist
+
+The following tasks require access to external cloud consoles and local offline keys and must be performed directly by the owner:
+
+1. **Rotate WhatsApp CRM API Key**:
+   - Because the previous API key was exposed in older git commits, access the WhatsApp CRM dashboard and regenerate/revoke the API key.
+   - Open app **Settings** > **WhatsApp Reminders** > **Edit** and enter the newly generated URL and API Key.
+
+2. **Deploy Security Rules**:
+   - Deploy the updated rules to Firebase using the Firebase CLI:
+     ```bash
+     firebase deploy --only firestore:rules,storage
+     ```
+   - In the Firebase Console (**Authentication** > **Sign-in method**):
+     - Ensure the **Google** sign-in provider is enabled.
+     - Ensure the **Anonymous** sign-in provider is disabled.
+     - Ensure **Email/Password** sign-in is disabled.
+     - Delete any existing anonymous user accounts in Authentication > Users.
+
+3. **Google Cloud Console API Key Restrictions**:
+   - Navigate to Google Cloud Console > APIs & Services > Credentials.
+   - Restrict the Android API Key used by Firebase:
+     - Set Application Restrictions to **Android apps**.
+     - Add package name `com.matoshree.collection` and the release keystore SHA-1 fingerprint.
+   - Download the updated `google-services.json` if configuration changed.
+
+4. **Release Keystore Setup**:
+   - Generate a private release keystore using `keytool`:
+     ```bash
+     keytool -genkey -v -keystore release-keystore.jks -alias matoshree-release -keyalg RSA -keysize 2048 -validity 10000
+     ```
+   - Store the keystore file and passwords in a secure offline location. Never commit the keystore or `keystore.properties` to version control.
+   - Copy `keystore.properties.example` to `keystore.properties` and fill in the paths and passwords.
+   - Obtain the SHA-256 fingerprint:
+     ```bash
+     keytool -list -v -keystore release-keystore.jks
+     ```
+     Add the hex fingerprint (without colons) to `certSha256` in `keystore.properties`.
+
+5. **Historical Secret Invalidation**:
+   - Any credentials present in past git commits (prior to v3.3.0) must be considered burned. Rotate all external API keys and revoke past tokens. Optionally, prune past repository history using `git-filter-repo`.

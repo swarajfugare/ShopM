@@ -2,15 +2,20 @@ package com.matoshree.shopmanager.security
 
 import android.content.Context
 import android.content.SharedPreferences
+import android.security.keystore.KeyGenParameterSpec
+import android.security.keystore.KeyProperties
 import androidx.biometric.BiometricManager
 import androidx.biometric.BiometricPrompt
 import androidx.core.content.ContextCompat
 import androidx.fragment.app.FragmentActivity
 import androidx.security.crypto.EncryptedSharedPreferences
 import androidx.security.crypto.MasterKey
+import java.security.KeyStore
 import java.security.MessageDigest
 import java.security.SecureRandom
+import javax.crypto.KeyGenerator
 import javax.crypto.Mac
+import javax.crypto.SecretKey
 import javax.crypto.spec.SecretKeySpec
 
 /**
@@ -58,143 +63,149 @@ class TokenStorage(context: Context) {
     fun getUserName(): String = prefs?.getString("user_name", "Matoshree Admin") ?: "Matoshree Admin"
 }
 
+object LegacyPrefsPurge {
+    fun purge(context: Context) {
+        val legacy = listOf(
+            "matoshree_security_prefs",
+            "matoshree_secure_pin_store_fallback",
+            "matoshree_secure_auth_prefs_fallback",
+            "matoshree_fallback_tokens",
+            "matoshree_google_auth_prefs"
+        )
+        for (name in legacy) {
+            try {
+                context.deleteSharedPreferences(name)
+            } catch (_: Exception) {}
+        }
+    }
+}
+
+object AndroidKeystoreHmacSigner : HmacSigner {
+    private const val ANDROID_KEYSTORE = "AndroidKeyStore"
+    private const val PIN_KEY_ALIAS = "MatoshreePinHmacKey"
+
+    @Synchronized
+    private fun getOrCreateKey(): SecretKey {
+        val ks = KeyStore.getInstance(ANDROID_KEYSTORE).apply { load(null) }
+        if (ks.containsAlias(PIN_KEY_ALIAS)) {
+            val entry = ks.getEntry(PIN_KEY_ALIAS, null) as? KeyStore.SecretKeyEntry
+            if (entry != null) return entry.secretKey
+        }
+
+        // Try StrongBox backed first on Android P+
+        return try {
+            generateKey(useStrongBox = true)
+        } catch (e: Throwable) {
+            // Fall back to standard AndroidKeyStore
+            generateKey(useStrongBox = false)
+        }
+    }
+
+    private fun generateKey(useStrongBox: Boolean): SecretKey {
+        val kg = KeyGenerator.getInstance(KeyProperties.KEY_ALGORITHM_HMAC_SHA256, ANDROID_KEYSTORE)
+        val specBuilder = KeyGenParameterSpec.Builder(
+            PIN_KEY_ALIAS,
+            KeyProperties.PURPOSE_SIGN
+        ).apply {
+            if (useStrongBox && android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.P) {
+                try {
+                    setIsStrongBoxBacked(true)
+                } catch (_: Throwable) {}
+            }
+        }
+        kg.init(specBuilder.build())
+        return kg.generateKey()
+    }
+
+    fun deleteKey() {
+        try {
+            val ks = KeyStore.getInstance(ANDROID_KEYSTORE).apply { load(null) }
+            if (ks.containsAlias(PIN_KEY_ALIAS)) {
+                ks.deleteEntry(PIN_KEY_ALIAS)
+            }
+        } catch (_: Exception) {}
+    }
+
+    override fun computeHmac(salt: ByteArray, pin: String): ByteArray {
+        val secretKey = getOrCreateKey()
+        val mac = Mac.getInstance(KeyProperties.KEY_ALGORITHM_HMAC_SHA256)
+        mac.init(secretKey)
+        mac.update(salt)
+        mac.update(pin.toByteArray(Charsets.UTF_8))
+        return mac.doFinal()
+    }
+}
+
+class EncryptedSharedPreferencesPinStorage(private val prefs: SharedPreferences) : PinStorage {
+    override fun getString(key: String): String? = prefs.getString(key, null)
+    override fun putString(key: String, value: String) { prefs.edit().putString(key, value).apply() }
+    override fun getLong(key: String, defValue: Long): Long = prefs.getLong(key, defValue)
+    override fun putLong(key: String, value: Long) { prefs.edit().putLong(key, value).apply() }
+    override fun getInt(key: String, defValue: Int): Int = prefs.getInt(key, defValue)
+    override fun putInt(key: String, value: Int) { prefs.edit().putInt(key, value).apply() }
+    override fun getBoolean(key: String, defValue: Boolean): Boolean = prefs.getBoolean(key, defValue)
+    override fun putBoolean(key: String, value: Boolean) { prefs.edit().putBoolean(key, value).apply() }
+    override fun contains(key: String): Boolean = prefs.contains(key)
+    override fun remove(key: String) { prefs.edit().remove(key).apply() }
+    override fun clear() { prefs.edit().clear().apply() }
+}
+
 /**
  * Zero-Trust Local PIN Manager.
- * - Stores PIN using non-extractable HMAC-SHA256 with a cryptographically generated 16-byte random salt.
+ * - Stores PIN using non-extractable Android Keystore HMAC-SHA256 with a cryptographically generated 16-byte random salt.
  * - Compares hashes in constant time to defeat side-channel timing attacks.
- * - Stores lockout timestamps and failure counters in Keystore-backed EncryptedSharedPreferences.
+ * - Stores lockout timestamps and failure counters in Keystore-backed EncryptedSharedPreferences only.
+ * - Never uses plaintext fallback: on keystore corruption, purges keys and requires re-login.
  * - Contains NO default PINs, backdoor hashes, or master passwords.
  * - Recovery is exclusively achieved by re-authenticating with the verified Google Account.
  */
-class PinManager(context: Context) {
-    private val prefs: SharedPreferences by lazy {
+class PinManager(private val context: Context) {
+    init {
+        LegacyPrefsPurge.purge(context)
+    }
+
+    private val engine: PinAuthEngine? by lazy {
         try {
             val masterKey = MasterKey.Builder(context)
                 .setKeyScheme(MasterKey.KeyScheme.AES256_GCM)
                 .build()
-            EncryptedSharedPreferences.create(
+            val prefs = EncryptedSharedPreferences.create(
                 context,
                 "matoshree_secure_pin_store",
                 masterKey,
                 EncryptedSharedPreferences.PrefKeyEncryptionScheme.AES256_SIV,
                 EncryptedSharedPreferences.PrefValueEncryptionScheme.AES256_GCM
             )
+            PinAuthEngine(
+                storage = EncryptedSharedPreferencesPinStorage(prefs),
+                signer = AndroidKeystoreHmacSigner,
+                clock = SystemClock
+            )
         } catch (e: Exception) {
-            // Fail closed with isolated private storage if keystore is re-initializing
-            context.getSharedPreferences("matoshree_secure_pin_store_fallback", Context.MODE_PRIVATE)
+            // Fail closed: Never fallback to plaintext preferences!
+            try {
+                context.deleteSharedPreferences("matoshree_secure_pin_store")
+                AndroidKeystoreHmacSigner.deleteKey()
+            } catch (_: Exception) {}
+            null
         }
     }
 
-    companion object {
-        private const val KEY_PIN_HMAC = "secure_pin_hmac_v3"
-        private const val KEY_PIN_SALT = "secure_pin_salt_v3"
-        private const val KEY_FAILED_PIN_ATTEMPTS = "failed_pin_attempts"
-        private const val KEY_PIN_LOCKOUT_UNTIL = "pin_lockout_until"
-    }
-
-    fun isPinLockedOut(): Boolean {
-        val until = prefs.getLong(KEY_PIN_LOCKOUT_UNTIL, 0L)
-        return System.currentTimeMillis() < until
-    }
-
-    fun getPinLockoutRemainingSeconds(): Long {
-        val until = prefs.getLong(KEY_PIN_LOCKOUT_UNTIL, 0L)
-        val diff = until - System.currentTimeMillis()
-        return if (diff > 0) (diff / 1000) else 0L
-    }
-
-    fun recordFailedPinAttempt(): Long {
-        val count = prefs.getInt(KEY_FAILED_PIN_ATTEMPTS, 0) + 1
-        val editor = prefs.edit().putInt(KEY_FAILED_PIN_ATTEMPTS, count)
-        val lockoutMs = when {
-            count >= 10 -> 15 * 60 * 1000L // 15 mins
-            count >= 5 -> 5 * 60 * 1000L   // 5 mins
-            count >= 3 -> 30 * 1000L       // 30 secs
-            else -> 0L
-        }
-        if (lockoutMs > 0) {
-            editor.putLong(KEY_PIN_LOCKOUT_UNTIL, System.currentTimeMillis() + lockoutMs)
-        }
-        editor.apply()
-        return lockoutMs / 1000L
-    }
-
-    fun resetPinFailedAttempts() {
-        prefs.edit()
-            .putInt(KEY_FAILED_PIN_ATTEMPTS, 0)
-            .remove(KEY_PIN_LOCKOUT_UNTIL)
-            .apply()
-    }
-
-    fun isPinSet(): Boolean = prefs.contains(KEY_PIN_HMAC) && prefs.contains(KEY_PIN_SALT)
-
-    private fun computeHmac(pin: String, salt: ByteArray): ByteArray {
-        val mac = Mac.getInstance("HmacSHA256")
-        val secretKey = SecretKeySpec(salt, "HmacSHA256")
-        mac.init(secretKey)
-        return mac.doFinal(pin.toByteArray(Charsets.UTF_8))
-    }
-
+    fun isPinLockedOut(): Boolean = engine?.isPinLockedOut() ?: false
+    fun getPinLockoutRemainingSeconds(): Long = engine?.getPinLockoutRemainingSeconds() ?: 0L
+    fun recordFailedPinAttempt(): Long = engine?.recordFailedPinAttempt() ?: 0L
+    fun resetPinFailedAttempts() { engine?.resetPinFailedAttempts() }
+    fun isPinSet(): Boolean = engine?.isPinSet() ?: false
     fun setPin(pin: String) {
-        require(pin.length == 4 && pin.all { it.isDigit() }) { "PIN must be exactly 4 digits" }
-        val salt = ByteArray(16)
-        SecureRandom().nextBytes(salt)
-        val hmac = computeHmac(pin, salt)
-
-        val saltHex = salt.joinToString("") { "%02x".format(it) }
-        val hmacHex = hmac.joinToString("") { "%02x".format(it) }
-
-        prefs.edit()
-            .putString(KEY_PIN_SALT, saltHex)
-            .putString(KEY_PIN_HMAC, hmacHex)
-            .apply()
-        resetPinFailedAttempts()
+        val eng = engine ?: throw IllegalStateException("Secure keystore unavailable. Re-authentication required.")
+        eng.setPin(pin)
     }
-
     fun savePin(pin: String) = setPin(pin)
-
-    fun verifyPin(enteredPin: String): Boolean {
-        if (isPinLockedOut()) return false
-        val storedHmacHex = prefs.getString(KEY_PIN_HMAC, null) ?: return false
-        val storedSaltHex = prefs.getString(KEY_PIN_SALT, null) ?: return false
-
-        return try {
-            val salt = storedSaltHex.chunked(2).map { it.toInt(16).toByte() }.toByteArray()
-            val computedHmac = computeHmac(enteredPin, salt)
-            val storedHmac = storedHmacHex.chunked(2).map { it.toInt(16).toByte() }.toByteArray()
-
-            // Constant-time array comparison defeats side-channel timing attacks
-            val isValid = MessageDigest.isEqual(computedHmac, storedHmac)
-            if (isValid) {
-                resetPinFailedAttempts()
-            } else {
-                recordFailedPinAttempt()
-            }
-            isValid
-        } catch (e: Exception) {
-            recordFailedPinAttempt()
-            false
-        }
-    }
-
-    fun changePin(currentPin: String, newPin: String): Boolean {
-        if (!verifyPin(currentPin)) return false
-        if (newPin.length != 4 || !newPin.all { it.isDigit() }) return false
-        setPin(newPin)
-        return true
-    }
-
-    fun resetPinAfterGoogleAuth(newPin: String): Boolean {
-        if (newPin.length != 4 || !newPin.all { it.isDigit() }) return false
-        setPin(newPin)
-        return true
-    }
-
-    fun isBiometricEnabled(): Boolean = prefs.getBoolean("biometric_enabled", true)
-
-    fun setBiometricEnabled(enabled: Boolean) {
-        prefs.edit().putBoolean("biometric_enabled", enabled).apply()
-    }
+    fun verifyPin(enteredPin: String): Boolean = engine?.verifyPin(enteredPin) ?: false
+    fun changePin(currentPin: String, newPin: String): Boolean = engine?.changePin(currentPin, newPin) ?: false
+    fun resetPinAfterGoogleAuth(newPin: String): Boolean = engine?.resetPinAfterGoogleAuth(newPin) ?: false
+    fun isBiometricEnabled(): Boolean = engine?.isBiometricEnabled() ?: true
+    fun setBiometricEnabled(enabled: Boolean) { engine?.setBiometricEnabled(enabled) }
 }
 
 object BiometricAuthHelper {

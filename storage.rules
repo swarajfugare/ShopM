@@ -1,11 +1,12 @@
 rules_version = '2';
 service firebase.storage {
   match /b/{bucket}/o {
+    // Authoritative Owner Whitelist (Must strictly match GoogleAuthManager.AUTHORIZED_EMAILS and firestore.rules)
     function isAuthorizedOwner() {
       return request.auth != null
         && request.auth.token.firebase.sign_in_provider == 'google.com'
         && request.auth.token.email_verified == true
-        && (request.auth.token.email == 'swarajfugare23@gmail.com' || request.auth.token.email == 'sadhanafugare86@gmail.com');
+        && request.auth.token.email in ['swarajfugare23@gmail.com', 'sadhanafugare86@gmail.com'];
     }
 
     match /shops/{shopId}/branding/{fileName} {
@@ -17,6 +18,7 @@ service firebase.storage {
                        || request.resource.contentType == 'image/jpeg' 
                        || request.resource.contentType == 'image/webp');
     }
+
     match /{allPaths=**} {
       allow read, write: if false;
     }

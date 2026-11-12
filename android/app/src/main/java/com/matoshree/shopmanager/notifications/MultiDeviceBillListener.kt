@@ -94,7 +94,7 @@ object MultiDeviceBillListener {
                         val isRecent = tx.createdAt > 0 && (System.currentTimeMillis() - tx.createdAt) in 0..120_000L
 
                         if (isFromAnotherDevice && isRecent && tx.type == "PAYMENT") {
-                            Log.d(TAG, "New udhari payment from remote device ($creator): ${tx.amount}")
+                            Log.d(TAG, "New udhari payment from remote device")
                             ShopNotificationManager.sendUdhariPaymentReceivedNotification(
                                 context = context.applicationContext,
                                 customerId = tx.customerId,

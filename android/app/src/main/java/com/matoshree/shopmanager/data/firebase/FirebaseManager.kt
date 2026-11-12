@@ -115,13 +115,13 @@ object FirebaseManager {
                 .addOnSuccessListener { authResult ->
                     val user = authResult.user
                     val email = user?.email?.lowercase()?.trim()
-                    if (email != null && AUTHORIZED_EMAILS.contains(email)) {
-                        Log.d(TAG, "Authorized Google login success: $email (UID: ${user.uid})")
+                    if (email != null && com.matoshree.shopmanager.security.GoogleAuthManager.AUTHORIZED_EMAILS.contains(email)) {
+                        Log.d(TAG, "Authorized Google login success")
                         onResult(true, null)
                     } else {
-                        Log.w(TAG, "Unauthorized login attempt from: $email")
+                        Log.w(TAG, "Unauthorized login attempt blocked")
                         try { auth.signOut() } catch (_: Exception) {}
-                        onResult(false, "प्रवेश नाकारला: $email हे खाते अधिकृत नाही. केवळ swarajfugare23@gmail.com किंवा sadhanafugare86@gmail.com द्वारेच प्रवेश शक्य आहे.")
+                        onResult(false, "प्रवेश नाकारला: हे खाते अधिकृत नाही. केवळ अधिकृत मालक खात्याद्वारेच प्रवेश शक्य आहे.")
                     }
                 }
                 .addOnFailureListener { e ->
@@ -252,15 +252,15 @@ object FirebaseManager {
             if (!shopSnap.exists()) {
                 val shopDto = ShopDto(
                     name = "मातोश्री कलेक्शन",
-                    mobile = "8208610261",
-                    email = "swarajfugare23@gmail.com",
-                    address = "कोंढारकी",
+                    mobile = "",
+                    email = "",
+                    address = "",
                     gstin = "",
                     showGstin = false,
-                    upiId = "matoshree@upi",
+                    upiId = "",
                     upiDisplayName = "मातोश्री कलेक्शन",
-                    upiMobile = "8208610261",
-                    logoPath = "android.resource://com.matoshree.collection/drawable/app_logo",
+                    upiMobile = "",
+                    logoPath = null,
                     updatedAt = System.currentTimeMillis()
                 )
                 shopDoc().set(shopDto, com.google.firebase.firestore.SetOptions.merge()).await()

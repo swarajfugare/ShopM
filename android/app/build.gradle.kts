@@ -1,5 +1,19 @@
 import java.util.Properties
 import java.io.FileInputStream
+import java.io.File
+
+// Release keystore configuration from keystore.properties (ignored in git)
+val keystorePropertiesFile = if (File(rootDir, "keystore.properties").exists()) {
+    File(rootDir, "keystore.properties")
+} else {
+    File(projectDir, "keystore.properties")
+}
+val keystoreProperties = Properties().apply {
+    if (keystorePropertiesFile.exists()) {
+        load(FileInputStream(keystorePropertiesFile))
+    }
+}
+val releaseCertSha256: String = keystoreProperties.getProperty("certSha256", "") ?: ""
 
 plugins {
     alias(libs.plugins.android.application)
@@ -30,13 +44,8 @@ android {
         ksp {
             arg("room.schemaLocation", "$projectDir/schemas")
         }
-    }
 
-    // Optional release keystore configuration from keystore.properties (ignored in git)
-    val keystorePropertiesFile = rootProject.file("keystore.properties")
-    val keystoreProperties = Properties()
-    if (keystorePropertiesFile.exists()) {
-        keystoreProperties.load(FileInputStream(keystorePropertiesFile))
+        buildConfigField("String", "RELEASE_CERT_SHA256", "\"$releaseCertSha256\"")
     }
 
     signingConfigs {
@@ -46,12 +55,6 @@ android {
                 storePassword = keystoreProperties.getProperty("storePassword")
                 keyAlias = keystoreProperties.getProperty("keyAlias")
                 keyPassword = keystoreProperties.getProperty("keyPassword")
-            } else {
-                val debugConfig = getByName("debug")
-                storeFile = debugConfig.storeFile
-                storePassword = debugConfig.storePassword
-                keyAlias = debugConfig.keyAlias
-                keyPassword = debugConfig.keyPassword
             }
         }
     }
@@ -124,9 +127,7 @@ dependencies {
     androidTestImplementation(libs.androidx.espresso.core)
     ksp(libs.androidx.room.compiler)
 
-    // Retrofit & OkHttp (for legacy migration/fallback)
-    implementation(libs.retrofit)
-    implementation(libs.retrofit.converter.kotlinx.serialization)
+    // OkHttp (Direct WhatsApp Webhook & API dispatch)
     implementation(libs.okhttp)
     implementation(libs.okhttp.logging)
 
@@ -152,4 +153,19 @@ dependencies {
     implementation(libs.kotlinx.coroutines.play.services)
 
     debugImplementation(libs.androidx.ui.tooling)
+}
+
+gradle.taskGraph.whenReady {
+    val isReleaseBuildRequested = allTasks.any { task ->
+        val name = task.name
+        (name.contains("assembleRelease", ignoreCase = true) || name.contains("bundleRelease", ignoreCase = true))
+    }
+    if (isReleaseBuildRequested) {
+        if (!keystorePropertiesFile.exists() || !keystoreProperties.containsKey("storeFile")) {
+            throw GradleException(
+                "Release build aborted: 'keystore.properties' is missing or incomplete.\n" +
+                "Please configure 'keystore.properties' based on 'keystore.properties.example' before building a release APK."
+            )
+        }
+    }
 }

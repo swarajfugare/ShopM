@@ -328,7 +328,7 @@ class FirestoreUdhariRepository {
 
             val commitTask = batch.commit()
             FirebaseManager.awaitWriteTask(commitTask)
-            Log.d(TAG, "Payment recorded successfully: $txDocId, amount=$safePaymentAmount, newCustDue=$newCustDue")
+            Log.d(TAG, "Payment recorded successfully: $txDocId")
             Result.success(Unit)
         } catch (e: Exception) {
             Log.e(TAG, "Error recording payment: ${e.message}", e)
@@ -618,7 +618,7 @@ class FirestoreUdhariRepository {
 
             val commitTask = batch.commit()
             FirebaseManager.awaitWriteTask(commitTask)
-            Log.d(TAG, "Manual debit recorded: $txDocId, amount=$amount, newDue=$newDue")
+            Log.d(TAG, "Manual debit recorded: $txDocId")
             Result.success(txDto.toDomain())
         } catch (e: Exception) {
             Log.e(TAG, "Error recording manual debit: ${e.message}", e)
@@ -703,7 +703,7 @@ class FirestoreUdhariRepository {
 
             val commitTask = batch.commit()
             FirebaseManager.awaitWriteTask(commitTask)
-            Log.d(TAG, "Manual udhari deleted successfully: $transactionId, amount=${originalTx.amount}")
+            Log.d(TAG, "Manual udhari deleted successfully: $transactionId")
             Result.success(Unit)
         } catch (e: Exception) {
             Log.e(TAG, "Error deleting manual udhari: ${e.message}", e)

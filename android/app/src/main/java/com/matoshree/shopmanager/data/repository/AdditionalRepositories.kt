@@ -106,7 +106,7 @@ class SyncRepository(
                     val docId = firestoreCustRepo.saveCustomer(custDomain)
                     val mappedId = (docId.hashCode().toLong() and 0x7FFFFFFFFFFFFFFFL)
                     database.customerDao().updateSyncStatus(cEntity.id, mappedId, SyncStatus.SYNCED)
-                    android.util.Log.d("SyncRepository", "Synced offline customer: ${custDomain.name} (id=${cEntity.id})")
+                    android.util.Log.d("SyncRepository", "Synced offline customer: id=${cEntity.id}")
                 } catch (ce: Exception) {
                     android.util.Log.w("SyncRepository", "Customer upload note: ${ce.message}")
                 }

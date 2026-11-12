@@ -2,95 +2,98 @@ rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
 
-    // Helper functions for authorization & membership verification
     function isAuthenticated() {
       return request.auth != null;
     }
 
-    // Strict Owner Verified Google Sign-In Whitelist Enforcement on Cloud
+    // Authoritative Owner Whitelist (Must strictly match GoogleAuthManager.AUTHORIZED_EMAILS and storage.rules)
     function isAuthorizedOwner() {
       return isAuthenticated() &&
         request.auth.token.firebase.sign_in_provider == 'google.com' &&
-        request.auth.token.email_verified == true && (
-          request.auth.token.email == 'swarajfugare23@gmail.com' ||
-          request.auth.token.email == 'sadhanafugare86@gmail.com'
-        );
+        request.auth.token.email_verified == true &&
+        request.auth.token.email in ['swarajfugare23@gmail.com', 'sadhanafugare86@gmail.com'];
     }
 
-    function isShopMember() {
-      return isAuthorizedOwner();
+    // Financial & Data Validation Helpers
+    function isValidBill() {
+      let data = request.resource.data;
+      return (!('finalAmount' in data) || (data.finalAmount is number && data.finalAmount >= 0));
     }
 
-    function isShopOwner() {
-      return isAuthorizedOwner();
+    function isValidCustomer() {
+      let data = request.resource.data;
+      return (!('name' in data) || (data.name is string && data.name.size() > 0 && data.name.size() <= 120)) &&
+             (!('mobile' in data) || (data.mobile is string && data.mobile.size() <= 20));
+    }
+
+    function isValidProduct() {
+      let data = request.resource.data;
+      return (!('name' in data) || (data.name is string && data.name.size() > 0 && data.name.size() <= 150)) &&
+             (!('price' in data) || (data.price is number && data.price >= 0));
+    }
+
+    function isValidUdhari() {
+      let data = request.resource.data;
+      return (!('amount' in data) || (data.amount is number && data.amount >= 0));
     }
 
     // 1. Shop Root & Member Authorization
     match /shops/{shopId} {
-      allow read, write: if isShopMember();
-
-      match /members/{memberUid} {
-        allow read, write: if isShopMember();
-      }
-
-      match /devices/{deviceId} {
-        allow read, write: if isShopMember();
-      }
+      allow read, write: if isAuthorizedOwner();
 
       match /{allChildren=**} {
-        allow read, write: if isShopMember();
+        allow read, write: if isAuthorizedOwner();
       }
     }
 
     // 2. Customers Collection
     match /customers/{customerId} {
-      allow read, write: if isShopMember();
+      allow read, delete: if isAuthorizedOwner();
+      allow create, update: if isAuthorizedOwner() && isValidCustomer();
     }
 
     // 3. Products & Categories
     match /products/{productId} {
-      allow read, write: if isShopMember();
+      allow read, delete: if isAuthorizedOwner();
+      allow create, update: if isAuthorizedOwner() && isValidProduct();
     }
 
     match /categories/{categoryId} {
-      allow read, write: if isShopMember();
+      allow read, write: if isAuthorizedOwner();
     }
 
-    // 4. Bills & Transactions (Financial Validation)
+    // 4. Bills & Transactions
     match /bills/{billId} {
-      allow read, write: if isShopMember();
+      allow read, delete: if isAuthorizedOwner();
+      allow create, update: if isAuthorizedOwner() && isValidBill();
 
-      match /items/{itemId} {
-        allow read, write: if isShopMember();
-      }
-
-      match /payments/{paymentId} {
-        allow read, write: if isShopMember();
+      match /{allChildren=**} {
+        allow read, write: if isAuthorizedOwner();
       }
     }
 
     // 5. Udhari Transactions Ledger
     match /udhari_transactions/{txId} {
-      allow read, write: if isShopMember();
+      allow read, delete: if isAuthorizedOwner();
+      allow create, update: if isAuthorizedOwner() && isValidUdhari();
     }
 
     // 6. Expenses & Daily Closings
     match /expenses/{expenseId} {
-      allow read, write: if isShopMember();
+      allow read, write: if isAuthorizedOwner();
     }
 
     match /daily_closings/{closingId} {
-      allow read, write: if isShopMember();
+      allow read, write: if isAuthorizedOwner();
     }
 
     // 7. Security & Device Whitelist
     match /authorized_devices/{deviceId} {
-      allow read, write: if isShopMember();
+      allow read, write: if isAuthorizedOwner();
     }
 
     match /settings/{settingDoc} {
-      allow read: if isShopMember();
-      allow write: if isShopOwner();
+      allow read, write: if isAuthorizedOwner();
     }
 
     // 8. Explicit Default Deny for unknown collections/documents
