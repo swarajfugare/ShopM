@@ -45,8 +45,8 @@ fun GoogleLoginScreen(
     val signInLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.StartActivityForResult()
     ) { result ->
-        if (result.resultCode == Activity.RESULT_OK) {
-            coroutineScope.launch {
+        coroutineScope.launch {
+            if (result.data != null) {
                 val res = googleAuthManager.handleSignInResult(result.data)
                 isLoading = false
                 if (res.isSuccess) {
@@ -55,10 +55,10 @@ fun GoogleLoginScreen(
                 } else {
                     errorMessage = res.exceptionOrNull()?.message ?: "लॉगिन अयशस्वी."
                 }
+            } else {
+                isLoading = false
+                errorMessage = "लॉगिन रद्द केले किंवा अयशस्वी झाले."
             }
-        } else {
-            isLoading = false
-            errorMessage = "लॉगिन रद्द केले किंवा अयशस्वी झाले."
         }
     }
 
