@@ -134,7 +134,13 @@ class BillViewModel(
 
     fun voidBill(billId: Long, reason: String = "Voided by manager") {
         viewModelScope.launch {
-            billRepository.voidBill(billId, reason)
+            val bill = _bills.value.find { it.id == billId }
+            billRepository.voidBill(
+                billId = billId,
+                reason = reason,
+                billNumber = bill?.billNumber,
+                transactionUuid = bill?.transactionUuid
+            )
         }
     }
 
@@ -164,7 +170,13 @@ class BillViewModel(
         viewModelScope.launch {
             toDelete.forEach { billId ->
                 try {
-                    billRepository.voidBill(billId, reason)
+                    val bill = _bills.value.find { it.id == billId }
+                    billRepository.voidBill(
+                        billId = billId,
+                        reason = reason,
+                        billNumber = bill?.billNumber,
+                        transactionUuid = bill?.transactionUuid
+                    )
                 } catch (e: Exception) {
                     android.util.Log.w("BillViewModel", "Error voiding bill $billId: ${e.message}")
                 }

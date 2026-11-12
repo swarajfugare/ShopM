@@ -200,6 +200,9 @@ interface CustomerDao {
     @Query("UPDATE customers SET isActive = 1 WHERE id = :id")
     suspend fun unarchiveCustomer(id: Long)
 
+    @Query("UPDATE customers SET isActive = 1 WHERE name LIKE '%' || :name || '%'")
+    suspend fun unarchiveCustomerByName(name: String)
+
     @Query("DELETE FROM customers WHERE id = :id")
     suspend fun deleteCustomer(id: Long)
 

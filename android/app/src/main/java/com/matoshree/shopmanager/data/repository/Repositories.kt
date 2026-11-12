@@ -435,23 +435,41 @@ class BillRepository(
         )
     }
 
-    suspend fun voidBill(billId: Long, reason: String = "Voided by manager") {
+    suspend fun voidBill(
+        billId: Long,
+        reason: String = "Voided by manager",
+        billNumber: String? = null,
+        transactionUuid: String? = null
+    ) {
+        val localBill = database?.billDao()?.getBillById(billId)
+            ?: database?.billDao()?.getBillByServerId(billId)
+            ?: (if (!billNumber.isNullOrBlank()) database?.billDao()?.getBillByNumber(billNumber) else null)
+            ?: (if (!transactionUuid.isNullOrBlank()) database?.billDao()?.getBillByUuid(transactionUuid) else null)
+
+        val targetBillNumber = localBill?.bill?.billNumber ?: billNumber
+        val targetUuid = localBill?.bill?.transactionUuid ?: transactionUuid
+
         try {
-            val localBill = database?.billDao()?.getBillById(billId)
             localBill?.items?.forEach { item ->
                 item.productId?.let { pid ->
-                    database.productDao().recordSaleStockRestore(pid, item.quantity)
+                    database?.productDao()?.recordSaleStockRestore(pid, item.quantity)
                 }
             }
         } catch (e: Exception) {
             Log.w("BillRepo", "Room stock restore note: ${e.message}")
         }
         try {
-            firestoreRepo.voidBill(billId, reason)
+            firestoreRepo.voidBill(
+                billId = billId,
+                reason = reason,
+                billNumber = targetBillNumber,
+                transactionUuid = targetUuid
+            )
         } catch (e: Exception) {
             Log.w("BillRepo", "Cloud void sync note: ${e.message}")
         }
-        database?.billDao()?.voidBill(billId, reason)
+        val targetLocalId = localBill?.bill?.id ?: billId
+        database?.billDao()?.voidBill(targetLocalId, reason)
     }
 }
 
@@ -601,15 +619,24 @@ class CustomerRepository(
         }
     }
 
-    suspend fun deleteOrArchiveCustomer(customerId: Long): String {
+    suspend fun deleteOrArchiveCustomer(
+        customerId: Long,
+        hintMobile: String = "",
+        hintName: String = ""
+    ): String {
         val cust = database?.customerDao()?.getCustomerById(customerId)?.toDomain()
-        val mobile = cust?.mobile?.trim() ?: ""
-        val cleanMobile = com.matoshree.shopmanager.utils.PhoneUtils.clean10DigitMobileInput(mobile)
+            ?: database?.customerDao()?.getCustomerByServerId(customerId)?.toDomain()
+            ?: (if (hintMobile.isNotBlank()) database?.customerDao()?.getCustomerByMobile(hintMobile)?.toDomain() else null)
+
+        val targetName = cust?.name ?: hintName
+        val targetMobile = cust?.mobile ?: hintMobile
+        val cleanMobile = com.matoshree.shopmanager.utils.PhoneUtils.clean10DigitMobileInput(targetMobile)
+        val targetId = cust?.id ?: customerId
 
         // 1. Restore product stock locally in Room for all bills of this customer, then delete bills
         if (database != null) {
             try {
-                val localBills = database.billDao().getBillsByCustomer(customerId, cleanMobile)
+                val localBills = database.billDao().getBillsByCustomer(targetId, cleanMobile)
                 localBills.forEach { bWithItems ->
                     if (!bWithItems.bill.isVoided) {
                         bWithItems.items.forEach { item ->
@@ -620,9 +647,10 @@ class CustomerRepository(
                     }
                     database.billDao().deleteBillItems(bWithItems.bill.id)
                 }
-                database.billDao().deleteBillsByCustomer(customerId, cleanMobile)
-                database.customerDao().resetCustomerStats(customerId)
-                database.customerDao().archiveCustomer(customerId)
+                database.billDao().deleteBillsByCustomer(targetId, cleanMobile)
+                database.customerDao().resetCustomerStats(targetId)
+                database.customerDao().archiveCustomer(targetId)
+                database.customerDao().hardDeleteCustomer(targetId)
             } catch (e: Exception) {
                 Log.w("CustomerRepo", "Local cascade delete note: ${e.message}")
             }
@@ -630,7 +658,11 @@ class CustomerRepository(
 
         // 2. Cascade delete in Firestore (restores cloud stock, deletes cloud bills & udhari txs, moves customer to TRASH)
         try {
-            firestoreRepo.deleteOrArchiveCustomer(customerId, cleanMobile)
+            firestoreRepo.deleteOrArchiveCustomer(
+                customerId = targetId,
+                hintMobile = cleanMobile,
+                hintName = targetName
+            )
         } catch (e: Exception) {
             Log.w("CustomerRepo", "Cloud customer delete note: ${e.message}")
         }
@@ -690,6 +722,15 @@ class CustomerRepository(
             firestoreRepo.purgeSpecificCustomerPermanently(name, cleanMobile)
         } catch (e: Exception) {
             Log.w("CustomerRepo", "Cloud purge specific customer note: ${e.message}")
+        }
+    }
+
+    suspend fun unTrashCustomerIfAccidental(name: String) {
+        try {
+            firestoreRepo.unTrashCustomerIfAccidental(name)
+            database?.customerDao()?.unarchiveCustomerByName(name)
+        } catch (e: Exception) {
+            Log.w("CustomerRepo", "unTrashCustomerIfAccidental note: ${e.message}")
         }
     }
 }

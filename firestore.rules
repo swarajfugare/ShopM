@@ -87,7 +87,12 @@ service cloud.firestore {
       allow read, write: if isAuthorizedOwner();
     }
 
-    // 7. Security & Device Whitelist
+    // 7. Stock Movements & Inventory Audit
+    match /stock_movements/{movementId} {
+      allow read, write: if isAuthorizedOwner();
+    }
+
+    // 8. Security, Devices, Settings & Diagnostics
     match /authorized_devices/{deviceId} {
       allow read, write: if isAuthorizedOwner();
     }
@@ -96,7 +101,15 @@ service cloud.firestore {
       allow read, write: if isAuthorizedOwner();
     }
 
-    // 8. Explicit Default Deny for unknown collections/documents
+    match /security/{securityDoc} {
+      allow read, write: if isAuthorizedOwner();
+    }
+
+    match /diagnostics/{diagDoc} {
+      allow read, write: if isAuthorizedOwner();
+    }
+
+    // 9. Explicit Default Deny for unknown collections/documents
     match /{document=**} {
       allow read, write: if false;
     }

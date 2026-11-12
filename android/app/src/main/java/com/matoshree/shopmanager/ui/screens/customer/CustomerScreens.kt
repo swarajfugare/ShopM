@@ -118,6 +118,7 @@ class CustomerViewModel(
         viewModelScope.launch {
             try {
                 customerRepository.purgeSpecificCustomerPermanently("Rohini Dandage", "9272035042")
+                customerRepository.unTrashCustomerIfAccidental("Maina Patil")
             } catch (_: Exception) {}
         }
     }
@@ -599,7 +600,7 @@ class CustomerViewModel(
                 if (cust.outstandingBalance > 0.01) {
                     skipped++
                 } else {
-                    customerRepository.deleteOrArchiveCustomer(id)
+                    customerRepository.deleteOrArchiveCustomer(id, cust.mobile, cust.name)
                     deleted++
                 }
             }
@@ -805,8 +806,14 @@ class CustomerViewModel(
                 onComplete("Cannot delete customer with active outstanding balance of ${CurrencyFormatter.format(customerOutstandingDue.value)}.")
                 return@launch
             }
-            val result = customerRepository.deleteOrArchiveCustomer(customerId)
+            val profile = selectedCustomerProfile.value
+            val result = customerRepository.deleteOrArchiveCustomer(
+                customerId = customerId,
+                hintMobile = profile?.mobile ?: "",
+                hintName = profile?.name ?: ""
+            )
             _customers.value = _customers.value.filter { it.id != customerId }
+            selectedCustomerProfile.value = null
             customerBills.value = emptyList()
             customerTransactions.value = emptyList()
             customerAllPayments.value = emptyList()

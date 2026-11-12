@@ -275,8 +275,8 @@ class FirestoreTrashRepository {
             // 1. Purge expired products
             val prods = FirebaseManager.productsCollection().whereEqualTo("status", "TRASH").get().await()
             prods.documents.forEach { doc ->
-                val dAt = doc.getLong("deletedAt") ?: doc.getLong("updatedAt") ?: 0L
-                if (dAt < purgeThreshold) {
+                val dAt = doc.getLong("deletedAt") ?: doc.getLong("updatedAt")
+                if (dAt != null && dAt > 0L && dAt < purgeThreshold) {
                     batch.delete(doc.reference)
                     count++
                 }
@@ -285,8 +285,8 @@ class FirestoreTrashRepository {
             // 2. Purge expired customers
             val custs = FirebaseManager.customersCollection().whereEqualTo("status", "TRASH").get().await()
             custs.documents.forEach { doc ->
-                val dAt = doc.getLong("deletedAt") ?: doc.getLong("updatedAt") ?: 0L
-                if (dAt < purgeThreshold) {
+                val dAt = doc.getLong("deletedAt") ?: doc.getLong("updatedAt")
+                if (dAt != null && dAt > 0L && dAt < purgeThreshold) {
                     batch.delete(doc.reference)
                     count++
                 }
@@ -295,8 +295,8 @@ class FirestoreTrashRepository {
             // 3. Purge expired bills
             val bills = FirebaseManager.billsCollection().whereEqualTo("status", "TRASH").get().await()
             bills.documents.forEach { doc ->
-                val dAt = doc.getLong("deletedAt") ?: doc.getLong("updatedAt") ?: 0L
-                if (dAt < purgeThreshold) {
+                val dAt = doc.getLong("deletedAt") ?: doc.getLong("updatedAt")
+                if (dAt != null && dAt > 0L && dAt < purgeThreshold) {
                     batch.delete(doc.reference)
                     count++
                 }
@@ -305,8 +305,8 @@ class FirestoreTrashRepository {
             // 4. Purge expired payments
             val pays = FirebaseManager.udhariTransactionsCollection().whereEqualTo("status", "TRASH").get().await()
             pays.documents.forEach { doc ->
-                val dAt = doc.getLong("deletedAt") ?: doc.getLong("updatedAt") ?: 0L
-                if (dAt < purgeThreshold) {
+                val dAt = doc.getLong("deletedAt") ?: doc.getLong("updatedAt")
+                if (dAt != null && dAt > 0L && dAt < purgeThreshold) {
                     batch.delete(doc.reference)
                     count++
                 }

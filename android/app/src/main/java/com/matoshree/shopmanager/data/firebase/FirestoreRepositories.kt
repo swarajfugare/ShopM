@@ -517,7 +517,7 @@ class FirestoreCustomerRepository {
         }
     }
 
-    suspend fun deleteOrArchiveCustomer(customerId: Long, hintMobile: String = ""): String {
+    suspend fun deleteOrArchiveCustomer(customerId: Long, hintMobile: String = "", hintName: String = ""): String {
         FirebaseManager.ensureAuthenticated()
         val isOnline = FirebaseManager.isNetworkAvailable()
         val snapshot = try {
@@ -543,15 +543,26 @@ class FirestoreCustomerRepository {
         } catch (e: Exception) { null }
 
         val allDocs = (snapshot?.documents ?: emptyList()) + (shopSnap?.documents ?: emptyList())
-        val matchDoc = allDocs.find { doc ->
-            val dto = doc.toObject(CustomerDto::class.java)?.apply { id = doc.id }
-            val id = dto?.legacyId ?: (doc.id.hashCode().toLong() and 0x7FFFFFFFFFFFFFFFL)
-            id == customerId || doc.id == "cust_$customerId" || doc.id == customerId.toString()
+        val cleanMobile = com.matoshree.shopmanager.utils.PhoneUtils.clean10DigitMobileInput(hintMobile)
+        val cleanName = hintName.trim()
+
+        val matchingDocs = allDocs.filter { doc ->
+            val dto = doc.toObject(CustomerDto::class.java) ?: return@filter false
+            val dMobile = com.matoshree.shopmanager.utils.PhoneUtils.clean10DigitMobileInput(dto.mobile)
+            val dName = dto.name.trim()
+
+            val mobileMatches = cleanMobile.length == 10 && dMobile == cleanMobile
+            val nameMatches = cleanName.isNotBlank() && dName.equals(cleanName, ignoreCase = true)
+            val docIdMatches = doc.id == "cust_$customerId" || doc.id == customerId.toString()
+            val idMatches = dto.legacyId == customerId && (cleanName.isBlank() || nameMatches)
+
+            mobileMatches || nameMatches || docIdMatches || idMatches
         }
 
+        val matchDoc = matchingDocs.firstOrNull()
         val custMobile = matchDoc?.toObject(CustomerDto::class.java)?.mobile?.ifBlank { hintMobile } ?: hintMobile
-        val custName = matchDoc?.toObject(CustomerDto::class.java)?.name?.trim() ?: ""
-        val cleanMobile = com.matoshree.shopmanager.utils.PhoneUtils.clean10DigitMobileInput(custMobile)
+        val custName = matchDoc?.toObject(CustomerDto::class.java)?.name?.trim() ?: cleanName
+        val effectiveCleanMobile = com.matoshree.shopmanager.utils.PhoneUtils.clean10DigitMobileInput(custMobile)
 
         try {
             val batch = FirebaseManager.firestore.batch()
@@ -617,8 +628,7 @@ class FirestoreCustomerRepository {
             }
 
             // 4. Soft-delete customer doc to TRASH and reset stats
-            if (matchDoc != null) {
-                val docPath = "customers/${matchDoc.id}"
+            if (matchingDocs.isNotEmpty()) {
                 val updateData = mapOf(
                     "status" to "TRASH",
                     "isActive" to false,
@@ -628,7 +638,9 @@ class FirestoreCustomerRepository {
                     "deletedAt" to System.currentTimeMillis(),
                     "updatedAt" to System.currentTimeMillis()
                 )
-                batch.update(matchDoc.reference, updateData)
+                matchingDocs.forEach { doc ->
+                    batch.update(doc.reference, updateData)
+                }
             }
 
             batch.commit().await()
@@ -782,6 +794,32 @@ class FirestoreCustomerRepository {
             Log.d(TAG, "PURGED specific customer permanently")
         } catch (e: Exception) {
             Log.w(TAG, "Purge specific customer error: ${e.message}")
+        }
+    }
+
+    suspend fun unTrashCustomerIfAccidental(customerName: String) {
+        try {
+            FirebaseManager.ensureAuthenticated()
+            val rootCusts = try { FirebaseManager.customersCollection().whereEqualTo("status", "TRASH").get().await().documents } catch (_: Exception) { emptyList() }
+            val shopCusts = try { FirebaseManager.shopCustomersCollection().whereEqualTo("status", "TRASH").get().await().documents } catch (_: Exception) { emptyList() }
+            val allTrashDocs = rootCusts + shopCusts
+
+            for (doc in allTrashDocs) {
+                val name = doc.getString("name") ?: ""
+                if (name.contains(customerName, ignoreCase = true)) {
+                    doc.reference.update(
+                        mapOf(
+                            "status" to "ACTIVE",
+                            "isActive" to true,
+                            "deletedAt" to null,
+                            "updatedAt" to System.currentTimeMillis()
+                        )
+                    ).await()
+                    Log.d(TAG, "Restored accidentally trashed customer: $name")
+                }
+            }
+        } catch (e: Exception) {
+            Log.w(TAG, "Un-trash customer notice: ${e.message}")
         }
     }
 }
@@ -1607,29 +1645,44 @@ class FirestoreBillRepository {
         return billDto.toDomain()
     }
 
-    suspend fun voidBill(billId: Long, reason: String) {
+    suspend fun voidBill(
+        billId: Long,
+        reason: String = "Voided by manager",
+        billNumber: String? = null,
+        transactionUuid: String? = null
+    ) {
         FirebaseManager.ensureAuthenticated()
-        val snapshot = FirebaseManager.billsCollection().get().await()
-        val matchDoc = snapshot.documents.find {
-            val dto = it.toObject(BillDto::class.java)
-            dto?.legacyId == billId || (it.id.hashCode().toLong() and 0x7FFFFFFFFFFFFFFFL) == billId
+        val rootBills = try { FirebaseManager.billsCollection().get().await().documents } catch (e: Exception) { emptyList() }
+        val shopBills = try { FirebaseManager.shopBillsCollection().get().await().documents } catch (e: Exception) { emptyList() }
+        val allDocs = rootBills + shopBills
+
+        val matchingDocs = allDocs.filter { doc ->
+            val dto = doc.toObject(BillDto::class.java) ?: return@filter false
+            (transactionUuid != null && transactionUuid.isNotBlank() && dto.transactionUuid == transactionUuid) ||
+            (billNumber != null && billNumber.isNotBlank() && dto.billNumber == billNumber) ||
+            dto.legacyId == billId ||
+            (doc.id.hashCode().toLong() and 0x7FFFFFFFFFFFFFFFL) == billId ||
+            doc.id == "bill_$billId" ||
+            doc.id == billId.toString()
         }
 
-        if (matchDoc != null) {
-            val billDto = matchDoc.toObject(BillDto::class.java)
+        if (matchingDocs.isNotEmpty()) {
             val batch = FirebaseManager.firestore.batch()
-            val billRef = FirebaseManager.billsCollection().document(matchDoc.id)
+            val primaryDoc = matchingDocs.first()
+            val billDto = primaryDoc.toObject(BillDto::class.java)
 
-            batch.update(
-                billRef,
-                mapOf(
-                    "status" to "TRASH",
-                    "paymentStatus" to "VOID",
-                    "voidReason" to reason,
-                    "deletedAt" to System.currentTimeMillis(),
-                    "updatedAt" to System.currentTimeMillis()
-                )
+            val updateMap = mapOf(
+                "status" to "TRASH",
+                "paymentStatus" to "VOID",
+                "isVoided" to true,
+                "voidReason" to reason,
+                "deletedAt" to System.currentTimeMillis(),
+                "updatedAt" to System.currentTimeMillis()
             )
+
+            matchingDocs.forEach { doc ->
+                batch.update(doc.reference, updateMap)
+            }
 
             // Adjust customer lifetime spend ONLY if it's a real registered customer
             val targetCustId = billDto?.customerId
@@ -1688,12 +1741,11 @@ class FirestoreBillRepository {
                 }
             }
 
-            val billPath = "bills/${matchDoc.id}"
             try {
                 batch.commit().await()
-                Log.d(TAG, "FIRESTORE_WRITE entity=BILL path=$billPath result=SUCCESS (VOIDED)")
+                Log.d(TAG, "FIRESTORE_WRITE entity=BILL void_success count=${matchingDocs.size} billId=$billId")
             } catch (e: Exception) {
-                Log.e(TAG, "FIRESTORE_WRITE entity=BILL path=$billPath result=FAILURE code=${e.javaClass.simpleName}", e)
+                Log.e(TAG, "FIRESTORE_WRITE entity=BILL void_failed: ${e.message}", e)
             }
         }
     }
