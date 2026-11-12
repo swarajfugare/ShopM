@@ -9,6 +9,7 @@ import com.matoshree.shopmanager.utils.PhoneUtils
 import kotlinx.coroutines.channels.awaitClose
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.callbackFlow
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.tasks.await
 import java.util.UUID
 
@@ -34,7 +35,7 @@ class FirestoreUdhariRepository {
                 }
             }
         awaitClose { listener.remove() }
-    }
+    }.distinctUntilChanged()
 
     /**
      * Observes Udhari transactions for a specific customer in realtime.
@@ -65,7 +66,7 @@ class FirestoreUdhariRepository {
                 }
             }
         awaitClose { listener.remove() }
-    }
+    }.distinctUntilChanged()
 
     /**
      * Observes Udhari transactions for a specific bill in realtime.
@@ -86,7 +87,7 @@ class FirestoreUdhariRepository {
                 }
             }
         awaitClose { listener.remove() }
-    }
+    }.distinctUntilChanged()
 
     /**
      * Atomically records a payment against a bill and updates customer outstanding.

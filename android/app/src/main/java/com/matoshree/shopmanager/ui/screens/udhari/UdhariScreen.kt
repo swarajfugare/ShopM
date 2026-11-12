@@ -60,9 +60,9 @@ class UdhariViewModel(
 
     private val _selectedSort = MutableStateFlow("HIGHEST_DUE") // HIGHEST_DUE, LOWEST_DUE, OLDEST_DUE, NEWEST_DUE, A_Z
 
-    val customersFlow = customerRepository.getAllCustomers()
-    val billsFlow = billRepository.getAllBills(1000)
-    val transactionsFlow = udhariRepository.getAllTransactions()
+    val customersFlow = customerRepository.getAllCustomers().distinctUntilChanged()
+    val billsFlow = billRepository.getAllBills(1000).distinctUntilChanged()
+    val transactionsFlow = udhariRepository.getAllTransactions().distinctUntilChanged()
 
     private val baseSummariesFlow = combine(
         customersFlow,
@@ -117,7 +117,7 @@ class UdhariViewModel(
                 availableCredit = availableCredit
             )
         }
-    }
+    }.distinctUntilChanged()
 
     // Combined Udhari customer summaries with query, filter, sort
     val customerSummaries: StateFlow<List<CustomerUdhariSummary>> = combine(
@@ -156,7 +156,7 @@ class UdhariViewModel(
             "A_Z" -> filtered.sortedBy { it.customer.name }
             else -> filtered.sortedByDescending { it.totalOutstanding }
         }
-    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+    }.distinctUntilChanged().stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
     // Overall Metrics
     val udhariMetrics: StateFlow<UdhariOverallMetrics> = combine(
@@ -201,7 +201,7 @@ class UdhariViewModel(
             overdueAmount = overdueAmount,
             pendingBillsCount = pendingBills.size
         )
-    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), UdhariOverallMetrics())
+    }.distinctUntilChanged().stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), UdhariOverallMetrics())
 
     fun onSearchChange(q: String) {
         _searchQuery.value = q

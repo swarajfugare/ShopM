@@ -12,6 +12,7 @@ import com.matoshree.shopmanager.utils.PrintShareHelper
 import kotlinx.coroutines.channels.awaitClose
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.callbackFlow
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.tasks.await
 import java.util.UUID
@@ -305,7 +306,7 @@ class FirestoreCustomerRepository {
             rootListener.remove()
             shopListener.remove()
         }
-    }
+    }.distinctUntilChanged()
 
     suspend fun findCustomerByMobile(mobile: String): Customer? {
         return try {
@@ -837,7 +838,7 @@ class FirestoreProductRepository {
             rootListener.remove()
             shopListener.remove()
         }
-    }
+    }.distinctUntilChanged()
 
     fun getAllCategories(): Flow<List<Category>> = callbackFlow {
         val rootMap = mutableMapOf<String, Category>()
@@ -892,7 +893,7 @@ class FirestoreProductRepository {
             rootListener.remove()
             shopListener.remove()
         }
-    }
+    }.distinctUntilChanged()
 
     suspend fun searchProducts(query: String): List<Product> {
         return try {
@@ -1271,7 +1272,7 @@ class FirestoreBillRepository {
             rootListener.remove()
             shopListener.remove()
         }
-    }
+    }.distinctUntilChanged()
 
     fun getAllBills(limit: Int = 500): Flow<List<Bill>> = getRecentBills(limit)
 
@@ -1858,7 +1859,7 @@ class FirestoreSettingsRepository {
             rootListener.remove()
             shopListener.remove()
         }
-    }
+    }.distinctUntilChanged()
 
     suspend fun saveShopSettings(name: String, mobile: String, email: String, address: String, gstin: String, showGstin: Boolean) {
         val payload = mapOf(

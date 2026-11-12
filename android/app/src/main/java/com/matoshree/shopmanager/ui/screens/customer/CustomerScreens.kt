@@ -106,6 +106,7 @@ class CustomerViewModel(
     val customerKhatavahi = MutableStateFlow<List<KhatavahiEntry>>(emptyList())
     val customerOutstandingDue = MutableStateFlow<Double>(0.0)
     val shopSettings = MutableStateFlow(PrintShareHelper.ShopSettingsSnapshot())
+    private val syncedCustomerIds = mutableSetOf<Long>()
 
     init {
         observeCustomers()
@@ -146,8 +147,8 @@ class CustomerViewModel(
 
         profileJob?.cancel()
         profileJob = viewModelScope.launch {
-            if (cust != null) {
-                selectedCustomerProfile.value = cust
+            if (selectedCustomerProfile.value == null || selectedCustomerProfile.value?.id != customerId) {
+                if (cust != null) selectedCustomerProfile.value = cust
             }
             if (isDifferentCustomer) {
                 // Reset state only when switching to an entirely DIFFERENT customer to avoid screen blinking
@@ -218,9 +219,10 @@ class CustomerViewModel(
                     selectedCustomerProfile.value = newProfile
                 }
 
-                // Auto-sync customer cached Firestore balance if different
-                if (currentCust != null && Math.abs(currentCust.outstandingBalance - totalPending) > 0.01) {
-                    viewModelScope.launch {
+                // Auto-sync customer cached Firestore balance ONCE per session to prevent infinite snapshot loops
+                if (currentCust != null && !syncedCustomerIds.contains(customerId) && Math.abs(currentCust.outstandingBalance - totalPending) > 0.5) {
+                    syncedCustomerIds.add(customerId)
+                    viewModelScope.launch(kotlinx.coroutines.Dispatchers.IO) {
                         try {
                             customerRepository.saveCustomer(currentCust.copy(outstandingBalance = totalPending))
                         } catch (_: Exception) {}
@@ -1473,7 +1475,9 @@ fun CustomerProfileScreen(
     val nonVoidedBills = remember(bills) { bills.filter { !it.isVoided } }
     val calculatedLifetimeSpend = remember(nonVoidedBills) { nonVoidedBills.sumOf { it.finalAmount } }
     val totalValidBills = nonVoidedBills.size
-    val averageBill = if (totalValidBills > 0) calculatedLifetimeSpend / totalValidBills else 0.0
+    val effectiveTotalBills = if (totalValidBills > 0) totalValidBills else (customer?.totalBills ?: 0)
+    val effectiveLifetimeSpend = if (calculatedLifetimeSpend > 0.0) calculatedLifetimeSpend else (customer?.lifetimeSpend ?: 0.0)
+    val effectiveAvgBill = if (effectiveTotalBills > 0) effectiveLifetimeSpend / effectiveTotalBills else 0.0
 
     Scaffold(
         topBar = {
@@ -1534,9 +1538,9 @@ fun CustomerProfileScreen(
                             Box(modifier = Modifier.weight(1.15f)) {
                                 CustomerHeaderProfileCard(
                                     customer = customer,
-                                    lifetimeSpend = calculatedLifetimeSpend,
-                                    totalBills = totalValidBills,
-                                    averageBill = averageBill,
+                                    lifetimeSpend = effectiveLifetimeSpend,
+                                    totalBills = effectiveTotalBills,
+                                    averageBill = effectiveAvgBill,
                                     outstandingDue = outstandingDue,
                                     onCallClick = onCallCustomer,
                                     onCreditLimitClick = { showCreditLimitDialog = true }
@@ -1558,9 +1562,9 @@ fun CustomerProfileScreen(
                         Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
                             CustomerHeaderProfileCard(
                                 customer = customer,
-                                lifetimeSpend = calculatedLifetimeSpend,
-                                totalBills = totalValidBills,
-                                averageBill = averageBill,
+                                lifetimeSpend = effectiveLifetimeSpend,
+                                totalBills = effectiveTotalBills,
+                                averageBill = effectiveAvgBill,
                                 outstandingDue = outstandingDue,
                                 onCallClick = onCallCustomer,
                                 onCreditLimitClick = { showCreditLimitDialog = true }

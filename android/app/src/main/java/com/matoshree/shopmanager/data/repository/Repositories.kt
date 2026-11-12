@@ -11,6 +11,7 @@ import com.matoshree.shopmanager.utils.DateUtils
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.callbackFlow
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.channels.awaitClose
 import kotlinx.coroutines.launch
 import java.util.UUID
@@ -174,7 +175,7 @@ class BillRepository(
             // 1. Observe Room reactively - whenever ANY bill is added/changed locally, emit immediately!
             val roomJob = kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.IO).launch {
                 try {
-                    database.billDao().getAllBills(limit).collect { entities ->
+                    database.billDao().getAllBills(limit).distinctUntilChanged().collect { entities ->
                         val domainBills = entities.map { it.toDomain() }
                         trySend(domainBills)
                     }
@@ -214,7 +215,7 @@ class BillRepository(
                 roomJob.cancel()
                 cloudJob.cancel()
             }
-        }
+        }.distinctUntilChanged()
     }
 
     fun getAllBills(limit: Int = 500): Flow<List<Bill>> = getRecentBills(limit)
@@ -484,7 +485,7 @@ class CustomerRepository(
             // 1. Observe Room reactively - authoritative local store with stable persistent IDs
             val roomJob = kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.IO).launch {
                 try {
-                    database.customerDao().getAllCustomers().collect { entities ->
+                    database.customerDao().getAllCustomers().distinctUntilChanged().collect { entities ->
                         val domainCustomers = entities.map { it.toDomain() }
                         trySend(domainCustomers)
                     }
@@ -523,7 +524,7 @@ class CustomerRepository(
                 roomJob.cancel()
                 cloudJob.cancel()
             }
-        }
+        }.distinctUntilChanged()
     }
 
     suspend fun searchCustomers(query: String): List<Customer> {

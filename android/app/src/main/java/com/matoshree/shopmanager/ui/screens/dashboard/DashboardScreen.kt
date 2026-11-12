@@ -62,7 +62,10 @@ class DashboardViewModel(
         if (productRepository != null) {
             viewModelScope.launch {
                 productRepository.getAllProducts().collectLatest { prods ->
-                    lowStockCount.value = prods.count { it.isActive && it.trackInventory && it.currentStock <= 5 }
+                    val newCount = prods.count { it.isActive && it.trackInventory && it.currentStock <= 5 }
+                    if (lowStockCount.value != newCount) {
+                        lowStockCount.value = newCount
+                    }
                 }
             }
         }
@@ -113,15 +116,23 @@ class DashboardViewModel(
                 val pendingCustCount = if (totalPending <= 0.01) 0 else pendingCustIds.size
 
                 val todayCollected = validTxs.filter { it.date.startsWith(today) && it.type == com.matoshree.shopmanager.domain.model.UdhariTransactionType.PAYMENT }.sumOf { it.amount }
-                todayCollectedCredit.value = todayCollected
+                if (todayCollectedCredit.value != todayCollected) {
+                    todayCollectedCredit.value = todayCollected
+                }
 
                 val estProfit = todayBills.sumOf { bill ->
                     if (bill.actualProfit > 0) bill.actualProfit else bill.finalAmount * 0.25
                 }
-                todayProfitEstimate.value = estProfit
+                if (todayProfitEstimate.value != estProfit) {
+                    todayProfitEstimate.value = estProfit
+                }
 
-                udhariOutstanding.value = totalPending
-                udhariPendingCount.value = pendingCustCount
+                if (udhariOutstanding.value != totalPending) {
+                    udhariOutstanding.value = totalPending
+                }
+                if (udhariPendingCount.value != pendingCustCount) {
+                    udhariPendingCount.value = pendingCustCount
+                }
 
                 // Task 1: Most recently added bills on top. Show today's bills only; if none, show this week's bills only
                 val sortedActiveBills = activeBills.sortedWith(
@@ -136,7 +147,7 @@ class DashboardViewModel(
                     else -> emptyList()
                 }
 
-                _summary.value = DashboardSummary(
+                val newSummary = DashboardSummary(
                     todaySales = todaySales,
                     todayBillsCount = todayBillsCount,
                     todayProfit = estProfit,
@@ -149,6 +160,9 @@ class DashboardViewModel(
                     recentBills = displayedBills,
                     businessInsight = if (todayBillsCount > 0) "Today: $todayBillsCount bills generated with avg ₹${String.format("%.0f", avgOrder)}" else "Ready for today's sales at Matoshree Collection."
                 )
+                if (_summary.value != newSummary) {
+                    _summary.value = newSummary
+                }
             }.collect { }
         }
     }

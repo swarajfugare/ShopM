@@ -144,24 +144,24 @@ class DailyClosingViewModel(
                     val newBillCash = todayBills.filter { it.paymentMethod == PaymentMethod.CASH }.sumOf { it.paidAmount }
                     val newBillUpi = todayBills.filter { it.paymentMethod == PaymentMethod.UPI }.sumOf { it.paidAmount }
                     val pendingSales = todayBills.sumOf { it.pendingAmount }
-                    todayPendingSales.value = pendingSales
+                    if (todayPendingSales.value != pendingSales) todayPendingSales.value = pendingSales
 
                     // Udhari payments collected today
                     val todayUdhariTxs = transactions.filter { !it.isReversed && it.type == UdhariTransactionType.PAYMENT && it.date == today }
                     val udhariCash = todayUdhariTxs.filter { it.paymentMethod == PaymentMethod.CASH }.sumOf { it.amount }
                     val udhariUpi = todayUdhariTxs.filter { it.paymentMethod == PaymentMethod.UPI }.sumOf { it.amount }
-                    todayUdhariCash.value = udhariCash
-                    todayUdhariUpi.value = udhariUpi
+                    if (todayUdhariCash.value != udhariCash) todayUdhariCash.value = udhariCash
+                    if (todayUdhariUpi.value != udhariUpi) todayUdhariUpi.value = udhariUpi
 
                     // Cash expenses deducted from cash drawer
                     val cashExpenses = expenses.filter { it.expenseDate == today && it.paymentMethod == PaymentMethod.CASH }.sumOf { it.amount }
-                    todayCashExpenses.value = cashExpenses
+                    if (todayCashExpenses.value != cashExpenses) todayCashExpenses.value = cashExpenses
 
                     val totalCashInDrawer = (newBillCash + udhariCash - cashExpenses).coerceAtLeast(0.0)
                     val totalUpiReceived = newBillUpi + udhariUpi
                     val grossProfit = todayBills.sumOf { it.estimatedProfit + it.actualProfit }
 
-                    _closingState.value = DailyClosing(
+                    val newClosing = DailyClosing(
                         closingDate = today,
                         totalSales = totalSales,
                         totalBills = totalBillsCount,
@@ -171,6 +171,9 @@ class DailyClosingViewModel(
                         expectedCash = totalCashInDrawer,
                         isClosed = false
                     )
+                    if (_closingState.value != newClosing) {
+                        _closingState.value = newClosing
+                    }
                 }.collect { }
             }
         }

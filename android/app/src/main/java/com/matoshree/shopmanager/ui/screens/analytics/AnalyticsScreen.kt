@@ -44,6 +44,7 @@ import com.matoshree.shopmanager.utils.PrintShareHelper
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.launch
 import java.text.SimpleDateFormat
 import java.util.*
@@ -112,29 +113,39 @@ class AnalyticsViewModel(
 
     private fun observeAllData() {
         viewModelScope.launch {
-            billRepository.getAllBills(limit = 500).collectLatest {
-                bills.value = it
-                lastUpdatedTime.value = getCurrentTimeDisplay()
+            billRepository.getAllBills(limit = 500).distinctUntilChanged().collectLatest {
+                if (bills.value != it) {
+                    bills.value = it
+                    lastUpdatedTime.value = getCurrentTimeDisplay()
+                }
             }
         }
         viewModelScope.launch {
-            customerRepository.getAllCustomers().collectLatest {
-                customers.value = it
+            customerRepository.getAllCustomers().distinctUntilChanged().collectLatest {
+                if (customers.value != it) {
+                    customers.value = it
+                }
             }
         }
         viewModelScope.launch {
-            productRepository.getAllProducts().collectLatest {
-                products.value = it
+            productRepository.getAllProducts().distinctUntilChanged().collectLatest {
+                if (products.value != it) {
+                    products.value = it
+                }
             }
         }
         viewModelScope.launch {
-            expenseRepository.getAllExpenses().collectLatest {
-                expenses.value = it
+            expenseRepository.getAllExpenses().distinctUntilChanged().collectLatest {
+                if (expenses.value != it) {
+                    expenses.value = it
+                }
             }
         }
         viewModelScope.launch {
-            dailyClosingRepository.getAllClosings().collectLatest {
-                dailyClosings.value = it
+            dailyClosingRepository.getAllClosings().distinctUntilChanged().collectLatest {
+                if (dailyClosings.value != it) {
+                    dailyClosings.value = it
+                }
             }
         }
     }
