@@ -1,0 +1,99 @@
+<resources>
+    <string name="app_name">मातोश्री कलेक्शन</string>
+    <string name="tagline">स्मार्ट शॉप मॅनेजर</string>
+    <string name="currency_symbol">₹</string>
+
+    <!-- Navigation -->
+    <string name="nav_home">डॅशबोर्ड</string>
+    <string name="nav_bills">बिल</string>
+    <string name="nav_customers">कस्टमर</string>
+    <string name="nav_analytics">ॲनालिटिक्स</string>
+    <string name="nav_settings">सेटिंग</string>
+
+    <!-- Dashboard -->
+    <string name="dashboard_title">डॅशबोर्ड</string>
+    <string name="dashboard_subtitle">पुन्हा स्वागत आहे. आजची दुकानाची कामगिरी येथे पहा.</string>
+    <string name="today_sales">आजची विक्री</string>
+    <string name="estimated_profit">अंदाजित नफा</string>
+    <string name="actual_profit">निश्चित नफा</string>
+    <string name="bills_generated">एकूण बिले</string>
+    <string name="average_order">सरासरी बिल</string>
+    <string name="monthly_sales_progress">मासिक विक्री प्रगती</string>
+    <string name="payment_breakdown">पेमेंट तपशील</string>
+    <string name="recent_bills">अलीकडील बिले</string>
+    <string name="view_all">सर्व पहा</string>
+
+    <!-- Sales & Billing -->
+    <string name="new_sale">नवीन बिल</string>
+    <string name="quick_sale">क्विक सेल</string>
+    <string name="add_product">प्रॉडक्ट ॲड करा</string>
+    <string name="add_to_bill">बिलात जोडा</string>
+    <string name="cart_empty">कार्ट रिकामी आहे</string>
+    <string name="cart_empty_desc">बिल सुरू करण्यासाठी कस्टमर निवडा किंवा प्रॉडक्ट ॲड करा.</string>
+    <string name="customer_search_hint">कस्टमरचे नाव किंवा मोबाईल सर्च करा…</string>
+    <string name="add_new_customer">नवीन कस्टमर ॲड करा</string>
+    <string name="item_details">प्रॉडक्टची माहिती</string>
+    <string name="product_name">प्रॉडक्टचे नाव</string>
+    <string name="quantity">नग</string>
+    <string name="rate">दर</string>
+    <string name="price">किंमत</string>
+    <string name="amount">रक्कम</string>
+    <string name="subtotal">उपएकूण</string>
+    <string name="discount">डिस्काउंट</string>
+    <string name="discount_amount">डिस्काउंट रक्कम</string>
+    <string name="percentage">टक्के</string>
+    <string name="you_saved">तुम्ही वाचवले</string>
+    <string name="total">एकूण</string>
+    <string name="grand_total">एकूण रक्कम</string>
+    <string name="final_amount">एकूण रक्कम</string>
+    <string name="checkout">बिल पूर्ण करा</string>
+    <string name="sale_summary">विक्री सारांश</string>
+    <string name="complete_sale">बिल सेव्ह करा</string>
+    <string name="scan_to_pay">यूपीआयने पेमेंट करण्यासाठी स्कॅन करा</string>
+    <string name="payable">देय रक्कम</string>
+    <string name="thank_you">धन्यवाद!</string>
+    <string name="visit_again">पुन्हा नक्की भेट द्या!</string>
+
+    <!-- Payments -->
+    <string name="payment">पेमेंट</string>
+    <string name="payment_method">पेमेंट पद्धत</string>
+    <string name="pay_cash">कॅश</string>
+    <string name="pay_upi">यूपीआय</string>
+    <string name="pay_udhari">उधारी</string>
+    <string name="pay_paid">पेमेंट झाले</string>
+    <string name="pay_pending">पेंडिंग</string>
+    <string name="balance_due">बाकी रक्कम</string>
+    <string name="paid_amount">भरलेली रक्कम</string>
+
+    <!-- Customer -->
+    <string name="customer">कस्टमर</string>
+    <string name="customer_name">कस्टमरचे नाव</string>
+    <string name="customer_mobile">मोबाईल</string>
+    <string name="customer_village">गाव</string>
+    <string name="invoice">बिल</string>
+    <string name="invoice_no">बिल नंबर</string>
+    <string name="date">दिनांक</string>
+    <string name="time">वेळ</string>
+
+    <!-- App Lock & Security -->
+    <string name="enter_pin">दुकान अनलॉक करण्यासाठी ४ अंकी पिन टाका</string>
+    <string name="unlock_with_biometric">फिंगरप्रिंट वापरा</string>
+    <string name="forgot_pin">पिन विसरलात?</string>
+
+    <!-- Daily Closing -->
+    <string name="daily_closing">दैनिक क्लोजिंग</string>
+    <string name="expected_cash">अपेक्षित कॅश</string>
+    <string name="actual_cash">गल्ल्यातील प्रत्यक्ष कॅश</string>
+    <string name="cash_difference">कॅश फरक</string>
+    <string name="close_day">गल्ला सील करा</string>
+
+    <!-- Common -->
+    <string name="sync_status_synced">सिंक झाले</string>
+    <string name="sync_status_pending">ऑफलाइन / सिंक पेंडिंग</string>
+    <string name="sync_status_failed">सिंक अयशस्वी - पुन्हा प्रयत्न करा</string>
+    <string name="btn_save">सेव्ह करा</string>
+    <string name="btn_cancel">रद्द करा</string>
+    <string name="btn_share">शेअर करा</string>
+    <string name="btn_print">प्रिंट करा</string>
+    <string name="btn_void">बिल रद्द करा</string>
+</resources>

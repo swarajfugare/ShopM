@@ -8,8 +8,13 @@
 node_modules/
 vendor/
 
-# Android project & test folders
-android/
+# Android build outputs & local config
+android/.gradle/
+android/build/
+android/app/build/
+android/.idea/
+android/local.properties
+android/.cxx/
 tests/
 backend/
 

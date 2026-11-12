@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "153254712645",
+    "project_id": "matoshree-collection-74ffa",
+    "storage_bucket": "matoshree-collection-74ffa.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:153254712645:android:546e3756cec4145b435a2c",
+        "android_client_info": {
+          "package_name": "com.matoshree.collection"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyCnx3lADfMK0PPXJjJDyR24ist2vTfBpQo"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
