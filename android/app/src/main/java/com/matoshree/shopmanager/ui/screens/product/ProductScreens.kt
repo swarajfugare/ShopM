@@ -8,6 +8,7 @@ import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -30,8 +31,10 @@ import com.matoshree.shopmanager.domain.model.Category
 import com.matoshree.shopmanager.domain.model.Product
 import com.matoshree.shopmanager.ui.components.MatoshreeCard
 import com.matoshree.shopmanager.ui.components.MatoshreeTopAppBar
+import com.matoshree.shopmanager.ui.components.OnePlusAlphabetScroller
 import com.matoshree.shopmanager.ui.components.StatusBadge
 import com.matoshree.shopmanager.ui.theme.*
+import com.matoshree.shopmanager.utils.AlphabetUtils
 import com.matoshree.shopmanager.utils.CurrencyFormatter
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -54,7 +57,7 @@ class ProductViewModel(private val productRepository: ProductRepository) : ViewM
 
     val searchQuery = MutableStateFlow("")
     val selectedCategoryId = MutableStateFlow<Long?>(null)
-    val sortOption = MutableStateFlow(ProductSortOption.RECENTLY_ADDED)
+    val sortOption = MutableStateFlow(ProductSortOption.NAME_ASC)
 
     init {
         observeCatalog()
@@ -241,12 +244,27 @@ fun ProductsListScreen(
         }
 
         when (currentSort) {
-            ProductSortOption.NAME_ASC -> list.sortedBy { it.name.lowercase() }
+            ProductSortOption.NAME_ASC -> list.sortedWith { p1, p2 ->
+                AlphabetUtils.compareAlphabetically(p1.name, p2.name)
+            }
             ProductSortOption.PRICE_LOW_HIGH -> list.sortedBy { it.sellingPrice }
             ProductSortOption.PRICE_HIGH_LOW -> list.sortedByDescending { it.sellingPrice }
             ProductSortOption.RECENTLY_ADDED -> list.sortedByDescending { it.id }
         }
     }
+
+    val productSectionIndices = remember(filtered) {
+        val map = mutableMapOf<String, Int>()
+        filtered.forEachIndexed { index, prod ->
+            val key = AlphabetUtils.getAlphabetKey(prod.name)
+            if (!map.containsKey(key)) {
+                map[key] = index
+            }
+        }
+        map
+    }
+
+    val productListState = rememberLazyListState()
 
     if (showBarcodeScanner) {
         com.matoshree.shopmanager.ui.components.BarcodeScannerDialog(
@@ -593,71 +611,16 @@ fun ProductsListScreen(
                     }
                 }
             } else {
-                if (isTablet) {
+                Box(modifier = Modifier.fillMaxSize()) {
                     LazyColumn(
+                        state = productListState,
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .padding(end = if (filtered.isNotEmpty()) 24.dp else 0.dp),
                         verticalArrangement = Arrangement.spacedBy(10.dp),
                         contentPadding = PaddingValues(bottom = 96.dp)
                     ) {
-                        items(filtered.chunked(2), key = { pair -> "prod_pair_${pair[0].id}_${pair.getOrNull(1)?.id}" }) { pair ->
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.spacedBy(12.dp)
-                            ) {
-                                Box(modifier = Modifier.weight(1f)) {
-                                    val catName = categories.find { it.id == pair[0].categoryId }?.name ?: "इतर"
-                                    val isSelected = selectedProductIds.contains(pair[0].id)
-                                    ProductListItemCard(
-                                        product = pair[0],
-                                        catName = catName,
-                                        isSelected = isSelected,
-                                        isSelectionMode = selectedProductIds.isNotEmpty(),
-                                        onClick = {
-                                            if (selectedProductIds.isNotEmpty()) {
-                                                viewModel.toggleProductSelection(pair[0].id)
-                                            } else {
-                                                selectedProductForDetails = pair[0]
-                                            }
-                                        },
-                                        onLongClick = {
-                                            viewModel.toggleProductSelection(pair[0].id)
-                                        },
-                                        onCheckedChange = { viewModel.toggleProductSelection(pair[0].id) }
-                                    )
-                                }
-                                if (pair.size > 1) {
-                                    Box(modifier = Modifier.weight(1f)) {
-                                        val catName = categories.find { it.id == pair[1].categoryId }?.name ?: "इतर"
-                                        val isSelected = selectedProductIds.contains(pair[1].id)
-                                        ProductListItemCard(
-                                            product = pair[1],
-                                            catName = catName,
-                                            isSelected = isSelected,
-                                            isSelectionMode = selectedProductIds.isNotEmpty(),
-                                            onClick = {
-                                                if (selectedProductIds.isNotEmpty()) {
-                                                    viewModel.toggleProductSelection(pair[1].id)
-                                                } else {
-                                                    selectedProductForDetails = pair[1]
-                                                }
-                                            },
-                                            onLongClick = {
-                                                viewModel.toggleProductSelection(pair[1].id)
-                                            },
-                                            onCheckedChange = { viewModel.toggleProductSelection(pair[1].id) }
-                                        )
-                                    }
-                                } else {
-                                    Spacer(modifier = Modifier.weight(1f))
-                                }
-                            }
-                        }
-                    }
-                } else {
-                    LazyColumn(
-                        verticalArrangement = Arrangement.spacedBy(10.dp),
-                        contentPadding = PaddingValues(bottom = 96.dp)
-                    ) {
-                        items(filtered) { product ->
+                        items(filtered, key = { it.id }) { product ->
                             val catName = categories.find { it.id == product.categoryId }?.name ?: "इतर"
                             val isSelected = selectedProductIds.contains(product.id)
                             ProductListItemCard(
@@ -678,6 +641,28 @@ fun ProductsListScreen(
                                 onCheckedChange = { viewModel.toggleProductSelection(product.id) }
                             )
                         }
+                    }
+
+                    if (filtered.isNotEmpty()) {
+                        OnePlusAlphabetScroller(
+                            modifier = Modifier
+                                .align(Alignment.CenterEnd)
+                                .fillMaxHeight()
+                                .padding(top = 4.dp, bottom = 96.dp, end = 2.dp),
+                            activeLetters = productSectionIndices.keys,
+                            onLetterSelected = { letter ->
+                                val target = AlphabetUtils.findBestTargetIndex(
+                                    letter,
+                                    productSectionIndices,
+                                    filtered.size
+                                )
+                                if (target != null) {
+                                    coroutineScope.launch {
+                                        productListState.scrollToItem(target)
+                                    }
+                                }
+                            }
+                        )
                     }
                 }
             }

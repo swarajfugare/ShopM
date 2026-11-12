@@ -13,6 +13,7 @@ import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.items
@@ -46,11 +47,13 @@ import com.matoshree.shopmanager.utils.PhoneUtils
 import com.matoshree.shopmanager.ui.components.MatoshreeCard
 import com.matoshree.shopmanager.ui.components.MatoshreeDatePickerField
 import com.matoshree.shopmanager.ui.components.MatoshreeTopAppBar
+import com.matoshree.shopmanager.ui.components.OnePlusAlphabetScroller
 import com.matoshree.shopmanager.ui.components.PaymentMethodPill
 import com.matoshree.shopmanager.ui.components.PaymentReceiptDialog
 import com.matoshree.shopmanager.ui.components.StatusBadge
 import androidx.compose.material3.TabRowDefaults.tabIndicatorOffset
 import com.matoshree.shopmanager.ui.theme.*
+import com.matoshree.shopmanager.utils.AlphabetUtils
 import com.matoshree.shopmanager.utils.CurrencyFormatter
 import com.matoshree.shopmanager.utils.DateUtils
 import com.matoshree.shopmanager.utils.PrintShareHelper
@@ -908,7 +911,7 @@ fun CustomersListScreen(
 
     val filteredCustomers = remember(customers, search, selectedTagFilter) {
         val cleanSearch = search.trim()
-        customers.filter { cust ->
+        val filtered = customers.filter { cust ->
             val matchesSearch = cleanSearch.isBlank() ||
                 cust.name.contains(cleanSearch, ignoreCase = true) ||
                 cust.mobile.contains(cleanSearch) ||
@@ -922,8 +925,24 @@ fun CustomersListScreen(
                 else -> cust.listTags.contains(selectedTagFilter)
             }
             matchesSearch && matchesTag
-        }.sortedByDescending { it.id }
+        }
+        filtered.sortedWith { c1, c2 ->
+            AlphabetUtils.compareAlphabetically(c1.name, c2.name)
+        }
     }
+
+    val customerSectionIndices = remember(filteredCustomers) {
+        val map = mutableMapOf<String, Int>()
+        filteredCustomers.forEachIndexed { index, cust ->
+            val key = AlphabetUtils.getAlphabetKey(cust.name)
+            if (!map.containsKey(key)) {
+                map[key] = index
+            }
+        }
+        map
+    }
+
+    val customerListState = rememberLazyListState()
 
     Scaffold(
         topBar = {
@@ -1143,12 +1162,17 @@ fun CustomersListScreen(
                     }
                 }
             } else {
-                if (isTablet) {
-                    androidx.compose.foundation.lazy.grid.LazyVerticalGrid(
-                        columns = androidx.compose.foundation.lazy.grid.GridCells.Fixed(2),
-                        modifier = Modifier.fillMaxSize(),
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .weight(1f)
+                ) {
+                    LazyColumn(
+                        state = customerListState,
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .padding(end = if (filteredCustomers.isNotEmpty()) 24.dp else 0.dp),
                         verticalArrangement = Arrangement.spacedBy(10.dp),
-                        horizontalArrangement = Arrangement.spacedBy(12.dp),
                         contentPadding = PaddingValues(bottom = 80.dp)
                     ) {
                         items(filteredCustomers, key = { it.id }) { customer ->
@@ -1170,30 +1194,27 @@ fun CustomersListScreen(
                             )
                         }
                     }
-                } else {
-                    LazyColumn(
-                        modifier = Modifier.fillMaxSize(),
-                        verticalArrangement = Arrangement.spacedBy(10.dp),
-                        contentPadding = PaddingValues(bottom = 80.dp)
-                    ) {
-                        items(filteredCustomers, key = { it.id }) { customer ->
-                            val isSelected = selectedIds.contains(customer.id)
-                            CustomerListItemCard(
-                                customer = customer,
-                                isSelected = isSelected,
-                                isSelectionMode = selectedIds.isNotEmpty(),
-                                onCardClick = {
-                                    if (selectedIds.isNotEmpty()) {
-                                        viewModel.toggleCustomerSelection(customer.id)
-                                    } else {
-                                        onCustomerClick(customer.id)
+
+                    if (filteredCustomers.isNotEmpty()) {
+                        OnePlusAlphabetScroller(
+                            modifier = Modifier
+                                .align(Alignment.CenterEnd)
+                                .fillMaxHeight()
+                                .padding(top = 4.dp, bottom = 80.dp, end = 2.dp),
+                            activeLetters = customerSectionIndices.keys,
+                            onLetterSelected = { letter ->
+                                val target = AlphabetUtils.findBestTargetIndex(
+                                    letter,
+                                    customerSectionIndices,
+                                    filteredCustomers.size
+                                )
+                                if (target != null) {
+                                    coroutineScope.launch {
+                                        customerListState.scrollToItem(target)
                                     }
-                                },
-                                onLongClick = {
-                                    viewModel.toggleCustomerSelection(customer.id)
                                 }
-                            )
-                        }
+                            }
+                        )
                     }
                 }
             }
