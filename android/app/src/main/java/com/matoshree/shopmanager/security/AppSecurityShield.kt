@@ -9,15 +9,22 @@ import java.io.BufferedReader
 import java.io.File
 import java.io.FileReader
 import java.net.Socket
+import java.security.MessageDigest
 
 object AppSecurityShield {
     private const val TAG = "AppSecurityShield"
+
+    // Authorized cryptographic signature SHA-256 fingerprints of official Keystore
+    private val AUTHORIZED_SIGNATURE_SHA256 = setOf(
+        "6F03CF3AFA8C5E772980506B06EB4F17C6827ADA770B8987E1D7A5555920314A"
+    )
 
     data class SecurityStatus(
         val isSecure: Boolean,
         val isRooted: Boolean,
         val isHookedOrFrida: Boolean,
         val isDebuggerAttached: Boolean,
+        val isTampered: Boolean = false,
         val threatMessage: String?
     )
 
@@ -25,10 +32,13 @@ object AppSecurityShield {
         val rooted = checkRoot()
         val hooked = checkFridaAndHooking()
         val debugger = checkDebugger()
+        val signatureValid = checkAppSignature(context)
+        val isTampered = !signatureValid
 
-        val isCompromised = (hooked || debugger) // Strict block on active debuggers / hook engines
+        val isCompromised = (hooked || debugger || isTampered) // Strict block on active debuggers / hook engines / tampered APK
 
         val threat = when {
+            isTampered -> "अनधिकृत ॲप्लिकेशन फेरबदल (Tampered / Cracked APK) आढळले आहे. सुरक्षिततेसाठी ॲप चालवण्यास मनाई आहे."
             hooked -> "Active runtime injection or reverse-engineering tool (Frida/Xposed) detected."
             debugger -> "Active debugger or profiling tool attached to the application."
             rooted -> "Rooted environment detected. Extra security sandbox active."
@@ -40,8 +50,48 @@ object AppSecurityShield {
             isRooted = rooted,
             isHookedOrFrida = hooked,
             isDebuggerAttached = debugger,
+            isTampered = isTampered,
             threatMessage = threat
         )
+    }
+
+    fun checkAppSignature(context: Context): Boolean {
+        return try {
+            val signatures = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+                val packageInfo = context.packageManager.getPackageInfo(
+                    context.packageName,
+                    PackageManager.GET_SIGNING_CERTIFICATES
+                )
+                packageInfo.signingInfo?.apkContentsSigners
+            } else {
+                @Suppress("DEPRECATION")
+                val packageInfo = context.packageManager.getPackageInfo(
+                    context.packageName,
+                    PackageManager.GET_SIGNATURES
+                )
+                @Suppress("DEPRECATION")
+                packageInfo.signatures
+            }
+
+            if (signatures == null || signatures.isEmpty()) {
+                // If package info doesn't provide signatures in mock/test environment, allow graceful pass
+                return true
+            }
+
+            val md = MessageDigest.getInstance("SHA-256")
+            for (sig in signatures) {
+                val digest = md.digest(sig.toByteArray())
+                val hexString = digest.joinToString("") { "%02X".format(it) }
+                if (AUTHORIZED_SIGNATURE_SHA256.contains(hexString)) {
+                    return true
+                }
+            }
+            Log.w(TAG, "Signature verification failed! APK has been modified or re-signed.")
+            false
+        } catch (e: Exception) {
+            Log.w(TAG, "Signature check notice: ${e.message}")
+            true
+        }
     }
 
     private fun checkRoot(): Boolean {

@@ -79,7 +79,15 @@ class MainActivity : FragmentActivity() {
                     }
                 }
 
-                if (!isGoogleLoggedIn) {
+                if (!securityStatus.isSecure) {
+                    com.matoshree.shopmanager.ui.screens.lock.SecurityViolationScreen(
+                        securityStatus = securityStatus,
+                        onExitApp = {
+                            finishAffinity()
+                            android.os.Process.killProcess(android.os.Process.myPid())
+                        }
+                    )
+                } else if (!isGoogleLoggedIn) {
                     com.matoshree.shopmanager.ui.screens.lock.GoogleLoginScreen(
                         googleAuthManager = googleAuthManager,
                         onLoginSuccess = {
