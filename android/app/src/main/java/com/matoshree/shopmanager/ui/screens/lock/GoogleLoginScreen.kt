@@ -175,11 +175,34 @@ fun GoogleLoginScreen(
                 onClick = {
                     isLoading = true
                     errorMessage = null
-                    try {
-                        signInLauncher.launch(googleAuthManager.getSignInIntent())
-                    } catch (e: Exception) {
-                        isLoading = false
-                        errorMessage = "लॉगिन सुरू करता आले नाही: ${e.message}"
+                    val activity = context as? Activity
+                    if (activity != null) {
+                        com.matoshree.shopmanager.data.firebase.FirebaseManager.signInWithGoogle(activity) { success, err ->
+                            if (success) {
+                                val user = com.google.firebase.auth.FirebaseAuth.getInstance().currentUser
+                                val email = user?.email?.lowercase()?.trim() ?: ""
+                                val name = user?.displayName ?: "Owner"
+                                googleAuthManager.saveSession(email, name)
+                                isLoading = false
+                                Toast.makeText(context, "Google लॉगिन यशस्वी!", Toast.LENGTH_SHORT).show()
+                                onLoginSuccess()
+                            } else {
+                                // Fallback to GoogleSignInClient
+                                try {
+                                    signInLauncher.launch(googleAuthManager.getSignInIntent())
+                                } catch (e: Exception) {
+                                    isLoading = false
+                                    errorMessage = err ?: "लॉगिन सुरू करता आले नाही: ${e.message}"
+                                }
+                            }
+                        }
+                    } else {
+                        try {
+                            signInLauncher.launch(googleAuthManager.getSignInIntent())
+                        } catch (e: Exception) {
+                            isLoading = false
+                            errorMessage = "लॉगिन सुरू करता आले नाही: ${e.message}"
+                        }
                     }
                 },
                 enabled = !isLoading,

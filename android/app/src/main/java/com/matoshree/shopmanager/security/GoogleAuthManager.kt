@@ -162,7 +162,7 @@ class GoogleAuthManager(private val context: Context) {
         }
     }
 
-    private fun saveSession(email: String, name: String) {
+    fun saveSession(email: String, name: String) {
         prefs?.edit()
             ?.putString(KEY_AUTH_EMAIL, email)
             ?.putString(KEY_AUTH_NAME, name)
@@ -180,7 +180,7 @@ class GoogleAuthManager(private val context: Context) {
         }
     }
 
-    private fun clearSession() {
+    fun clearSession() {
         prefs?.edit()?.clear()?.apply()
     }
 }

@@ -18,6 +18,7 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.shape.CircleShape
@@ -324,6 +325,8 @@ fun SettingsScreen(
     var showBulkReminderConfirmDialog by remember { mutableStateOf(false) }
     var bulkReminderStatusText by remember { mutableStateOf("") }
     var showWaConfigDialog by remember { mutableStateOf(false) }
+    var showRulesHelpDialog by remember { mutableStateOf(false) }
+    val clipboardManager = androidx.compose.ui.platform.LocalClipboardManager.current
     var waWebhookUrl by remember { mutableStateOf(WhatsAppWebhookManager.getWebhookUrl(context)) }
     var waApiKey by remember { mutableStateOf(WhatsAppWebhookManager.getApiKey(context)) }
     var screenProtectionEnabled by remember {
@@ -1028,10 +1031,20 @@ fun SettingsScreen(
                     Spacer(modifier = Modifier.height(10.dp))
 
                     val diag = diagnostics
+                    val isDiagOk = diag?.isOnline == true && !(diag.firestoreStatus.contains("403") || diag.firestoreStatus.contains("Blocked"))
+                    val isDiagBlocked = diag?.isOnline == false || diag?.firestoreStatus?.contains("403") == true || diag?.firestoreStatus?.contains("Blocked") == true
+                    val isFirebaseAuthed = com.matoshree.shopmanager.data.firebase.FirebaseManager.isAuthorizedUser()
+
                     Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
                         Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                             Text("डेटाबेस स्थिती:", style = MaterialTheme.typography.bodySmall.copy(color = MutedCharcoal))
-                            Text(diag?.firestoreStatus ?: "Cloud Firestore (Online)", style = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.Bold, color = DeepEmerald))
+                            Text(
+                                diag?.firestoreStatus ?: "Cloud Firestore (Online)",
+                                style = MaterialTheme.typography.bodySmall.copy(
+                                    fontWeight = FontWeight.Bold,
+                                    color = if (isDiagOk) DeepEmerald else BoutiqueError
+                                )
+                            )
                         }
                         Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                             Text("सक्रिय डिव्हाइस / काउंटर:", style = MaterialTheme.typography.bodySmall.copy(color = MutedCharcoal))
@@ -1061,6 +1074,103 @@ fun SettingsScreen(
                         Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                             Text("एकूण खर्च (क्लाउड):", style = MaterialTheme.typography.bodySmall.copy(color = MutedCharcoal))
                             Text("${diag?.expensesCount ?: 0} नोंदी", style = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.Bold))
+                        }
+                    }
+
+                    if (isDiagBlocked || !isFirebaseAuthed) {
+                        Spacer(modifier = Modifier.height(12.dp))
+                        Surface(
+                            shape = RoundedCornerShape(10.dp),
+                            color = BoutiqueError.copy(alpha = 0.08f),
+                            border = BorderStroke(1.dp, BoutiqueError.copy(alpha = 0.4f)),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Column(modifier = Modifier.padding(12.dp)) {
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Icon(
+                                        Icons.Default.Security,
+                                        contentDescription = null,
+                                        tint = BoutiqueError,
+                                        modifier = Modifier.size(20.dp)
+                                    )
+                                    Spacer(modifier = Modifier.width(8.dp))
+                                    Text(
+                                        "क्लाउड ऑथेंटिकेशन आवश्यक (Firebase 403)",
+                                        style = MaterialTheme.typography.titleSmall.copy(
+                                            fontWeight = FontWeight.Bold,
+                                            color = BoutiqueError
+                                        )
+                                    )
+                                }
+                                Spacer(modifier = Modifier.height(6.dp))
+                                Text(
+                                    "Firestore डेटाबेस सुरक्षित असल्यामुळे अधिकृत Google खात्याने लॉगिन आवश्यक आहे. खालील बटणावर क्लिक करून Google लॉगिन री-ऑथेंटिकेट करा:",
+                                    style = MaterialTheme.typography.bodySmall.copy(
+                                        color = MutedCharcoal,
+                                        lineHeight = 18.sp
+                                    )
+                                )
+                                Spacer(modifier = Modifier.height(10.dp))
+
+                                var isAuthenticating by remember { mutableStateOf(false) }
+
+                                Button(
+                                    onClick = {
+                                        val act = context as? android.app.Activity
+                                        if (act != null) {
+                                            isAuthenticating = true
+                                            com.matoshree.shopmanager.data.firebase.FirebaseManager.signInWithGoogle(act) { success, err ->
+                                                isAuthenticating = false
+                                                if (success) {
+                                                    val user = com.google.firebase.auth.FirebaseAuth.getInstance().currentUser
+                                                    val email = user?.email?.lowercase()?.trim() ?: ""
+                                                    val name = user?.displayName ?: "Owner"
+                                                    val gAuth = com.matoshree.shopmanager.security.GoogleAuthManager(context)
+                                                    gAuth.saveSession(email, name)
+                                                    Toast.makeText(context, "Google प्रमाणीकरण यशस्वी! क्लाउड डेटाबेस जोडला गेला.", Toast.LENGTH_SHORT).show()
+                                                    viewModel.loadDiagnostics()
+                                                } else {
+                                                    Toast.makeText(context, err ?: "प्रमाणीकरण अयशस्वी", Toast.LENGTH_LONG).show()
+                                                }
+                                            }
+                                        }
+                                    },
+                                    enabled = !isAuthenticating,
+                                    colors = ButtonDefaults.buttonColors(containerColor = DeepEmerald),
+                                    shape = RoundedCornerShape(8.dp),
+                                    modifier = Modifier.fillMaxWidth().height(42.dp)
+                                ) {
+                                    if (isAuthenticating) {
+                                        CircularProgressIndicator(color = WarmWhite, modifier = Modifier.size(18.dp), strokeWidth = 2.dp)
+                                    } else {
+                                        Icon(Icons.Default.AccountCircle, contentDescription = null, tint = ChampagneGold, modifier = Modifier.size(18.dp))
+                                        Spacer(modifier = Modifier.width(8.dp))
+                                        Text(
+                                            "Google ने पुन्हा लॉगिन करा (Re-Authenticate)",
+                                            fontSize = 12.sp,
+                                            fontWeight = FontWeight.Bold,
+                                            color = WarmWhite
+                                        )
+                                    }
+                                }
+
+                                Spacer(modifier = Modifier.height(8.dp))
+                                OutlinedButton(
+                                    onClick = {
+                                        showRulesHelpDialog = true
+                                    },
+                                    shape = RoundedCornerShape(8.dp),
+                                    border = BorderStroke(1.dp, ChampagneGold),
+                                    modifier = Modifier.fillMaxWidth().height(36.dp)
+                                ) {
+                                    Text(
+                                        "📋 Firebase Console नियम (Rules) तपासा / कॉपी करा",
+                                        fontSize = 11.sp,
+                                        fontWeight = FontWeight.SemiBold,
+                                        color = DeepEmerald
+                                    )
+                                }
+                            }
                         }
                     }
                 }
@@ -1796,6 +1906,86 @@ fun SettingsScreen(
             dismissButton = {
                 TextButton(onClick = { showWaConfigDialog = false }) {
                     Text("रद्द करा")
+                }
+            },
+            containerColor = WarmWhite,
+            shape = RoundedCornerShape(16.dp)
+        )
+    }
+
+    if (showRulesHelpDialog) {
+        val rulesText = """rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+    function isAuthorizedOwner() {
+      return isAuthenticated() &&
+        request.auth.token.email in ['swarajfugare23@gmail.com', 'sadhanafugare86@gmail.com'];
+    }
+    match /{document=**} {
+      allow read, write: if isAuthorizedOwner();
+    }
+  }
+}"""
+
+        AlertDialog(
+            onDismissRequest = { showRulesHelpDialog = false },
+            title = {
+                Text(
+                    "Firebase Console Rules मदत",
+                    fontWeight = FontWeight.Bold,
+                    color = DeepEmerald
+                )
+            },
+            text = {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .verticalScroll(rememberScrollState()),
+                    verticalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    Text(
+                        "जर Firebase Console मधील नियम जुने किंवा ब्लॉक झालेले असतील, तर पुढील ३ सोप्या पायऱ्या करा:\n\n" +
+                        "१. console.firebase.google.com उघडा.\n" +
+                        "२. Firestore Database -> 'Rules' टॅबवर जा.\n" +
+                        "३. खालील नियम पेस्ट करून वर दिलेले 'Publish' बटण दाबा.",
+                        style = MaterialTheme.typography.bodySmall.copy(color = MutedCharcoal, lineHeight = 18.sp)
+                    )
+
+                    Surface(
+                        color = Color(0xFFF4F4F4),
+                        shape = RoundedCornerShape(8.dp),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Text(
+                            text = rulesText,
+                            style = MaterialTheme.typography.bodySmall.copy(
+                                fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace,
+                                fontSize = 10.sp,
+                                color = Color.DarkGray
+                            ),
+                            modifier = Modifier.padding(10.dp)
+                        )
+                    }
+                }
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        clipboardManager.setText(androidx.compose.ui.text.AnnotatedString(rulesText))
+                        Toast.makeText(context, "Firestore Rules क्लिपबोर्डवर कॉपी केले!", Toast.LENGTH_SHORT).show()
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = DeepEmerald),
+                    shape = RoundedCornerShape(8.dp)
+                ) {
+                    Text("नियम कॉपी करा")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showRulesHelpDialog = false }) {
+                    Text("बंद करा")
                 }
             },
             containerColor = WarmWhite,
