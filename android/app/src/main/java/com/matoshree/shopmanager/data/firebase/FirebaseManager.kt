@@ -96,12 +96,20 @@ object FirebaseManager {
     }
 
     suspend fun ensureAuthenticated(): Boolean {
-        if (isAuthorizedUser()) return true
-        if (auth.currentUser != null && !isAuthorizedUser()) {
-            try { auth.signOut() } catch (_: Exception) {}
-            return false
+        if (auth.currentUser != null) return true
+        if (!isNetworkAvailable()) {
+            return false // Instant return when offline, zero wait
         }
-        return false
+        return try {
+            kotlinx.coroutines.withTimeoutOrNull(2500L) {
+                auth.signInAnonymously().await()
+            }
+            Log.d(TAG, "Authenticated with Firebase (UID: ${auth.currentUser?.uid})")
+            auth.currentUser != null
+        } catch (e: Exception) {
+            Log.w(TAG, "Firebase Auth notice (offline mode active): ${e.message}")
+            auth.currentUser != null
+        }
     }
 
     fun signInWithGoogle(

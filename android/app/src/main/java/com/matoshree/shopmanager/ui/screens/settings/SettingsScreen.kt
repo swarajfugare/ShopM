@@ -1386,7 +1386,7 @@ fun SettingsScreen(
         }
         val renderVersionCard: @Composable () -> Unit = {
             Text(
-                text = "मातोश्री कलेक्शन शॉप मॅनेजर • Version 2.5.3\nCloud Firestore Authoritative Single Source of Truth",
+                text = "मातोश्री कलेक्शन शॉप मॅनेजर • Version 2.5.4\nCloud Firestore Authoritative Single Source of Truth",
                 style = MaterialTheme.typography.bodySmall.copy(color = MutedCharcoal),
                 modifier = Modifier
                     .fillMaxWidth()

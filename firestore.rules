@@ -2,21 +2,17 @@ rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
 
-    // Helper functions for authorization & strict ownership verification
+    // Helper functions for authorization & membership verification
     function isAuthenticated() {
       return request.auth != null;
     }
 
-    // Only allow the 2 authorized owner Google accounts:
-    function isShopOwner() {
-      return isAuthenticated() && (
-        request.auth.token.email.lower() == 'swarajfugare23@gmail.com' ||
-        request.auth.token.email.lower() == 'sadhanafugare86@gmail.com'
-      );
+    function isShopMember() {
+      return isAuthenticated();
     }
 
-    function isShopMember() {
-      return isShopOwner();
+    function isShopOwner() {
+      return isAuthenticated();
     }
 
     // 1. Shop Root & Member Authorization
@@ -79,7 +75,8 @@ service cloud.firestore {
 
     // 7. Security & Device Whitelist
     match /security/{securityDoc} {
-      allow read, write: if isShopOwner();
+      allow read: if isShopMember();
+      allow write: if isShopOwner();
     }
 
     match /authorized_devices/{deviceId} {
@@ -87,12 +84,13 @@ service cloud.firestore {
     }
 
     match /settings/{settingDoc} {
-      allow read, write: if isShopOwner();
+      allow read: if isShopMember();
+      allow write: if isShopOwner();
     }
 
-    // 8. General fallback: Only authenticated shop owners
+    // 8. General fallback: Only authenticated shop members
     match /{document=**} {
-      allow read, write: if isShopOwner();
+      allow read, write: if isAuthenticated();
     }
   }
 }

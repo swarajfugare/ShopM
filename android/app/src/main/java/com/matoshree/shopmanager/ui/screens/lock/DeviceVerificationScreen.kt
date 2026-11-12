@@ -44,7 +44,6 @@ fun DeviceVerificationScreen(
     var errorMessage by remember { mutableStateOf<String?>(null) }
     var isVerifying by remember { mutableStateOf(false) }
 
-    val accountEmail = remember { TotpAuthenticator.ACCOUNT_EMAIL }
     val hardwareId = remember { deviceTrustManager.getHardwareDeviceId() }
     val deviceName = remember { deviceTrustManager.getDeviceName() }
 
@@ -108,7 +107,7 @@ fun DeviceVerificationScreen(
             Spacer(modifier = Modifier.height(8.dp))
 
             Text(
-                text = "हे डिव्हाइस अधिकृत करण्यासाठी $accountEmail च्या Google Authenticator ॲपमधील ६ अंकी कोड टाका, किंवा दुकान मालकाकडून या डिव्हाइसला क्लाउड मंजुरी घ्या.",
+                text = "हे डिव्हाइस अधिकृत करण्यासाठी गुप्त सुरक्षा कोड टाका, किंवा दुकान मालकाकडून या डिव्हाइसला क्लाउड मंजुरी घ्या.",
                 style = MaterialTheme.typography.bodyMedium.copy(
                     color = MutedCharcoal,
                     textAlign = TextAlign.Center,
