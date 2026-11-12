@@ -187,7 +187,8 @@ class BillRepository(
                 try {
                     firestoreRepo.getRecentBills(limit).collect { cloudBills ->
                         if (cloudBills.isNotEmpty()) {
-                            cloudBills.forEach { b ->
+                            val billsToUpsert = mutableListOf<Pair<BillEntity, List<BillItemEntity>>>()
+                            for (b in cloudBills) {
                                 try {
                                     val existing = (if (b.transactionUuid.isNotBlank()) database.billDao().getBillByUuid(b.transactionUuid) else null)
                                         ?: (if (b.billNumber.isNotBlank()) database.billDao().getBillByNumber(b.billNumber) else null)
@@ -198,9 +199,12 @@ class BillRepository(
                                         (b.items.isNotEmpty() && existing.items.isEmpty())
 
                                     if (needsSync) {
-                                        cacheBillToRoom(database, b)
+                                        billsToUpsert.add(toBillEntities(b))
                                     }
                                 } catch (_: Exception) {}
+                            }
+                            if (billsToUpsert.isNotEmpty()) {
+                                database.billDao().upsertServerBills(billsToUpsert)
                             }
                         }
                     }
@@ -293,15 +297,9 @@ class BillRepository(
         return billToSave
     }
 
-    private suspend fun cacheBillToRoom(database: AppDatabase, bill: Bill, syncStatus: SyncStatus = SyncStatus.SYNCED) {
-        val existing = (if (bill.transactionUuid.isNotBlank()) database.billDao().getBillByUuid(bill.transactionUuid) else null)
-            ?: (if (bill.id > 0) database.billDao().getBillByServerId(bill.id) else null)
-            ?: (if (bill.billNumber.isNotBlank()) database.billDao().getBillByNumber(bill.billNumber) else null)
-
-        val localRoomId = existing?.bill?.id ?: 0L
-
+    private fun toBillEntities(bill: Bill, syncStatus: SyncStatus = SyncStatus.SYNCED): Pair<BillEntity, List<BillItemEntity>> {
         val billEntity = BillEntity(
-            id = localRoomId,
+            id = 0L,
             serverId = bill.id,
             shopId = bill.shopId,
             customerId = bill.customerId,
@@ -337,7 +335,7 @@ class BillRepository(
         val itemEntities = bill.items.map { item ->
             BillItemEntity(
                 id = 0,
-                billId = localRoomId,
+                billId = 0L,
                 productId = item.productId,
                 productNameSnapshot = item.productName,
                 skuSnapshot = item.sku,
@@ -351,7 +349,12 @@ class BillRepository(
                 lineProfit = item.lineProfit
             )
         }
-        database.billDao().upsertServerBill(billEntity, itemEntities)
+        return Pair(billEntity, itemEntities)
+    }
+
+    private suspend fun cacheBillToRoom(database: AppDatabase, bill: Bill, syncStatus: SyncStatus = SyncStatus.SYNCED) {
+        val pair = toBillEntities(bill, syncStatus)
+        database.billDao().upsertServerBill(pair.first, pair.second)
         // Note: incrementCustomerSpend is deliberately NOT called here to prevent double-counting during sync
     }
 
@@ -495,7 +498,8 @@ class CustomerRepository(
             val cloudJob = kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.IO).launch {
                 try {
                     firestoreRepo.getAllCustomers().collect { cloudCusts ->
-                        cloudCusts.forEach { c ->
+                        val custsToUpsert = mutableListOf<CustomerEntity>()
+                        for (c in cloudCusts) {
                             try {
                                 val existing = if (c.mobile.isNotBlank()) database.customerDao().getCustomerByMobile(c.mobile) else null
                                 val needsUpsert = existing == null ||
@@ -507,9 +511,12 @@ class CustomerRepository(
 
                                 if (needsUpsert) {
                                     val entity = c.toEntity().copy(serverId = if (c.id > 0) c.id else null)
-                                    database.customerDao().upsertServerCustomer(entity)
+                                    custsToUpsert.add(entity)
                                 }
                             } catch (_: Exception) {}
+                        }
+                        if (custsToUpsert.isNotEmpty()) {
+                            database.customerDao().upsertServerCustomers(custsToUpsert)
                         }
                     }
                 } catch (e: Exception) {

@@ -36,6 +36,8 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.debounce
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.launch
 
 class DashboardViewModel(
@@ -71,13 +73,17 @@ class DashboardViewModel(
         }
     }
 
+    @OptIn(kotlinx.coroutines.FlowPreview::class)
     private fun observeBills() {
         viewModelScope.launch {
             combine(
-                billRepository.getAllBills(limit = 500),
-                udhariRepository.getAllTransactions()
+                billRepository.getAllBills(limit = 500).distinctUntilChanged(),
+                udhariRepository.getAllTransactions().distinctUntilChanged()
             ) { bills, transactions ->
+                Pair(bills, transactions)
+            }.debounce(200).collectLatest { (bills, transactions) ->
                 val today = DateUtils.todayDate()
+                val currentMonthPrefix = today.take(7)
                 val todayBills = bills.filter { it.billDate.startsWith(today) && !it.isVoided }
 
                 val todaySales = todayBills.sumOf { it.finalAmount }
@@ -87,7 +93,7 @@ class DashboardViewModel(
                 val cashSales = todayBills.filter { it.paymentMethod.name == "CASH" }.sumOf { it.paidAmount }
                 val upiSales = todayBills.filter { it.paymentMethod.name == "UPI" }.sumOf { it.paidAmount }
 
-                val allMonthSales = bills.filter { !it.isVoided }.sumOf { it.finalAmount }
+                val allMonthSales = bills.filter { it.billDate.startsWith(currentMonthPrefix) && !it.isVoided }.sumOf { it.finalAmount }
                 val target = 500000.0
                 val progress = ((allMonthSales / target) * 100).coerceAtMost(100.0)
 
@@ -163,7 +169,7 @@ class DashboardViewModel(
                 if (_summary.value != newSummary) {
                     _summary.value = newSummary
                 }
-            }.collect { }
+            }
         }
     }
 }

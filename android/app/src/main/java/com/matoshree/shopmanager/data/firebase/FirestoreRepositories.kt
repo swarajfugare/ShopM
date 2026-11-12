@@ -257,11 +257,16 @@ class FirestoreCustomerRepository {
         val rootMap = mutableMapOf<String, Customer>()
         val shopMap = mutableMapOf<String, Customer>()
 
+        var debounceJob: kotlinx.coroutines.Job? = null
         fun emitCombined() {
-            val combined = (rootMap.values + shopMap.values)
-                .distinctBy { if (it.mobile.isNotBlank()) it.mobile else it.id.toString() }
-                .sortedByDescending { it.id }
-            trySend(combined)
+            debounceJob?.cancel()
+            debounceJob = launch {
+                kotlinx.coroutines.delay(100)
+                val combined = (rootMap.values + shopMap.values)
+                    .distinctBy { if (it.mobile.isNotBlank()) it.mobile else it.id.toString() }
+                    .sortedByDescending { it.id }
+                trySend(combined)
+            }
         }
 
         val rootListener = FirebaseManager.customersCollection()
@@ -1224,12 +1229,17 @@ class FirestoreBillRepository {
         val rootMap = mutableMapOf<String, Bill>()
         val shopMap = mutableMapOf<String, Bill>()
 
+        var debounceJob: kotlinx.coroutines.Job? = null
         fun emitCombined() {
-            val combined = (rootMap.values + shopMap.values)
-                .distinctBy { if (it.transactionUuid.isNotBlank()) it.transactionUuid else "${it.billNumber}_${it.id}" }
-                .sortedWith(compareByDescending<Bill> { it.billDate }.thenByDescending { it.id })
-                .take(limit)
-            trySend(combined)
+            debounceJob?.cancel()
+            debounceJob = launch {
+                kotlinx.coroutines.delay(100)
+                val combined = (rootMap.values + shopMap.values)
+                    .distinctBy { if (it.transactionUuid.isNotBlank()) it.transactionUuid else "${it.billNumber}_${it.id}" }
+                    .sortedWith(compareByDescending<Bill> { it.billDate }.thenByDescending { it.id })
+                    .take(limit)
+                trySend(combined)
+            }
         }
 
         val rootListener = FirebaseManager.billsCollection()

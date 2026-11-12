@@ -141,6 +141,13 @@ interface BillDao {
             insertBillItems(itemsWithId)
         }
     }
+
+    @Transaction
+    suspend fun upsertServerBills(billsWithItems: List<Pair<BillEntity, List<BillItemEntity>>>) {
+        for ((bill, items) in billsWithItems) {
+            upsertServerBill(bill, items)
+        }
+    }
 }
 
 @Dao
@@ -225,6 +232,13 @@ interface CustomerDao {
             }
         } else {
             insertCustomer(customer.copy(id = 0))
+        }
+    }
+
+    @Transaction
+    suspend fun upsertServerCustomers(customers: List<CustomerEntity>) {
+        for (customer in customers) {
+            upsertServerCustomer(customer)
         }
     }
 }

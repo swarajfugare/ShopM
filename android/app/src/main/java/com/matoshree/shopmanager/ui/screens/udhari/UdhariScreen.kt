@@ -46,6 +46,7 @@ import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
 import java.util.UUID
 
+@OptIn(kotlinx.coroutines.FlowPreview::class)
 class UdhariViewModel(
     private val udhariRepository: UdhariRepository,
     private val customerRepository: CustomerRepository,
@@ -69,6 +70,8 @@ class UdhariViewModel(
         billsFlow,
         transactionsFlow
     ) { customers, bills, transactions ->
+        Triple(customers, bills, transactions)
+    }.debounce(200).map { (customers, bills, transactions) ->
         val activeBills = bills.filter { !it.isVoided }
         val validTxs = transactions.filter { !it.isReversed }
 
@@ -163,6 +166,8 @@ class UdhariViewModel(
         billsFlow,
         transactionsFlow
     ) { bills, transactions ->
+        Pair(bills, transactions)
+    }.debounce(200).map { (bills, transactions) ->
         val activeBills = bills.filter { !it.isVoided }
         val validTxs = transactions.filter { !it.isReversed }
 
@@ -503,7 +508,10 @@ fun UdhariScreen(
                     }
                 }
             } else {
-                items(customerList, key = { it.customer.id }) { summary ->
+                items(
+                    items = customerList,
+                    key = { if (it.customer.mobile.isNotBlank()) it.customer.mobile else "cust_${it.customer.id}_${it.customer.name}" }
+                ) { summary ->
                     UdhariCustomerCard(
                         summary = summary,
                         onClick = { onCustomerClick(summary.customer.id) },
