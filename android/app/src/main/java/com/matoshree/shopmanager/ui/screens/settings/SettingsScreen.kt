@@ -1046,7 +1046,7 @@ fun SettingsScreen(
                     ) {
                         Icon(Icons.Default.Send, contentDescription = null, modifier = Modifier.size(14.dp), tint = DeepEmerald)
                         Spacer(modifier = Modifier.width(6.dp))
-                        Text("🧪 उधारी आठवण मेसेजची चाचणी घ्या (Test)", fontSize = 11.sp, color = DeepEmerald)
+                        Text("उधारी आठवण मेसेज पूर्वावलोकन पाठवा", fontSize = 11.sp, color = DeepEmerald)
                     }
 
                     Spacer(modifier = Modifier.height(14.dp))
@@ -1386,7 +1386,7 @@ fun SettingsScreen(
         }
         val renderVersionCard: @Composable () -> Unit = {
             Text(
-                text = "मातोश्री कलेक्शन शॉप मॅनेजर • Version 2.5.7\nCloud Firestore Authoritative Single Source of Truth",
+                text = "मातोश्री कलेक्शन शॉप मॅनेजर • Version 3.0.0 (Production Stable)\nCloud Firestore Authoritative Single Source of Truth",
                 style = MaterialTheme.typography.bodySmall.copy(color = MutedCharcoal),
                 modifier = Modifier
                     .fillMaxWidth()

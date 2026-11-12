@@ -23,11 +23,6 @@ class DeviceTrustManager(private val context: Context) {
         private const val KEY_IS_AUTHORIZED = "is_device_authorized"
         private const val KEY_DEVICE_TOKEN = "device_security_token"
         private const val KEY_ACTIVATED_AT = "device_activated_at"
-
-        // Salted SHA-256 hash of Owner Master Activation Passcode: "MATOSHREE-SHOP-OWNER-2026"
-        private const val MASTER_KEY_HASH = "8f1a84c8a2b53e414c44ec94b34bdfbc4a737f22ec28795791e847c20ef22f3e"
-        // Salted SHA-256 hash of Secondary Owner Recovery Passcode
-        private const val BACKUP_KEY_HASH = "4a44dc15364204a80fe80e9039455cc1608281820fe2b24f1e5233ade67a4b8f"
     }
 
     @SuppressLint("HardwareIds")
@@ -88,52 +83,6 @@ class DeviceTrustManager(private val context: Context) {
                 Log.w(TAG, "Failed to register device in cloud: ${e.message}")
             }
         }
-    }
-
-    suspend fun verifyAndAuthorizeDevice(activationKey: String): Boolean {
-        val trimmed = activationKey.trim()
-        val enteredHash = hashString(trimmed)
-
-        // 1. Verify with Google Authenticator (6-digit TOTP)
-        val isTotpValid = TotpAuthenticator.verifyCode(trimmed)
-
-        // 2. Master Key / Owner Code Fallbacks (SHA-256 salted only - no plaintext backdoors)
-        val isMasterValid = (enteredHash == MASTER_KEY_HASH || enteredHash == BACKUP_KEY_HASH)
-
-        val isValid = isTotpValid || isMasterValid
-
-        if (isValid) {
-            val token = "AUTH-DEV-${UUID.randomUUID().toString().take(12).uppercase()}"
-            prefs.edit()
-                .putBoolean(KEY_IS_AUTHORIZED, true)
-                .putString(KEY_DEVICE_TOKEN, token)
-                .putLong(KEY_ACTIVATED_AT, System.currentTimeMillis())
-                .apply()
-
-            // Register device in Cloud Firestore trusted registry
-            try {
-                FirebaseManager.ensureAuthenticated()
-                val devId = getHardwareDeviceId()
-                FirebaseManager.firestore.collection("authorized_devices").document(devId).set(
-                    mapOf(
-                        "deviceId" to devId,
-                        "deviceName" to getDeviceName(),
-                        "deviceModel" to Build.MODEL,
-                        "osVersion" to Build.VERSION.RELEASE,
-                        "authorizedAt" to System.currentTimeMillis(),
-                        "status" to "ACTIVE"
-                    ),
-                    SetOptions.merge()
-                ).await()
-                Log.d(TAG, "Device $devId successfully authorized & registered in Firestore")
-            } catch (e: Exception) {
-                Log.w(TAG, "Failed to register device in cloud: ${e.message}")
-            }
-
-            return true
-        }
-
-        return false
     }
 
     suspend fun checkCloudApproval(): Boolean {

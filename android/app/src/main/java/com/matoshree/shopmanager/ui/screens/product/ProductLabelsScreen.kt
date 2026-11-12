@@ -392,7 +392,7 @@ fun ProductLabelsScreen(
                             if (isTestingPrint) {
                                 CircularProgressIndicator(modifier = Modifier.size(12.dp), strokeWidth = 1.5.dp, color = DeepEmerald)
                             } else {
-                                Text("🧪 चाचणी", fontSize = 11.sp, color = DeepEmerald, fontWeight = FontWeight.Bold)
+                                Text("नमुना प्रिंट", fontSize = 11.sp, color = DeepEmerald, fontWeight = FontWeight.Bold)
                             }
                         }
 
@@ -1252,7 +1252,7 @@ fun StickerCalibrationDialog(
                     contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp),
                     modifier = Modifier.height(36.dp)
                 ) {
-                    Text("🧪 चाचणी", fontSize = 11.sp, color = DeepEmerald, fontWeight = FontWeight.Bold)
+                    Text("नमुना प्रिंट", fontSize = 11.sp, color = DeepEmerald, fontWeight = FontWeight.Bold)
                 }
                 Button(
                     onClick = { onSave(size, gapOffset, verticalOffset, protocol) },
