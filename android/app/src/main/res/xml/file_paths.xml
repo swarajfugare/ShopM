@@ -1,5 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <paths xmlns:android="http://schemas.android.com/apk/res/android">
-    <cache-path name="shared_cache" path="." />
-    <files-path name="shared_files" path="." />
+    <cache-path name="shared_receipts" path="receipts/" />
+    <cache-path name="shared_labels" path="labels/" />
+    <cache-path name="shared_reports" path="reports/" />
 </paths>

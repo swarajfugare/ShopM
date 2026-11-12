@@ -425,11 +425,3 @@ data class DailyClosingDto(
         )
     }
 }
-
-@IgnoreExtraProperties
-data class SecurityPinDto(
-    var pinHash: String = "03ac674216f3e15c761ee1a5e255f067953623c8b388b4459e13f978d7c846f4",
-    var salt: String = "matoshree_salt_v2",
-    var updatedAt: Long = System.currentTimeMillis(),
-    var updatedByDevice: String = ""
-)

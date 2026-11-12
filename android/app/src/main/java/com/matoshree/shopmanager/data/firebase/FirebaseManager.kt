@@ -85,10 +85,7 @@ object FirebaseManager {
         }
     }
 
-    val AUTHORIZED_EMAILS = setOf(
-        "swarajfugare23@gmail.com",
-        "sadhanafugare86@gmail.com"
-    )
+    val AUTHORIZED_EMAILS = com.matoshree.shopmanager.security.GoogleAuthManager.AUTHORIZED_EMAILS
 
     fun isAuthorizedUser(): Boolean {
         val email = auth.currentUser?.email?.lowercase()?.trim()
@@ -96,20 +93,14 @@ object FirebaseManager {
     }
 
     suspend fun ensureAuthenticated(): Boolean {
-        if (auth.currentUser != null) return true
-        if (!isNetworkAvailable()) {
-            return false // Instant return when offline, zero wait
-        }
-        return try {
-            kotlinx.coroutines.withTimeoutOrNull(2500L) {
-                auth.signInAnonymously().await()
+        val user = auth.currentUser
+        if (user != null) {
+            val email = user.email?.lowercase()?.trim()
+            if (email != null && AUTHORIZED_EMAILS.contains(email)) {
+                return true
             }
-            Log.d(TAG, "Authenticated with Firebase (UID: ${auth.currentUser?.uid})")
-            auth.currentUser != null
-        } catch (e: Exception) {
-            Log.w(TAG, "Firebase Auth notice (offline mode active): ${e.message}")
-            auth.currentUser != null
         }
+        return false
     }
 
     fun signInWithGoogle(
@@ -254,12 +245,6 @@ object FirebaseManager {
                     results.add("FIRESTORE DELETE: FAIL (${de.message})")
                     allPassed = false
                 }
-            }
-
-            // Test Security PIN Document on server
-            val pinSnap = securityDoc().get().await()
-            if (!pinSnap.exists()) {
-                securityDoc().set(SecurityPinDto(updatedAt = System.currentTimeMillis(), updatedByDevice = "init")).await()
             }
 
             // Seed Shop Settings if missing

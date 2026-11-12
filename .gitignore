@@ -3,6 +3,9 @@
 .env.local
 *.key
 *.pem
+keystore.properties
+*.jks
+*.keystore
 
 # Dependencies
 node_modules/

@@ -118,6 +118,7 @@ object ShopNotificationManager {
             .setSmallIcon(R.drawable.ic_stat_notification)
             .setColor(0xFF1B4D3E.toInt()) // DeepEmerald
             .setContentTitle(title)
+            .setVisibility(NotificationCompat.VISIBILITY_PRIVATE)
             .setContentText("$customerText साठी $methodText द्वारे बिल केले ($deviceName)")
             .setStyle(
                 NotificationCompat.BigTextStyle().bigText(
@@ -165,6 +166,7 @@ object ShopNotificationManager {
             .setSmallIcon(R.drawable.ic_stat_notification)
             .setColor(0xFF1B4D3E.toInt())
             .setContentTitle("💰 पेमेंट जमा: $paidStr")
+            .setVisibility(NotificationCompat.VISIBILITY_PRIVATE)
             .setContentText("$customerName कडून $paidStr जमा ($deviceName). शिल्लक बाकी: $remStr")
             .setStyle(
                 NotificationCompat.BigTextStyle().bigText(
@@ -210,6 +212,7 @@ object ShopNotificationManager {
             .setSmallIcon(R.drawable.ic_stat_notification)
             .setColor(0xFFD32F2F.toInt()) // Red warning
             .setContentTitle("⚠️ उधारी मर्यादा अलर्ट: $customerName")
+            .setVisibility(NotificationCompat.VISIBILITY_PRIVATE)
             .setContentText("बाकी रक्कम ($balStr) उधारी मर्यादेपेक्षा ($limitStr) जास्त झाली आहे.")
             .setStyle(
                 NotificationCompat.BigTextStyle().bigText(
@@ -254,6 +257,7 @@ object ShopNotificationManager {
             .setSmallIcon(R.drawable.ic_stat_notification)
             .setColor(0xFF1B4D3E.toInt())
             .setContentTitle("⏳ आज उधारी देय तारीख: $customerName")
+            .setVisibility(NotificationCompat.VISIBILITY_PRIVATE)
             .setContentText("$amountStr पेमेंट आज ($dueDate) देय आहे.")
             .setStyle(
                 NotificationCompat.BigTextStyle().bigText(
@@ -295,6 +299,7 @@ object ShopNotificationManager {
             .setSmallIcon(R.drawable.ic_stat_notification)
             .setColor(0xFF1B4D3E.toInt())
             .setContentTitle("⚠️ थकीत उधारी अलर्ट")
+            .setVisibility(NotificationCompat.VISIBILITY_PRIVATE)
             .setContentText("$overdueCount कस्टमर्सची उधारी थकीत आहे (>१५ दिवस). एकूण: $totalStr")
             .setStyle(
                 NotificationCompat.BigTextStyle().bigText(
@@ -330,6 +335,7 @@ object ShopNotificationManager {
             .setSmallIcon(R.drawable.ic_stat_notification)
             .setColor(0xFF1B4D3E.toInt())
             .setContentTitle("⏰ दैनिक रजिस्टर क्लोजिंग रिमाइंडर")
+            .setVisibility(NotificationCompat.VISIBILITY_PRIVATE)
             .setContentText("रात्रीचे ९:३० वाजले आहेत — आजचा कॅश गल्ला तपासा आणि दिवस क्लोज करा.")
             .setStyle(
                 NotificationCompat.BigTextStyle().bigText(
@@ -377,6 +383,7 @@ object ShopNotificationManager {
             .setSmallIcon(R.drawable.ic_stat_notification)
             .setColor(0xFF1B4D3E.toInt())
             .setContentTitle("📊 रजिस्टर क्लोज केले: आज $salesStr विक्री ($billsCount बिले)")
+            .setVisibility(NotificationCompat.VISIBILITY_PRIVATE)
             .setContentText("निव्वळ नफा: $profitStr • कॅश: $cashStr • यूपीआय: $upiStr")
             .setStyle(
                 NotificationCompat.BigTextStyle().bigText(
@@ -418,6 +425,7 @@ object ShopNotificationManager {
             .setSmallIcon(R.drawable.ic_stat_notification)
             .setColor(0xFF1B4D3E.toInt())
             .setContentTitle("🌅 शुभ सकाळ — मातोश्री कलेक्शन!")
+            .setVisibility(NotificationCompat.VISIBILITY_PRIVATE)
             .setContentText("कालची एकूण विक्री: $salesStr ($yesterdayBills बिले). आजचा दिवस फायदेशीर जावो!")
             .setStyle(
                 NotificationCompat.BigTextStyle().bigText(
@@ -453,6 +461,7 @@ object ShopNotificationManager {
             .setSmallIcon(R.drawable.ic_stat_notification)
             .setColor(0xFF1B4D3E.toInt())
             .setContentTitle("📦 कमी स्टॉक अलर्ट: $productName")
+            .setVisibility(NotificationCompat.VISIBILITY_PRIVATE)
             .setContentText("स्टॉकमध्ये फक्त $currentStock नग शिल्लक आहेत. इन्व्हेंटरी तपासण्यासाठी टॅप करा.")
             .setPriority(NotificationCompat.PRIORITY_DEFAULT)
             .setContentIntent(pendingIntent)
@@ -474,6 +483,7 @@ object ShopNotificationManager {
             .setSmallIcon(R.drawable.ic_stat_notification)
             .setColor(0xFF1B4D3E.toInt())
             .setContentTitle("☁️ क्लाउड सिंक पूर्ण झाले")
+            .setVisibility(NotificationCompat.VISIBILITY_PRIVATE)
             .setContentText("$syncedCount ऑफलाईन विक्री आणि व्यवहार क्लाउडवर सुरक्षितपणे सेव्ह झाले.")
             .setPriority(NotificationCompat.PRIORITY_LOW)
             .setAutoCancel(true)

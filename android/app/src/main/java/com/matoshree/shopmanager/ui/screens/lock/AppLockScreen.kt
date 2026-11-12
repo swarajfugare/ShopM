@@ -1,5 +1,9 @@
 package com.matoshree.shopmanager.ui.screens.lock
 
+import android.app.Activity
+import android.widget.Toast
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.infiniteRepeatable
@@ -26,6 +30,7 @@ import androidx.fragment.app.FragmentActivity
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.matoshree.shopmanager.security.BiometricAuthHelper
+import com.matoshree.shopmanager.security.GoogleAuthManager
 import com.matoshree.shopmanager.security.PinManager
 import com.matoshree.shopmanager.ui.components.CustomKeypad
 import com.matoshree.shopmanager.ui.components.PinIndicator
@@ -45,10 +50,12 @@ class AppLockViewModel(private val pinManager: PinManager) : ViewModel() {
     private val _isUnlocked = MutableStateFlow(false)
     val isUnlocked: StateFlow<Boolean> = _isUnlocked
 
-    val showRecoveryDialog = MutableStateFlow(false)
-    val recoveryStep = MutableStateFlow(1) // 1: password, 2: set pin
-    val recoveryError = MutableStateFlow<String?>(null)
-    val lockoutRemaining = MutableStateFlow(0L)
+    // Creation & Reset State
+    val isPinSetupMode = MutableStateFlow(!pinManager.isPinSet())
+    val setupStep = MutableStateFlow(1) // 1 = enter new, 2 = confirm new
+    private var firstEnteredPin = ""
+
+    val showGoogleResetDialog = MutableStateFlow(false)
     val pinLockoutRemaining = MutableStateFlow(0L)
 
     init {
@@ -60,14 +67,18 @@ class AppLockViewModel(private val pinManager: PinManager) : ViewModel() {
     }
 
     fun onDigit(digit: String) {
-        if (pinManager.isPinLockedOut()) {
+        if (!isPinSetupMode.value && pinManager.isPinLockedOut()) {
             checkPinLockout()
             return
         }
         if (_pinState.value.length < 4) {
             _pinState.value += digit
             if (_pinState.value.length == 4) {
-                verify()
+                if (isPinSetupMode.value) {
+                    handleSetupStep()
+                } else {
+                    verify()
+                }
             }
         }
     }
@@ -76,6 +87,30 @@ class AppLockViewModel(private val pinManager: PinManager) : ViewModel() {
         if (_pinState.value.isNotEmpty()) {
             _pinState.value = _pinState.value.dropLast(1)
             _isError.value = false
+        }
+    }
+
+    private fun handleSetupStep() {
+        viewModelScope.launch {
+            if (setupStep.value == 1) {
+                firstEnteredPin = _pinState.value
+                delay(200)
+                _pinState.value = ""
+                setupStep.value = 2
+            } else {
+                if (_pinState.value == firstEnteredPin) {
+                    pinManager.setPin(_pinState.value)
+                    isPinSetupMode.value = false
+                    _isUnlocked.value = true
+                } else {
+                    _isError.value = true
+                    delay(600)
+                    _pinState.value = ""
+                    _isError.value = false
+                    setupStep.value = 1
+                    firstEnteredPin = ""
+                }
+            }
         }
     }
 
@@ -106,64 +141,20 @@ class AppLockViewModel(private val pinManager: PinManager) : ViewModel() {
         _isUnlocked.value = true
     }
 
-    fun openForgotPinDialog() {
-        checkLockout()
-        recoveryError.value = null
-        recoveryStep.value = 1
-        showRecoveryDialog.value = true
+    fun openGoogleResetDialog() {
+        showGoogleResetDialog.value = true
     }
 
-    fun closeForgotPinDialog() {
-        showRecoveryDialog.value = false
-        recoveryError.value = null
-        recoveryStep.value = 1
+    fun closeGoogleResetDialog() {
+        showGoogleResetDialog.value = false
     }
 
-    private fun checkLockout() {
-        lockoutRemaining.value = pinManager.getRemainingLockoutSeconds()
-    }
-
-    fun verifyRecovery(password: String) {
-        if (password.isBlank()) {
-            recoveryError.value = "Please enter the recovery password"
-            return
-        }
-        if (pinManager.isRecoveryLockedOut()) {
-            lockoutRemaining.value = pinManager.getRemainingLockoutSeconds()
-            recoveryError.value = "Locked out. Try again later."
-            return
-        }
-
-        if (pinManager.verifyRecoveryPassword(password)) {
-            recoveryError.value = null
-            recoveryStep.value = 2
-        } else {
-            checkLockout()
-            if (lockoutRemaining.value > 0) {
-                recoveryError.value = "Too many failed attempts. Locked out for ${lockoutRemaining.value}s."
-            } else {
-                recoveryError.value = "Invalid recovery password. Please try again."
-            }
-        }
-    }
-
-    fun applyNewPin(password: String, newPin: String, confirmPin: String) {
-        if (newPin.length != 4 || !newPin.all { it.isDigit() }) {
-            recoveryError.value = "New PIN must be exactly 4 digits"
-            return
-        }
-        if (newPin != confirmPin) {
-            recoveryError.value = "PINs do not match"
-            return
-        }
-
-        if (pinManager.recoverAndSetPin(password, newPin)) {
-            recoveryError.value = null
-            showRecoveryDialog.value = false
-            _isUnlocked.value = true
-        } else {
-            recoveryError.value = "Failed to update PIN"
-        }
+    fun onGoogleAuthVerifiedForReset() {
+        showGoogleResetDialog.value = false
+        isPinSetupMode.value = true
+        setupStep.value = 1
+        firstEnteredPin = ""
+        _pinState.value = ""
     }
 }
 
@@ -173,18 +164,48 @@ fun AppLockScreen(
 ) {
     val context = LocalContext.current
     val pinManager = remember { PinManager(context) }
+    val googleAuthManager = remember { GoogleAuthManager(context) }
     val viewModel = remember { AppLockViewModel(pinManager) }
 
     val pin by viewModel.pinState.collectAsState()
     val isError by viewModel.isError.collectAsState()
     val isUnlocked by viewModel.isUnlocked.collectAsState()
     val pinLockoutRemaining by viewModel.pinLockoutRemaining.collectAsState()
+    val isPinSetupMode by viewModel.isPinSetupMode.collectAsState()
+    val setupStep by viewModel.setupStep.collectAsState()
+    val showGoogleResetDialog by viewModel.showGoogleResetDialog.collectAsState()
 
-    var showSplash by remember { mutableStateOf(true) }
+    val coroutineScope = rememberCoroutineScope()
 
+    val googleSignInLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.StartActivityForResult()
+    ) { result ->
+        if (result.resultCode == Activity.RESULT_OK) {
+            coroutineScope.launch {
+                val res = googleAuthManager.handleSignInResult(result.data)
+                if (res.isSuccess) {
+                    Toast.makeText(context, "Google प्रमाणीकरण यशस्वी! आता नवीन पिन सेट करा.", Toast.LENGTH_LONG).show()
+                    viewModel.onGoogleAuthVerifiedForReset()
+                } else {
+                    val err = res.exceptionOrNull()?.message ?: "Google प्रमाणीकरण अयशस्वी."
+                    Toast.makeText(context, err, Toast.LENGTH_LONG).show()
+                }
+            }
+        }
+    }
+
+    // Biometric auto-trigger on screen open if PIN is set and not locked out
     LaunchedEffect(Unit) {
-        delay(1200)
-        showSplash = false
+        if (!isPinSetupMode && pinManager.isBiometricEnabled() && !pinManager.isPinLockedOut()) {
+            val activity = context as? FragmentActivity
+            if (activity != null && BiometricAuthHelper.canAuthenticate(activity)) {
+                BiometricAuthHelper.showBiometricPrompt(
+                    activity = activity,
+                    onSuccess = { viewModel.onBiometricSuccess() },
+                    onError = { /* fallback to PIN */ }
+                )
+            }
+        }
     }
 
     LaunchedEffect(isUnlocked) {
@@ -193,29 +214,11 @@ fun AppLockScreen(
         }
     }
 
-    val infiniteTransition = rememberInfiniteTransition(label = "pulse")
-    val pulseScale by infiniteTransition.animateFloat(
-        initialValue = 0.96f,
-        targetValue = 1.04f,
-        animationSpec = infiniteRepeatable(
-            animation = tween(1000),
-            repeatMode = androidx.compose.animation.core.RepeatMode.Reverse
-        ),
-        label = "pulseScale"
-    )
-
-    // Trigger biometric automatically if enabled and available
-    LaunchedEffect(showSplash) {
-        if (!showSplash && pinManager.isBiometricEnabled() && BiometricAuthHelper.canAuthenticate(context)) {
-            if (context is FragmentActivity) {
-                BiometricAuthHelper.showBiometricPrompt(
-                    activity = context,
-                    title = "मातोश्री कलेक्शन अनलॉक करा",
-                    subtitle = "अनलॉक करण्यासाठी फिंगरप्रिंट वापरा",
-                    onSuccess = { viewModel.onBiometricSuccess() },
-                    onError = { /* Fallback to keypad smoothly */ }
-                )
-            }
+    // Periodic lockout check
+    LaunchedEffect(pinLockoutRemaining) {
+        if (pinLockoutRemaining > 0) {
+            delay(1000)
+            viewModel.checkPinLockout()
         }
     }
 
@@ -223,105 +226,33 @@ fun AppLockScreen(
         modifier = Modifier.fillMaxSize(),
         color = WarmIvory
     ) {
-        if (showSplash) {
-            // Splash Screen
-            Column(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .padding(24.dp),
-                horizontalAlignment = Alignment.CenterHorizontally,
-                verticalArrangement = Arrangement.Center
-            ) {
-                Box(
-                    contentAlignment = Alignment.Center,
-                    modifier = Modifier.scale(pulseScale)
-                ) {
-                    Surface(
-                        modifier = Modifier.size(130.dp),
-                        shape = CircleShape,
-                        color = DeepEmerald,
-                        shadowElevation = 8.dp
-                    ) {
-                        Box(contentAlignment = Alignment.Center) {
-                            androidx.compose.foundation.Image(
-                                painter = androidx.compose.ui.res.painterResource(id = com.matoshree.shopmanager.R.drawable.app_logo),
-                                contentDescription = "Matoshree Logo",
-                                modifier = Modifier.size(90.dp)
-                            )
-                        }
-                    }
-                }
-
-                Spacer(modifier = Modifier.height(28.dp))
-
-                Text(
-                    text = "मातोश्री कलेक्शन",
-                    style = MaterialTheme.typography.displayMedium.copy(
-                        fontSize = 28.sp,
-                        color = DeepEmerald,
-                        fontWeight = FontWeight.Bold,
-                        letterSpacing = 1.sp
-                    )
-                )
-
-                Spacer(modifier = Modifier.height(6.dp))
-
-                Text(
-                    text = "MATOSHREE COLLECTION",
-                    style = MaterialTheme.typography.labelMedium.copy(
-                        color = ChampagneGold,
-                        fontWeight = FontWeight.Bold,
-                        letterSpacing = 2.sp
-                    )
-                )
-
-                Spacer(modifier = Modifier.height(4.dp))
-
-                Text(
-                    text = "Smart Boutique & POS Manager",
-                    style = MaterialTheme.typography.bodySmall.copy(
-                        color = MutedCharcoal,
-                        fontSize = 13.sp,
-                        fontWeight = FontWeight.Medium
-                    )
-                )
-
-                Spacer(modifier = Modifier.height(36.dp))
-
-                LinearProgressIndicator(
-                    modifier = Modifier
-                        .width(160.dp)
-                        .height(4.dp)
-                        .clip(RoundedCornerShape(2.dp)),
-                    color = DeepEmerald,
-                    trackColor = OutlineVariantGrey.copy(alpha = 0.3f)
-                )
-            }
-        } else {
-            // Main 4-Digit Unlock Keypad UI
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .statusBarsPadding()
+                .navigationBarsPadding(),
+            contentAlignment = Alignment.Center
+        ) {
             Column(
                 horizontalAlignment = Alignment.CenterHorizontally,
                 verticalArrangement = Arrangement.Center,
                 modifier = Modifier
                     .fillMaxWidth()
-                    .statusBarsPadding()
-                    .navigationBarsPadding()
+                    .padding(horizontal = 24.dp)
             ) {
-                // Header Logo
-                Surface(
-                    modifier = Modifier.size(68.dp),
-                    shape = CircleShape,
-                    color = WarmWhite,
-                    border = androidx.compose.foundation.BorderStroke(2.dp, ChampagneGoldContainer),
-                    shadowElevation = 4.dp
+                // Shop Emblem
+                Box(
+                    modifier = Modifier
+                        .size(80.dp)
+                        .clip(CircleShape)
+                        .background(WarmWhite),
+                    contentAlignment = Alignment.Center
                 ) {
-                    Box(contentAlignment = Alignment.Center) {
-                        androidx.compose.foundation.Image(
-                            painter = androidx.compose.ui.res.painterResource(id = com.matoshree.shopmanager.R.drawable.app_logo),
-                            contentDescription = "Logo",
-                            modifier = Modifier.size(50.dp)
-                        )
-                    }
+                    androidx.compose.foundation.Image(
+                        painter = androidx.compose.ui.res.painterResource(id = com.matoshree.shopmanager.R.drawable.app_logo),
+                        contentDescription = "Logo",
+                        modifier = Modifier.size(52.dp)
+                    )
                 }
 
                 Spacer(modifier = Modifier.height(14.dp))
@@ -339,9 +270,14 @@ fun AppLockScreen(
                 Spacer(modifier = Modifier.height(4.dp))
 
                 Text(
-                    text = "दुकान अनलॉक करण्यासाठी ४ अंकी पिन टाका",
+                    text = when {
+                        isPinSetupMode && setupStep == 1 -> "नवीन ४-अंकी सुरक्षा पिन तयार करा"
+                        isPinSetupMode && setupStep == 2 -> "पिन निश्चित करा (पिन पुन्हा प्रविष्ट करा)"
+                        else -> "दुकान अनलॉक करण्यासाठी ४ अंकी पिन टाका"
+                    },
                     style = MaterialTheme.typography.bodyMedium.copy(
-                        color = MutedCharcoal,
+                        color = if (isPinSetupMode) DeepEmerald else MutedCharcoal,
+                        fontWeight = if (isPinSetupMode) FontWeight.SemiBold else FontWeight.Normal,
                         fontSize = 13.sp
                     )
                 )
@@ -349,7 +285,7 @@ fun AppLockScreen(
                 Spacer(modifier = Modifier.height(20.dp))
 
                 // Lockout Banner
-                AnimatedVisibility(visible = pinLockoutRemaining > 0) {
+                AnimatedVisibility(visible = pinLockoutRemaining > 0 && !isPinSetupMode) {
                     Surface(
                         color = BoutiqueError.copy(alpha = 0.12f),
                         shape = RoundedCornerShape(8.dp),
@@ -372,7 +308,7 @@ fun AppLockScreen(
                     isError = isError
                 )
 
-                Spacer(modifier = Modifier.height(30.dp))
+                Spacer(modifier = Modifier.height(26.dp))
 
                 // Keypad
                 CustomKeypad(
@@ -383,47 +319,63 @@ fun AppLockScreen(
 
                 Spacer(modifier = Modifier.height(10.dp))
 
-                // Forgot PIN
-                TextButton(
-                    onClick = { viewModel.openForgotPinDialog() }
-                ) {
-                    Text(
-                        text = "पिन विसरलात का?",
-                        style = MaterialTheme.typography.labelMedium.copy(
-                            color = ChampagneGold,
-                            fontWeight = FontWeight.Bold
-                        )
-                    )
+                // Forgot PIN / Biometric Option
+                if (!isPinSetupMode) {
+                    Row(
+                        horizontalArrangement = Arrangement.Center,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        TextButton(
+                            onClick = { viewModel.openGoogleResetDialog() }
+                        ) {
+                            Text(
+                                text = "पिन विसरलात का?",
+                                style = MaterialTheme.typography.labelMedium.copy(
+                                    color = ChampagneGold,
+                                    fontWeight = FontWeight.Bold
+                                )
+                            )
+                        }
+
+                        if (pinManager.isBiometricEnabled() && pinLockoutRemaining == 0L) {
+                            Spacer(modifier = Modifier.width(12.dp))
+                            IconButton(
+                                onClick = {
+                                    val activity = context as? FragmentActivity
+                                    if (activity != null && BiometricAuthHelper.canAuthenticate(activity)) {
+                                        BiometricAuthHelper.showBiometricPrompt(
+                                            activity = activity,
+                                            onSuccess = { viewModel.onBiometricSuccess() },
+                                            onError = { /* fallback to PIN */ }
+                                        )
+                                    }
+                                }
+                            ) {
+                                Icon(Icons.Default.Fingerprint, contentDescription = "Biometric", tint = DeepEmerald)
+                            }
+                        }
+                    }
                 }
             }
         }
 
-        // Forgot PIN Recovery Modal Dialog
-        val showRecoveryDialog by viewModel.showRecoveryDialog.collectAsState()
-        val recoveryStep by viewModel.recoveryStep.collectAsState()
-        val recoveryError by viewModel.recoveryError.collectAsState()
-        val lockoutRemaining by viewModel.lockoutRemaining.collectAsState()
-
-        if (showRecoveryDialog) {
-            var recoveryPassword by remember { mutableStateOf("") }
-            var newPin by remember { mutableStateOf("") }
-            var confirmPin by remember { mutableStateOf("") }
-
+        // Google Authentication PIN Reset Dialog (Zero backdoor password)
+        if (showGoogleResetDialog) {
             AlertDialog(
-                onDismissRequest = { viewModel.closeForgotPinDialog() },
+                onDismissRequest = { viewModel.closeGoogleResetDialog() },
                 containerColor = WarmWhite,
                 shape = RoundedCornerShape(16.dp),
                 title = {
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Icon(
-                            imageVector = Icons.Default.LockReset,
+                            imageVector = Icons.Default.Security,
                             contentDescription = null,
                             tint = DeepEmerald,
                             modifier = Modifier.size(24.dp)
                         )
                         Spacer(modifier = Modifier.width(8.dp))
                         Text(
-                            text = if (recoveryStep == 1) "ओनर पिन रिकव्हरी" else "नवीन ४ अंकी पिन सेट करा",
+                            text = "Google द्वारे पिन रीसेट",
                             style = MaterialTheme.typography.titleMedium.copy(
                                 fontWeight = FontWeight.Bold,
                                 color = DeepEmerald
@@ -433,81 +385,32 @@ fun AppLockScreen(
                 },
                 text = {
                     Column(modifier = Modifier.fillMaxWidth()) {
-                        if (recoveryStep == 1) {
-                            Text(
-                                text = "ओळख निश्चितीसाठी मास्टर ओनर रिकव्हरी कोड टाका.",
-                                style = MaterialTheme.typography.bodyMedium.copy(color = MutedCharcoal)
-                            )
-                            Spacer(modifier = Modifier.height(12.dp))
-                            OutlinedTextField(
-                                value = recoveryPassword,
-                                onValueChange = { recoveryPassword = it },
-                                label = { Text("रिकव्हरी कोड") },
-                                singleLine = true,
-                                visualTransformation = androidx.compose.ui.text.input.PasswordVisualTransformation(),
-                                keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(
-                                    keyboardType = androidx.compose.ui.text.input.KeyboardType.Password
-                                ),
-                                shape = RoundedCornerShape(10.dp),
-                                modifier = Modifier.fillMaxWidth()
-                            )
-                        } else {
-                            Text(
-                                text = "दुकान अनलॉक करण्यासाठी नवीन ४ अंकी पिन निवडा.",
-                                style = MaterialTheme.typography.bodyMedium.copy(color = MutedCharcoal)
-                            )
-                            Spacer(modifier = Modifier.height(12.dp))
-                            OutlinedTextField(
-                                value = newPin,
-                                onValueChange = { if (it.length <= 4 && it.all { ch -> ch.isDigit() }) newPin = it },
-                                label = { Text("नवीन ४ अंकी पिन") },
-                                singleLine = true,
-                                keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(
-                                    keyboardType = androidx.compose.ui.text.input.KeyboardType.NumberPassword
-                                ),
-                                shape = RoundedCornerShape(10.dp),
-                                modifier = Modifier.fillMaxWidth()
-                            )
-                            Spacer(modifier = Modifier.height(8.dp))
-                            OutlinedTextField(
-                                value = confirmPin,
-                                onValueChange = { if (it.length <= 4 && it.all { ch -> ch.isDigit() }) confirmPin = it },
-                                label = { Text("पिन पुन्हा टाका (Confirm)") },
-                                singleLine = true,
-                                keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(
-                                    keyboardType = androidx.compose.ui.text.input.KeyboardType.NumberPassword
-                                ),
-                                shape = RoundedCornerShape(10.dp),
-                                modifier = Modifier.fillMaxWidth()
-                            )
-                        }
-
-                        if (recoveryError != null) {
-                            Spacer(modifier = Modifier.height(8.dp))
-                            Text(
-                                text = recoveryError!!,
-                                style = MaterialTheme.typography.bodySmall.copy(color = BoutiqueError)
-                            )
-                        }
+                        Text(
+                            text = "सुरक्षेसाठी पिन रीसेट करण्याकरिता अधिकृत मालक Google खात्याने पुन्हा प्रमाणीकरण करणे आवश्यक आहे.",
+                            style = MaterialTheme.typography.bodyMedium.copy(color = MutedCharcoal)
+                        )
+                        Spacer(modifier = Modifier.height(10.dp))
+                        Text(
+                            text = "Google लॉगिन यशस्वी झाल्यावर तुम्ही लगेच नवीन ४-अंकी पिन सेट करू शकाल.",
+                            style = MaterialTheme.typography.bodySmall.copy(color = DeepCharcoal, fontWeight = FontWeight.Medium)
+                        )
                     }
                 },
                 confirmButton = {
                     Button(
                         onClick = {
-                            if (recoveryStep == 1) {
-                                viewModel.verifyRecovery(recoveryPassword)
-                            } else {
-                                viewModel.applyNewPin(recoveryPassword, newPin, confirmPin)
-                            }
+                            googleSignInLauncher.launch(googleAuthManager.getSignInIntent())
                         },
                         colors = ButtonDefaults.buttonColors(containerColor = DeepEmerald),
                         shape = RoundedCornerShape(8.dp)
                     ) {
-                        Text(if (recoveryStep == 1) "पडताळणी करा" else "पिन बदला")
+                        Icon(Icons.Default.AccountCircle, contentDescription = null, modifier = Modifier.size(16.dp))
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text("Google ने पडताळणी करा")
                     }
                 },
                 dismissButton = {
-                    TextButton(onClick = { viewModel.closeForgotPinDialog() }) {
+                    TextButton(onClick = { viewModel.closeGoogleResetDialog() }) {
                         Text("रद्द करा", color = MutedCharcoal)
                     }
                 }

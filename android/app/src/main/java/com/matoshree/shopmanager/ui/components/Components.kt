@@ -83,8 +83,8 @@ fun SyncStatusBadge(
             Pair(BoutiqueSuccess, label)
         }
         com.matoshree.shopmanager.sync.AppSyncState.SYNCING -> Pair(ChampagneGold, "Syncing...")
-        com.matoshree.shopmanager.sync.AppSyncState.PENDING -> Pair(BoutiqueWarning, "Pending")
         com.matoshree.shopmanager.sync.AppSyncState.OFFLINE -> Pair(BoutiqueError, "Offline")
+        com.matoshree.shopmanager.sync.AppSyncState.ERROR -> Pair(BoutiqueError, "Sync Error")
     }
 
     Surface(

@@ -84,8 +84,7 @@ object AppSecurityShield {
             }
 
             if (signatures == null || signatures.isEmpty()) {
-                // If package info doesn't provide signatures in mock/test environment, allow graceful pass
-                return true
+                return com.matoshree.shopmanager.BuildConfig.DEBUG
             }
 
             val md = MessageDigest.getInstance("SHA-256")
@@ -100,7 +99,7 @@ object AppSecurityShield {
             false
         } catch (e: Exception) {
             Log.w(TAG, "Signature check notice: ${e.message}")
-            true
+            com.matoshree.shopmanager.BuildConfig.DEBUG
         }
     }
 

@@ -3,7 +3,6 @@ package com.matoshree.shopmanager.data.repository
 import android.content.Context
 import com.matoshree.shopmanager.data.firebase.*
 import com.matoshree.shopmanager.data.local.AppDatabase
-import com.matoshree.shopmanager.data.remote.api.MatoshreeApiService
 import com.matoshree.shopmanager.domain.model.DailyClosing
 import com.matoshree.shopmanager.domain.model.Expense
 import com.matoshree.shopmanager.domain.model.PaymentMethod
@@ -16,7 +15,6 @@ import com.matoshree.shopmanager.domain.model.SyncStatus
 
 class ExpenseRepository(
     private val database: AppDatabase? = null,
-    private val apiService: MatoshreeApiService? = null,
     private val firestoreRepo: FirestoreExpenseRepository = FirestoreExpenseRepository()
 ) {
     fun getAllExpenses(): Flow<List<Expense>> = firestoreRepo.getAllExpenses()
@@ -82,7 +80,6 @@ class DailyClosingRepository(
 
 class SyncRepository(
     private val database: AppDatabase? = null,
-    private val apiService: MatoshreeApiService? = null,
     private val context: Context? = null,
     private val firestoreBillRepo: FirestoreBillRepository = FirestoreBillRepository(),
     private val firestoreCustRepo: FirestoreCustomerRepository = FirestoreCustomerRepository()

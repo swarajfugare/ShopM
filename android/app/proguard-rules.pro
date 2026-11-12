@@ -10,9 +10,6 @@
 -keepclassmembers class com.matoshree.shopmanager.data.local.entity.** { *; }
 -keep class com.matoshree.shopmanager.domain.model.** { *; }
 -keepclassmembers class com.matoshree.shopmanager.domain.model.** { *; }
--keep class com.matoshree.shopmanager.data.remote.dto.** { *; }
--keepclassmembers class com.matoshree.shopmanager.data.remote.dto.** { *; }
-
 # Keep AndroidX Biometric and Security Crypto
 -keep class androidx.biometric.** { *; }
 -keep class androidx.security.crypto.** { *; }

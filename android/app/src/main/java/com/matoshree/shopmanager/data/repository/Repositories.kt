@@ -5,7 +5,6 @@ import com.matoshree.shopmanager.data.firebase.*
 import com.matoshree.shopmanager.data.local.AppDatabase
 import com.matoshree.shopmanager.data.local.dao.BillWithItems
 import com.matoshree.shopmanager.data.local.entity.*
-import com.matoshree.shopmanager.data.remote.api.MatoshreeApiService
 import com.matoshree.shopmanager.domain.model.*
 import com.matoshree.shopmanager.utils.DateUtils
 import kotlinx.coroutines.flow.Flow
@@ -166,7 +165,6 @@ fun BillWithItems.toDomain(): Bill {
 
 class BillRepository(
     private val database: AppDatabase? = null,
-    private val apiService: MatoshreeApiService? = null,
     private val firestoreRepo: FirestoreBillRepository = FirestoreBillRepository()
 ) {
     fun getRecentBills(limit: Int = 100): Flow<List<Bill>> {
@@ -476,7 +474,6 @@ class UdhariRepository(
 
 class CustomerRepository(
     private val database: AppDatabase? = null,
-    private val apiService: MatoshreeApiService? = null,
     private val firestoreRepo: FirestoreCustomerRepository = FirestoreCustomerRepository()
 ) {
     fun getAllCustomers(): Flow<List<Customer>> {
@@ -692,7 +689,6 @@ class CustomerRepository(
 
 class ProductRepository(
     private val database: AppDatabase? = null,
-    private val apiService: MatoshreeApiService? = null,
     private val firestoreRepo: FirestoreProductRepository = FirestoreProductRepository()
 ) {
     fun getAllProducts(): Flow<List<Product>> {

@@ -1199,8 +1199,8 @@ suspend fun shareColorInventoryReport(
         }
 
         // Save Bitmap to cache & share
-        val cacheDir = context.cacheDir
-        val file = File(cacheDir, "Matoshree_Inventory_Report.png")
+        val cacheDir = java.io.File(context.cacheDir, "reports").apply { mkdirs() }
+        val file = java.io.File(cacheDir, "Matoshree_Inventory_Report.png")
         val stream = FileOutputStream(file)
         bmp.compress(Bitmap.CompressFormat.PNG, 100, stream)
         stream.flush()

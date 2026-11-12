@@ -30,6 +30,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.matoshree.shopmanager.security.GoogleAuthManager
 import com.matoshree.shopmanager.ui.theme.*
+import kotlinx.coroutines.launch
 
 @Composable
 fun GoogleLoginScreen(
@@ -37,22 +38,26 @@ fun GoogleLoginScreen(
     onLoginSuccess: () -> Unit
 ) {
     val context = LocalContext.current
+    val coroutineScope = rememberCoroutineScope()
     var isLoading by remember { mutableStateOf(false) }
     var errorMessage by remember { mutableStateOf<String?>(null) }
 
     val signInLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.StartActivityForResult()
     ) { result ->
-        isLoading = false
         if (result.resultCode == Activity.RESULT_OK) {
-            val res = googleAuthManager.handleSignInResult(result.data)
-            if (res.isSuccess) {
-                Toast.makeText(context, "Google लॉगिन यशस्वी!", Toast.LENGTH_SHORT).show()
-                onLoginSuccess()
-            } else {
-                errorMessage = res.exceptionOrNull()?.message ?: "लॉगिन अयशस्वी."
+            coroutineScope.launch {
+                val res = googleAuthManager.handleSignInResult(result.data)
+                isLoading = false
+                if (res.isSuccess) {
+                    Toast.makeText(context, "Google लॉगिन यशस्वी!", Toast.LENGTH_SHORT).show()
+                    onLoginSuccess()
+                } else {
+                    errorMessage = res.exceptionOrNull()?.message ?: "लॉगिन अयशस्वी."
+                }
             }
         } else {
+            isLoading = false
             errorMessage = "लॉगिन रद्द केले किंवा अयशस्वी झाले."
         }
     }

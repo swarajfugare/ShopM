@@ -34,6 +34,9 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.PasswordVisualTransformation
+import androidx.compose.ui.text.input.VisualTransformation
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
@@ -45,11 +48,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.matoshree.shopmanager.data.local.dao.SettingsDao
 import com.matoshree.shopmanager.data.local.entity.SettingsEntity
-import com.matoshree.shopmanager.data.remote.api.MatoshreeApiService
-import com.matoshree.shopmanager.data.remote.dto.ChangePinRequest
-import com.matoshree.shopmanager.data.remote.dto.RecoverPinRequest
 import kotlinx.coroutines.tasks.await
-import com.matoshree.shopmanager.data.remote.dto.UpdateSettingsRequest
 import com.matoshree.shopmanager.data.repository.SyncRepository
 import com.matoshree.shopmanager.security.PinManager
 import com.matoshree.shopmanager.sync.SyncManager
@@ -71,8 +70,7 @@ import java.util.*
 class SettingsViewModel(
     private val syncRepository: SyncRepository,
     private val pinManager: PinManager,
-    private val settingsDao: SettingsDao,
-    private val apiService: MatoshreeApiService? = null
+    private val settingsDao: SettingsDao
 ) : ViewModel() {
 
     val pendingSyncCount = MutableStateFlow(0)
@@ -176,58 +174,6 @@ class SettingsViewModel(
     fun toggleBiometric(enabled: Boolean) {
         pinManager.setBiometricEnabled(enabled)
         isBiometricEnabled.value = enabled
-    }
-
-    fun changePin(currentPin: String, newPin: String, confirmPin: String, onResult: (String?) -> Unit) {
-        if (currentPin.isBlank() || newPin.isBlank() || confirmPin.isBlank()) {
-            onResult("All PIN fields are required")
-            return
-        }
-        if (newPin.length != 4 || !newPin.all { it.isDigit() }) {
-            onResult("New PIN must be exactly 4 digits")
-            return
-        }
-        if (newPin != confirmPin) {
-            onResult("New PIN and Confirm PIN do not match")
-            return
-        }
-
-        viewModelScope.launch {
-            val firestorePin = com.matoshree.shopmanager.data.firebase.FirestorePinManager(com.matoshree.shopmanager.data.firebase.FirebaseManager.firestore.app.applicationContext)
-            val res = firestorePin.changePin(currentPin, newPin)
-            if (res.isSuccess) {
-                pinManager.savePin(newPin)
-                onResult(null)
-            } else {
-                onResult(res.exceptionOrNull()?.message ?: "Failed to update PIN")
-            }
-        }
-    }
-
-    fun recoverPin(recoveryCode: String, newPin: String, confirmPin: String, onResult: (String?) -> Unit) {
-        if (recoveryCode.isBlank() || newPin.isBlank() || confirmPin.isBlank()) {
-            onResult("All fields are required")
-            return
-        }
-        if (newPin.length != 4 || !newPin.all { it.isDigit() }) {
-            onResult("New PIN must be exactly 4 digits")
-            return
-        }
-        if (newPin != confirmPin) {
-            onResult("New PIN and Confirm PIN do not match")
-            return
-        }
-
-        viewModelScope.launch {
-            val firestorePin = com.matoshree.shopmanager.data.firebase.FirestorePinManager(com.matoshree.shopmanager.data.firebase.FirebaseManager.firestore.app.applicationContext)
-            val res = firestorePin.recoverPin(recoveryCode, newPin)
-            if (res.isSuccess) {
-                pinManager.savePin(newPin)
-                onResult(null)
-            } else {
-                onResult(res.exceptionOrNull()?.message ?: "Failed to recover PIN")
-            }
-        }
     }
 
     data class RealtimeDiagnostics(
@@ -377,6 +323,15 @@ fun SettingsScreen(
     var isSendingBulkReminders by remember { mutableStateOf(false) }
     var showBulkReminderConfirmDialog by remember { mutableStateOf(false) }
     var bulkReminderStatusText by remember { mutableStateOf("") }
+    var showWaConfigDialog by remember { mutableStateOf(false) }
+    var waWebhookUrl by remember { mutableStateOf(WhatsAppWebhookManager.getWebhookUrl(context)) }
+    var waApiKey by remember { mutableStateOf(WhatsAppWebhookManager.getApiKey(context)) }
+    var screenProtectionEnabled by remember {
+        mutableStateOf(com.matoshree.shopmanager.security.AppLockManager.isScreenProtectionEnabled(context))
+    }
+    var lockTimeoutSeconds by remember {
+        mutableLongStateOf(com.matoshree.shopmanager.security.AppLockManager.getTimeoutSeconds(context))
+    }
 
     // Advanced App Controls Preferences
     val appControlPrefs = remember { context.getSharedPreferences("matoshree_app_controls", Context.MODE_PRIVATE) }
@@ -903,23 +858,42 @@ fun SettingsScreen(
 
                 Spacer(modifier = Modifier.height(12.dp))
 
-                // Notice on policy
+                // Credentials status and secure edit button
+                val isWaConfigured = WhatsAppWebhookManager.isConfigured(context)
                 Surface(
                     shape = RoundedCornerShape(8.dp),
-                    color = WarmIvory,
+                    color = if (isWaConfigured) ChampagneGoldContainer.copy(alpha = 0.35f) else OutlineVariantGrey.copy(alpha = 0.15f),
                     modifier = Modifier.fillMaxWidth()
                 ) {
                     Row(
                         modifier = Modifier.padding(10.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Icon(Icons.Default.CheckCircle, contentDescription = null, tint = BoutiqueSuccess, modifier = Modifier.size(16.dp))
-                        Spacer(modifier = Modifier.width(8.dp))
-                        Text(
-                            "API क्रेडेंशियल्स ॲपमध्ये सुरक्षितपणे सेव्ह आहेत. बिल बनवल्यावर आपोआप मेसेज जाणे बंद ठेवले आहे.",
-                            fontSize = 11.sp,
-                            color = DeepCharcoal
-                        )
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                if (isWaConfigured) "CRM क्रेडेंशियल्स: एनक्रिप्टेड सेव्ह 🔒" else "CRM क्रेडेंशियल्स: सेट केलेले नाही ⚠️",
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = if (isWaConfigured) DeepEmerald else MutedCharcoal
+                            )
+                            Text(
+                                if (isWaConfigured) "URL व Secret Key Keystore स्टोरेजमध्ये सुरक्षित आहेत" else "मेसेज पाठवण्यासाठी URL आणि Secret Key सेट करा",
+                                fontSize = 11.sp,
+                                color = MutedCharcoal
+                            )
+                        }
+                        OutlinedButton(
+                            onClick = {
+                                waWebhookUrl = WhatsAppWebhookManager.getWebhookUrl(context)
+                                waApiKey = WhatsAppWebhookManager.getApiKey(context)
+                                showWaConfigDialog = true
+                            },
+                            shape = RoundedCornerShape(6.dp),
+                            contentPadding = PaddingValues(horizontal = 10.dp, vertical = 2.dp)
+                        ) {
+                            Text("बदला", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                        }
                     }
                 }
 
@@ -1117,6 +1091,42 @@ fun SettingsScreen(
                         color = OutlineVariantGrey.copy(alpha = 0.2f)
                     )
 
+                    // Auto-Lock Inactivity Timeout
+                    Text("ऑटो-लॉक वेळ (Inactivity Auto-Lock)", fontWeight = FontWeight.SemiBold, fontSize = 13.sp)
+                    Spacer(modifier = Modifier.height(4.dp))
+                    Text("ॲप बॅकग्राउंडमध्ये गेल्यावर किती वेळाने आपोआप लॉक व्हावे", style = MaterialTheme.typography.bodySmall.copy(color = MutedCharcoal))
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        listOf(
+                            0L to "लगेच",
+                            30L to "३० से.",
+                            60L to "१ मि.",
+                            300L to "५ मि."
+                        ).forEach { (seconds, label) ->
+                            val isSelected = lockTimeoutSeconds == seconds
+                            OutlinedButton(
+                                onClick = {
+                                    lockTimeoutSeconds = seconds
+                                    com.matoshree.shopmanager.security.AppLockManager.setTimeoutSeconds(context, seconds)
+                                },
+                                shape = RoundedCornerShape(8.dp),
+                                border = BorderStroke(1.dp, if (isSelected) DeepEmerald else OutlineVariantGrey),
+                                colors = ButtonDefaults.outlinedButtonColors(
+                                    containerColor = if (isSelected) ChampagneGoldContainer.copy(alpha = 0.4f) else Color.Transparent
+                                ),
+                                contentPadding = PaddingValues(horizontal = 6.dp, vertical = 2.dp),
+                                modifier = Modifier.weight(1f).height(32.dp)
+                            ) {
+                                Text(label, fontSize = 10.sp, fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal, color = if (isSelected) DeepEmerald else MutedCharcoal)
+                            }
+                        }
+                    }
+
+                    HorizontalDivider(
+                        modifier = Modifier.padding(vertical = 12.dp),
+                        color = OutlineVariantGrey.copy(alpha = 0.2f)
+                    )
+
                     Surface(
                         shape = RoundedCornerShape(8.dp),
                         color = ChampagneGoldContainer.copy(alpha = 0.35f),
@@ -1285,6 +1295,32 @@ fun SettingsScreen(
                         colors = SwitchDefaults.colors(checkedThumbColor = WarmWhite, checkedTrackColor = DeepEmerald)
                     )
                 }
+
+                HorizontalDivider(modifier = Modifier.padding(vertical = 10.dp), color = OutlineVariantGrey.copy(alpha = 0.2f))
+
+                // Control 6: Screen & Recents Protection (FLAG_SECURE)
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text("ॲप स्क्रीन व रेकॉर्डिंग सुरक्षा (FLAG_SECURE)", fontWeight = FontWeight.SemiBold, fontSize = 13.sp)
+                        Text("स्क्रीनशॉट, स्क्रीन रेकॉर्डिंग व रिसेंट ॲप्स प्रिव्ह्यू ब्लॉक करा (सुरक्षित मोड)", style = MaterialTheme.typography.bodySmall.copy(color = MutedCharcoal))
+                    }
+                    Switch(
+                        checked = screenProtectionEnabled,
+                        onCheckedChange = { enabled ->
+                            screenProtectionEnabled = enabled
+                            com.matoshree.shopmanager.security.AppLockManager.setScreenProtectionEnabled(context, enabled)
+                            if (context is android.app.Activity) {
+                                com.matoshree.shopmanager.security.AppLockManager.applyScreenProtection(context)
+                            }
+                            Toast.makeText(context, if (enabled) "स्क्रीन सुरक्षा चालू केली" else "स्क्रीन सुरक्षा बंद केली", Toast.LENGTH_SHORT).show()
+                        },
+                        colors = SwitchDefaults.colors(checkedThumbColor = WarmWhite, checkedTrackColor = DeepEmerald)
+                    )
+                }
             }
         }
         val renderTrashCard: @Composable () -> Unit = {
@@ -1320,7 +1356,7 @@ fun SettingsScreen(
         }
         val renderVersionCard: @Composable () -> Unit = {
             Text(
-                text = "मातोश्री कलेक्शन शॉप मॅनेजर • Version 3.2.0 (Production Stable)\nCloud Firestore Authoritative Single Source of Truth",
+                text = "मातोश्री कलेक्शन शॉप मॅनेजर • Version 3.3.0 (Production Fortified)\nCloud Firestore Authoritative Single Source of Truth • Zero Trust Security",
                 style = MaterialTheme.typography.bodySmall.copy(color = MutedCharcoal),
                 modifier = Modifier
                     .fillMaxWidth()
@@ -1681,6 +1717,85 @@ fun SettingsScreen(
                     enabled = !isSendingBulkReminders
                 ) {
                     Text("बंद करा")
+                }
+            },
+            containerColor = WarmWhite,
+            shape = RoundedCornerShape(16.dp)
+        )
+    }
+
+    // Secure WhatsApp Webhook Credentials Dialog
+    if (showWaConfigDialog) {
+        var editUrl by remember { mutableStateOf(waWebhookUrl) }
+        var editKey by remember { mutableStateOf(waApiKey) }
+        var showPassword by remember { mutableStateOf(false) }
+
+        AlertDialog(
+            onDismissRequest = { showWaConfigDialog = false },
+            title = {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(Icons.Default.VpnKey, contentDescription = null, tint = DeepEmerald, modifier = Modifier.size(20.dp))
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text("WhatsApp Webhook API सेटिंग्ज", fontWeight = FontWeight.Bold, color = DeepEmerald, fontSize = 16.sp)
+                }
+            },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Text(
+                        "हे क्रेडेंशियल्स डिव्हाइसच्या हार्डवेअर Keystore (EncryptedSharedPreferences) मध्ये सुरक्षितपणे सेव्ह होतात.",
+                        fontSize = 11.sp,
+                        color = MutedCharcoal
+                    )
+
+                    OutlinedTextField(
+                        value = editUrl,
+                        onValueChange = { editUrl = it },
+                        label = { Text("Webhook URL") },
+                        placeholder = { Text("https://wa-crm.refixer.in/api/webhooks/shop-bills") },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(8.dp)
+                    )
+
+                    OutlinedTextField(
+                        value = editKey,
+                        onValueChange = { editKey = it },
+                        label = { Text("API Secret Key") },
+                        placeholder = { Text("wacrm_live_...") },
+                        visualTransformation = if (showPassword) VisualTransformation.None else PasswordVisualTransformation(),
+                        trailingIcon = {
+                            IconButton(onClick = { showPassword = !showPassword }) {
+                                Icon(
+                                    imageVector = if (showPassword) Icons.Default.VisibilityOff else Icons.Default.Visibility,
+                                    contentDescription = if (showPassword) "Hide API Key" else "Show API Key"
+                                )
+                            }
+                        },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(8.dp)
+                    )
+                }
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        WhatsAppWebhookManager.setWebhookUrl(context, editUrl)
+                        WhatsAppWebhookManager.setApiKey(context, editKey)
+                        waWebhookUrl = editUrl
+                        waApiKey = editKey
+                        showWaConfigDialog = false
+                        Toast.makeText(context, "API क्रेडेंशियल्स सुरक्षितपणे सेव्ह केले", Toast.LENGTH_SHORT).show()
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = DeepEmerald),
+                    shape = RoundedCornerShape(8.dp)
+                ) {
+                    Text("सेव्ह करा")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showWaConfigDialog = false }) {
+                    Text("रद्द करा")
                 }
             },
             containerColor = WarmWhite,

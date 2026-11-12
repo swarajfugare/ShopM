@@ -14,8 +14,8 @@ import androidx.fragment.app.FragmentActivity
 import androidx.navigation.compose.rememberNavController
 import com.matoshree.shopmanager.data.firebase.FirebaseManager
 import com.matoshree.shopmanager.data.local.AppDatabase
-import com.matoshree.shopmanager.data.remote.ApiClient
 import com.matoshree.shopmanager.notifications.ShopNotificationManager
+import com.matoshree.shopmanager.security.AppLockManager
 import com.matoshree.shopmanager.security.PinManager
 import com.matoshree.shopmanager.sync.SyncManager
 import com.matoshree.shopmanager.ui.navigation.AppNavGraph
@@ -52,12 +52,15 @@ class MainActivity : FragmentActivity() {
 
         val database = AppDatabase.getInstance(this)
         val pinManager = PinManager(this)
-        val apiService = ApiClient.create(this)
-        syncManager = SyncManager.getInstance(this, database, apiService)
+        syncManager = SyncManager.getInstance(this, database)
 
         val deviceTrustManager = com.matoshree.shopmanager.security.DeviceTrustManager(this)
         val googleAuthManager = com.matoshree.shopmanager.security.GoogleAuthManager(this)
         val securityStatus = com.matoshree.shopmanager.security.AppSecurityShield.performFullSecurityScan(this)
+
+        // Initialize process-wide lock manager and apply FLAG_SECURE screen protection
+        AppLockManager.init(this)
+        AppLockManager.applyScreenProtection(this)
 
         // Schedule periodic background sync
         SyncManager.schedulePeriodicSync(this)
@@ -65,6 +68,7 @@ class MainActivity : FragmentActivity() {
         setContent {
             MatoshreeTheme {
                 var isGoogleLoggedIn: Boolean by remember { mutableStateOf(googleAuthManager.isUserLoggedIn()) }
+                val isAppLocked by AppLockManager.isLocked.collectAsState()
 
                 DisposableEffect(isGoogleLoggedIn) {
                     val listener = if (isGoogleLoggedIn) {
@@ -94,6 +98,12 @@ class MainActivity : FragmentActivity() {
                             isGoogleLoggedIn = true
                             val email = googleAuthManager.getLoggedInEmail() ?: "authorized_owner"
                             deviceTrustManager.authorizeDeviceFromGoogleLogin(email)
+                        }
+                    )
+                } else if (isAppLocked) {
+                    com.matoshree.shopmanager.ui.screens.lock.AppLockScreen(
+                        onUnlockSuccess = {
+                            AppLockManager.unlock()
                         }
                     )
                 } else {

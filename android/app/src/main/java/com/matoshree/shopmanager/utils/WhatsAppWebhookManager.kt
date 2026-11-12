@@ -4,6 +4,8 @@ import android.content.Context
 import android.content.SharedPreferences
 import android.util.Log
 import android.widget.Toast
+import androidx.security.crypto.EncryptedSharedPreferences
+import androidx.security.crypto.MasterKey
 import com.matoshree.shopmanager.data.firebase.CustomerDto
 import com.matoshree.shopmanager.domain.model.Bill
 import kotlinx.coroutines.Dispatchers
@@ -41,10 +43,6 @@ object WhatsAppWebhookManager {
     private const val KEY_REMINDER_TEMPLATE_NAME = "whatsapp_reminder_template_name"
     private const val KEY_CLEARED_TEMPLATE_NAME = "whatsapp_cleared_template_name"
 
-    // Official Permanently Secured Webhook URL and API Key for Matoshree Collection
-    private const val PERMANENT_WEBHOOK_URL = "https://wa-crm.refixer.in/api/webhooks/shop-bills"
-    private const val PERMANENT_API_KEY = "wacrm_live_WRVM4c_qnLH4x7jlQ_wWGj4jUd5WKgcvVYNEFjXJW3U"
-
     private val httpClient: OkHttpClient by lazy {
         OkHttpClient.Builder()
             .connectTimeout(12, TimeUnit.SECONDS)
@@ -58,8 +56,42 @@ object WhatsAppWebhookManager {
         return context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
     }
 
+    private fun getSecurePrefs(context: Context): SharedPreferences? {
+        return try {
+            val masterKey = MasterKey.Builder(context)
+                .setKeyScheme(MasterKey.KeyScheme.AES256_GCM)
+                .build()
+            EncryptedSharedPreferences.create(
+                context,
+                "matoshree_secure_wa_prefs",
+                masterKey,
+                EncryptedSharedPreferences.PrefKeyEncryptionScheme.AES256_SIV,
+                EncryptedSharedPreferences.PrefValueEncryptionScheme.AES256_GCM
+            )
+        } catch (e: Exception) {
+            try {
+                // Recover securely by purging corrupted keys without plaintext fallback
+                context.deleteSharedPreferences("matoshree_secure_wa_prefs")
+                val masterKey = MasterKey.Builder(context)
+                    .setKeyScheme(MasterKey.KeyScheme.AES256_GCM)
+                    .build()
+                EncryptedSharedPreferences.create(
+                    context,
+                    "matoshree_secure_wa_prefs",
+                    masterKey,
+                    EncryptedSharedPreferences.PrefKeyEncryptionScheme.AES256_SIV,
+                    EncryptedSharedPreferences.PrefValueEncryptionScheme.AES256_GCM
+                )
+            } catch (e2: Exception) {
+                null
+            }
+        }
+    }
+
     fun isConfigured(context: Context): Boolean {
-        return true
+        val url = getWebhookUrl(context)
+        val key = getApiKey(context)
+        return url.isNotBlank() && key.isNotBlank()
     }
 
     fun isAutoSendEnabled(context: Context): Boolean {
@@ -71,19 +103,19 @@ object WhatsAppWebhookManager {
     }
 
     fun getWebhookUrl(context: Context): String {
-        return PERMANENT_WEBHOOK_URL
+        return getSecurePrefs(context)?.getString(KEY_WEBHOOK_URL, "") ?: ""
     }
 
     fun setWebhookUrl(context: Context, url: String) {
-        // Permanent in code
+        getSecurePrefs(context)?.edit()?.putString(KEY_WEBHOOK_URL, url.trim())?.apply()
     }
 
     fun getApiKey(context: Context): String {
-        return PERMANENT_API_KEY
+        return getSecurePrefs(context)?.getString(KEY_API_KEY, "") ?: ""
     }
 
     fun setApiKey(context: Context, key: String) {
-        // Permanent in code
+        getSecurePrefs(context)?.edit()?.putString(KEY_API_KEY, key.trim())?.apply()
     }
 
     const val DEFAULT_REMINDER_PAYLOAD = "{\n  \"to\": \"{phone}\",\n  \"action\": \"udhari_reminder\",\n  \"template_name\": \"udhari_reminder\",\n  \"customerName\": \"{customerName}\",\n  \"amount\": \"{outstandingDue}\",\n  \"dueDate\": \"{dueDate}\",\n  \"shopName\": \"{shopName}\",\n  \"message\": \"{message}\"\n}"

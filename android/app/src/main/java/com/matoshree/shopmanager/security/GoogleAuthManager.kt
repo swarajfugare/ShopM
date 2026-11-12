@@ -2,16 +2,38 @@ package com.matoshree.shopmanager.security
 
 import android.content.Context
 import android.content.Intent
+import android.content.SharedPreferences
 import android.util.Log
+import androidx.security.crypto.EncryptedSharedPreferences
+import androidx.security.crypto.MasterKey
 import com.google.android.gms.auth.api.signin.GoogleSignIn
 import com.google.android.gms.auth.api.signin.GoogleSignInAccount
 import com.google.android.gms.auth.api.signin.GoogleSignInClient
 import com.google.android.gms.auth.api.signin.GoogleSignInOptions
 import com.google.android.gms.common.api.ApiException
+import com.google.firebase.auth.FirebaseAuth
+import com.google.firebase.auth.GoogleAuthProvider
+import kotlinx.coroutines.tasks.await
 
 class GoogleAuthManager(private val context: Context) {
     private val TAG = "GoogleAuthManager"
-    private val prefs = context.getSharedPreferences("matoshree_google_auth_prefs", Context.MODE_PRIVATE)
+
+    private val prefs: SharedPreferences by lazy {
+        try {
+            val masterKey = MasterKey.Builder(context)
+                .setKeyScheme(MasterKey.KeyScheme.AES256_GCM)
+                .build()
+            EncryptedSharedPreferences.create(
+                context,
+                "matoshree_secure_auth_prefs",
+                masterKey,
+                EncryptedSharedPreferences.PrefKeyEncryptionScheme.AES256_SIV,
+                EncryptedSharedPreferences.PrefValueEncryptionScheme.AES256_GCM
+            )
+        } catch (e: Exception) {
+            context.getSharedPreferences("matoshree_secure_auth_prefs_fallback", Context.MODE_PRIVATE)
+        }
+    }
 
     companion object {
         private const val KEY_AUTH_EMAIL = "auth_google_email"
@@ -24,11 +46,26 @@ class GoogleAuthManager(private val context: Context) {
         )
     }
 
+    private val webClientId: String? by lazy {
+        try {
+            val resId = context.resources.getIdentifier("default_web_client_id", "string", context.packageName)
+            if (resId != 0) context.getString(resId) else null
+        } catch (e: Exception) {
+            null
+        }
+    }
+
     private val googleSignInClient: GoogleSignInClient by lazy {
-        val gso = GoogleSignInOptions.Builder(GoogleSignInOptions.DEFAULT_SIGN_IN)
+        val gsoBuilder = GoogleSignInOptions.Builder(GoogleSignInOptions.DEFAULT_SIGN_IN)
             .requestEmail()
-            .build()
-        GoogleSignIn.getClient(context, gso)
+
+        webClientId?.let { id ->
+            if (id.isNotBlank()) {
+                gsoBuilder.requestIdToken(id)
+            }
+        }
+
+        GoogleSignIn.getClient(context, gsoBuilder.build())
     }
 
     fun getSignInIntent(): Intent {
@@ -36,13 +73,22 @@ class GoogleAuthManager(private val context: Context) {
     }
 
     fun isUserLoggedIn(): Boolean {
-        // 1. Check local verified session
+        // 1. Primary check: Firebase Auth currentUser verified Google identity
+        val firebaseUser = FirebaseAuth.getInstance().currentUser
+        if (firebaseUser != null) {
+            val email = firebaseUser.email?.lowercase()?.trim()
+            if (email != null && AUTHORIZED_EMAILS.contains(email)) {
+                return true
+            }
+        }
+
+        // 2. Local verified Keystore session
         val savedEmail = prefs.getString(KEY_AUTH_EMAIL, null)?.lowercase()?.trim()
         if (savedEmail != null && AUTHORIZED_EMAILS.contains(savedEmail)) {
             return true
         }
 
-        // 2. Check GoogleSignIn last signed-in account
+        // 3. GoogleSignIn client cached account
         val lastAccount = GoogleSignIn.getLastSignedInAccount(context)
         val email = lastAccount?.email?.lowercase()?.trim()
         if (email != null && AUTHORIZED_EMAILS.contains(email)) {
@@ -54,23 +100,41 @@ class GoogleAuthManager(private val context: Context) {
     }
 
     fun getLoggedInEmail(): String? {
+        val firebaseUser = FirebaseAuth.getInstance().currentUser
+        if (firebaseUser != null) {
+            val email = firebaseUser.email?.lowercase()?.trim()
+            if (email != null && AUTHORIZED_EMAILS.contains(email)) return email
+        }
+
         val saved = prefs.getString(KEY_AUTH_EMAIL, null)?.lowercase()?.trim()
         if (saved != null && AUTHORIZED_EMAILS.contains(saved)) return saved
+
         val lastAccount = GoogleSignIn.getLastSignedInAccount(context)
         val email = lastAccount?.email?.lowercase()?.trim()
         if (email != null && AUTHORIZED_EMAILS.contains(email)) return email
         return null
     }
 
-    fun handleSignInResult(data: Intent?): Result<String> {
+    suspend fun handleSignInResult(data: Intent?): Result<String> {
         return try {
             val task = GoogleSignIn.getSignedInAccountFromIntent(data)
             val account: GoogleSignInAccount = task.getResult(ApiException::class.java)
             val email = account.email?.lowercase()?.trim()
 
             if (email != null && AUTHORIZED_EMAILS.contains(email)) {
+                // Link Google account with Firebase Auth
+                val idToken = account.idToken
+                if (!idToken.isNullOrBlank()) {
+                    try {
+                        val credential = GoogleAuthProvider.getCredential(idToken, null)
+                        FirebaseAuth.getInstance().signInWithCredential(credential).await()
+                        Log.d(TAG, "Firebase Auth successfully verified with Google ID Token: $email")
+                    } catch (fe: Exception) {
+                        Log.w(TAG, "Firebase credential link warning (offline or fallback active): ${fe.message}")
+                    }
+                }
+
                 saveSession(email, account.displayName ?: "Owner")
-                Log.d(TAG, "Google Login Authorized: $email")
                 Result.success(email)
             } else {
                 Log.w(TAG, "Google Login Denied: Unauthorized account: $email")
@@ -103,6 +167,9 @@ class GoogleAuthManager(private val context: Context) {
 
     fun signOut(onComplete: () -> Unit = {}) {
         clearSession()
+        try {
+            FirebaseAuth.getInstance().signOut()
+        } catch (e: Exception) {}
         googleSignInClient.signOut().addOnCompleteListener {
             onComplete()
         }

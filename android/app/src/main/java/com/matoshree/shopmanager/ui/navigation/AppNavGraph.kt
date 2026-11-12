@@ -15,7 +15,6 @@ import androidx.navigation.NavType
 import androidx.navigation.compose.*
 import androidx.navigation.navArgument
 import com.matoshree.shopmanager.data.local.AppDatabase
-import com.matoshree.shopmanager.data.remote.ApiClient
 import com.matoshree.shopmanager.data.repository.*
 import com.matoshree.shopmanager.security.PinManager
 import com.matoshree.shopmanager.ui.screens.analytics.AnalyticsScreen
@@ -58,14 +57,13 @@ fun AppNavGraph(
     syncManager: com.matoshree.shopmanager.sync.SyncManager? = null
 ) {
     val context = androidx.compose.ui.platform.LocalContext.current
-    val apiService = remember { ApiClient.create(context) }
 
-    val billRepository = remember { BillRepository(database, apiService) }
-    val customerRepository = remember { CustomerRepository(database, apiService) }
-    val productRepository = remember { ProductRepository(database, apiService) }
-    val expenseRepository = remember { ExpenseRepository(database, apiService) }
+    val billRepository = remember { BillRepository(database) }
+    val customerRepository = remember { CustomerRepository(database) }
+    val productRepository = remember { ProductRepository(database) }
+    val expenseRepository = remember { ExpenseRepository(database) }
     val dailyClosingRepository = remember { DailyClosingRepository(database) }
-    val syncRepository = remember { SyncRepository(database, apiService, context) }
+    val syncRepository = remember { SyncRepository(database) }
     val settingsDao = remember { database.settingsDao() }
     val udhariRepository = remember { UdhariRepository() }
 
@@ -79,7 +77,7 @@ fun AppNavGraph(
     val analyticsViewModel = remember { AnalyticsViewModel(billRepository, customerRepository, productRepository, expenseRepository, dailyClosingRepository) }
     val udhariViewModel = remember { com.matoshree.shopmanager.ui.screens.udhari.UdhariViewModel(udhariRepository, customerRepository, billRepository) }
     val inventoryViewModel = remember { com.matoshree.shopmanager.ui.screens.inventory.InventoryViewModel(productRepository) }
-    val settingsViewModel = remember { SettingsViewModel(syncRepository, pinManager, settingsDao, apiService) }
+    val settingsViewModel = remember { SettingsViewModel(syncRepository, pinManager, settingsDao) }
 
     val navBackStackEntry by navController.currentBackStackEntryAsState()
     val currentRoute = navBackStackEntry?.destination?.route
@@ -143,7 +141,7 @@ fun AppNavGraph(
     ) { padding ->
         NavHost(
             navController = navController,
-            startDestination = Screen.AppLock.route,
+            startDestination = Screen.Dashboard.route,
             modifier = Modifier.padding(bottom = padding.calculateBottomPadding())
         ) {
             composable(Screen.AppLock.route) {
