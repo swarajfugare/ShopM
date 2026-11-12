@@ -12,6 +12,7 @@ import androidx.compose.runtime.*
 import androidx.core.content.ContextCompat
 import androidx.fragment.app.FragmentActivity
 import androidx.navigation.compose.rememberNavController
+import com.matoshree.shopmanager.data.firebase.FirebaseManager
 import com.matoshree.shopmanager.data.local.AppDatabase
 import com.matoshree.shopmanager.data.remote.ApiClient
 import com.matoshree.shopmanager.notifications.ShopNotificationManager
@@ -62,7 +63,8 @@ class MainActivity : FragmentActivity() {
 
         setContent {
             MatoshreeTheme {
-                var isDeviceTrusted by remember { mutableStateOf(deviceTrustManager.isDeviceAuthorized()) }
+                var isGoogleLoggedIn: Boolean by remember { mutableStateOf(FirebaseManager.isAuthorizedUser()) }
+                var isDeviceTrusted: Boolean by remember { mutableStateOf(deviceTrustManager.isDeviceAuthorized()) }
 
                 DisposableEffect(isDeviceTrusted) {
                     val listener = if (isDeviceTrusted) {
@@ -75,7 +77,13 @@ class MainActivity : FragmentActivity() {
                     }
                 }
 
-                if (!isDeviceTrusted) {
+                if (!isGoogleLoggedIn) {
+                    com.matoshree.shopmanager.ui.screens.lock.GoogleLoginScreen(
+                        onLoginSuccess = {
+                            isGoogleLoggedIn = true
+                        }
+                    )
+                } else if (!isDeviceTrusted) {
                     com.matoshree.shopmanager.ui.screens.lock.DeviceVerificationScreen(
                         securityStatus = securityStatus,
                         onVerificationSuccess = {

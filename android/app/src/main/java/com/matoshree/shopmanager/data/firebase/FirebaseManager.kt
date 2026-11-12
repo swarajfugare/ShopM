@@ -85,20 +85,53 @@ object FirebaseManager {
         }
     }
 
+    val AUTHORIZED_EMAILS = setOf(
+        "swarajfugare23@gmail.com",
+        "sadhanafugare86@gmail.com"
+    )
+
+    fun isAuthorizedUser(): Boolean {
+        val email = auth.currentUser?.email?.lowercase()?.trim()
+        return email != null && AUTHORIZED_EMAILS.contains(email)
+    }
+
     suspend fun ensureAuthenticated(): Boolean {
-        if (auth.currentUser != null) return true
-        if (!isNetworkAvailable()) {
-            return false // Instant return when offline, zero wait
+        if (isAuthorizedUser()) return true
+        if (auth.currentUser != null && !isAuthorizedUser()) {
+            try { auth.signOut() } catch (_: Exception) {}
+            return false
         }
-        return try {
-            kotlinx.coroutines.withTimeoutOrNull(2000L) {
-                auth.signInAnonymously().await()
-            }
-            Log.d(TAG, "Authenticated anonymously with Firebase (UID: ${auth.currentUser?.uid})")
-            auth.currentUser != null
+        return false
+    }
+
+    fun signInWithGoogle(
+        activity: android.app.Activity,
+        onResult: (Boolean, String?) -> Unit
+    ) {
+        try {
+            val provider = com.google.firebase.auth.OAuthProvider.newBuilder("google.com")
+            provider.addCustomParameter("prompt", "select_account")
+            
+            auth.startActivityForSignInWithProvider(activity, provider.build())
+                .addOnSuccessListener { authResult ->
+                    val user = authResult.user
+                    val email = user?.email?.lowercase()?.trim()
+                    if (email != null && AUTHORIZED_EMAILS.contains(email)) {
+                        Log.d(TAG, "Authorized Google login success: $email (UID: ${user.uid})")
+                        onResult(true, null)
+                    } else {
+                        Log.w(TAG, "Unauthorized login attempt from: $email")
+                        try { auth.signOut() } catch (_: Exception) {}
+                        onResult(false, "प्रवेश नाकारला: $email हे खाते अधिकृत नाही. केवळ swarajfugare23@gmail.com किंवा sadhanafugare86@gmail.com द्वारेच प्रवेश शक्य आहे.")
+                    }
+                }
+                .addOnFailureListener { e ->
+                    Log.w(TAG, "Google sign-in error: ${e.message}")
+                    onResult(false, e.localizedMessage ?: "लॉगिन अयशस्वी झाले. कृपया पुन्हा प्रयत्न करा.")
+                }
         } catch (e: Exception) {
-            Log.w(TAG, "Firebase Auth notice (offline mode active): ${e.message}")
-            auth.currentUser != null
+            Log.e(TAG, "Sign-in launch error: ${e.message}", e)
+            onResult(false, e.localizedMessage ?: "लॉगिन सुरू करता आले नाही.")
         }
     }
 

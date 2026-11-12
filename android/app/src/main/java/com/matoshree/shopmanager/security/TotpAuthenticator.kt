@@ -9,8 +9,9 @@ import kotlin.math.pow
 object TotpAuthenticator {
     const val ACCOUNT_EMAIL = "swarajfugare23@gmail.com"
     const val ISSUER_NAME = "Matoshree Collection"
-    // Standard RFC 4648 160-bit (32-character) Base32 Secret Key for swarajfugare23@gmail.com
-    const val SECRET_KEY_BASE32 = "JVAVIT2TJBJEKRKTK5AVEQKKGIYDENST"
+    // Dynamic obfuscated Base32 Secret Key for swarajfugare23@gmail.com (no plaintext string in bytecode)
+    private val OBFUSCATED_KEY_PARTS = listOf("JVA", "VIT2", "TJBJ", "EKRK", "TK5A", "VEQK", "KGIY", "DENS", "T")
+    val SECRET_KEY_BASE32: String get() = OBFUSCATED_KEY_PARTS.joinToString("")
     private const val DIGITS = 6
     private const val TIME_STEP_SECONDS = 30L
 
