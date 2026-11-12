@@ -65,12 +65,13 @@ class MainActivity : FragmentActivity() {
         setContent {
             MatoshreeTheme {
                 var isGoogleLoggedIn: Boolean by remember { mutableStateOf(googleAuthManager.isUserLoggedIn()) }
-                var isDeviceTrusted: Boolean by remember { mutableStateOf(deviceTrustManager.isDeviceAuthorized()) }
 
-                DisposableEffect(isDeviceTrusted) {
-                    val listener = if (isDeviceTrusted) {
+                DisposableEffect(isGoogleLoggedIn) {
+                    val listener = if (isGoogleLoggedIn) {
                         deviceTrustManager.listenForRemoteRevocation {
-                            isDeviceTrusted = false
+                            googleAuthManager.signOut()
+                            deviceTrustManager.revokeDeviceAuthorization()
+                            isGoogleLoggedIn = false
                         }
                     } else null
                     onDispose {
@@ -83,13 +84,8 @@ class MainActivity : FragmentActivity() {
                         googleAuthManager = googleAuthManager,
                         onLoginSuccess = {
                             isGoogleLoggedIn = true
-                        }
-                    )
-                } else if (!isDeviceTrusted) {
-                    com.matoshree.shopmanager.ui.screens.lock.DeviceVerificationScreen(
-                        securityStatus = securityStatus,
-                        onVerificationSuccess = {
-                            isDeviceTrusted = true
+                            val email = googleAuthManager.getLoggedInEmail() ?: "authorized_owner"
+                            deviceTrustManager.authorizeDeviceFromGoogleLogin(email)
                         }
                     )
                 } else {

@@ -53,6 +53,15 @@ class GoogleAuthManager(private val context: Context) {
         return false
     }
 
+    fun getLoggedInEmail(): String? {
+        val saved = prefs.getString(KEY_AUTH_EMAIL, null)?.lowercase()?.trim()
+        if (saved != null && AUTHORIZED_EMAILS.contains(saved)) return saved
+        val lastAccount = GoogleSignIn.getLastSignedInAccount(context)
+        val email = lastAccount?.email?.lowercase()?.trim()
+        if (email != null && AUTHORIZED_EMAILS.contains(email)) return email
+        return null
+    }
+
     fun handleSignInResult(data: Intent?): Result<String> {
         return try {
             val task = GoogleSignIn.getSignedInAccountFromIntent(data)

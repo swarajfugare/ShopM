@@ -8,6 +8,9 @@ import android.provider.Settings
 import android.util.Log
 import com.google.firebase.firestore.SetOptions
 import com.matoshree.shopmanager.data.firebase.FirebaseManager
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.tasks.await
 import java.security.MessageDigest
 import java.util.UUID
@@ -51,6 +54,40 @@ class DeviceTrustManager(private val context: Context) {
         // On first run on the owner's primary device (identified by default token or seed), auto-authorize
         val token = prefs.getString(KEY_DEVICE_TOKEN, null)
         return token != null
+    }
+
+    fun authorizeDeviceFromGoogleLogin(email: String) {
+        val devId = getHardwareDeviceId()
+        val token = "AUTH-DEV-${UUID.randomUUID().toString().take(12).uppercase()}"
+        prefs.edit()
+            .putBoolean(KEY_IS_AUTHORIZED, true)
+            .putString(KEY_DEVICE_TOKEN, token)
+            .putLong(KEY_ACTIVATED_AT, System.currentTimeMillis())
+            .putString("authorized_by_email", email)
+            .apply()
+
+        // Register/update device authorization in Firestore cloud registry
+        CoroutineScope(Dispatchers.IO).launch {
+            try {
+                FirebaseManager.ensureAuthenticated()
+                FirebaseManager.firestore.collection("authorized_devices").document(devId).set(
+                    mapOf(
+                        "deviceId" to devId,
+                        "deviceName" to getDeviceName(),
+                        "deviceModel" to Build.MODEL,
+                        "osVersion" to Build.VERSION.RELEASE,
+                        "authorizedAt" to System.currentTimeMillis(),
+                        "authorizedBy" to email,
+                        "authMethod" to "GOOGLE_SIGN_IN",
+                        "status" to "ACTIVE"
+                    ),
+                    SetOptions.merge()
+                ).await()
+                Log.d(TAG, "Device $devId successfully authorized via Google Login ($email) & registered in Firestore")
+            } catch (e: Exception) {
+                Log.w(TAG, "Failed to register device in cloud: ${e.message}")
+            }
+        }
     }
 
     suspend fun verifyAndAuthorizeDevice(activationKey: String): Boolean {
