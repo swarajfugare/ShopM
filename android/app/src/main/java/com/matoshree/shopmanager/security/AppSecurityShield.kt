@@ -62,7 +62,17 @@ object AppSecurityShield {
                     context.packageName,
                     PackageManager.GET_SIGNING_CERTIFICATES
                 )
-                packageInfo.signingInfo?.apkContentsSigners
+                val signingInfo = packageInfo.signingInfo
+                if (signingInfo != null) {
+                    if (signingInfo.hasMultipleSigners()) {
+                        signingInfo.apkContentsSigners
+                    } else {
+                        signingInfo.signingCertificateHistory
+                    }
+                } else {
+                    @Suppress("DEPRECATION")
+                    packageInfo.signatures
+                }
             } else {
                 @Suppress("DEPRECATION")
                 val packageInfo = context.packageManager.getPackageInfo(
