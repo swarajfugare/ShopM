@@ -2045,14 +2045,19 @@ class FirestorePinManager(private val context: Context) {
             FirebaseManager.ensureAuthenticated()
             val snap = FirebaseManager.securityDoc().get().await()
             if (snap.exists()) {
-                val serverHash = snap.getString("pinHash") ?: hashPin("1234")
+                val serverHash = snap.getString("pinHash")
                 val serverSalt = snap.getString("salt") ?: "matoshree_salt_v2"
-                cachedPinHash = serverHash
-                cachedSalt = serverSalt
-                return hashPin(inputPin, serverSalt) == serverHash
+                if (!serverHash.isNullOrBlank()) {
+                    cachedPinHash = serverHash
+                    cachedSalt = serverSalt
+                    return hashPin(inputPin, serverSalt) == serverHash
+                }
             }
         } catch (e: Exception) {}
-        return hashPin(inputPin, cachedSalt) == cachedPinHash || inputPin == "1234"
+        if (cachedPinHash.isNotBlank()) {
+            return hashPin(inputPin, cachedSalt) == cachedPinHash
+        }
+        return inputPin == "1234"
     }
 
     suspend fun changePin(oldPin: String, newPin: String): Result<Unit> {

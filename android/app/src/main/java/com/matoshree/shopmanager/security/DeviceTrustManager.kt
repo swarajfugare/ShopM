@@ -23,7 +23,7 @@ class DeviceTrustManager(private val context: Context) {
 
         // Salted SHA-256 hash of Owner Master Activation Passcode: "MATOSHREE-SHOP-OWNER-2026"
         private const val MASTER_KEY_HASH = "8f1a84c8a2b53e414c44ec94b34bdfbc4a737f22ec28795791e847c20ef22f3e"
-        // Secondary Owner Mobile Verification: "9876543210"
+        // Salted SHA-256 hash of Secondary Owner Recovery Passcode
         private const val BACKUP_KEY_HASH = "4a44dc15364204a80fe80e9039455cc1608281820fe2b24f1e5233ade67a4b8f"
     }
 
@@ -60,11 +60,8 @@ class DeviceTrustManager(private val context: Context) {
         // 1. Verify with Google Authenticator (6-digit TOTP)
         val isTotpValid = TotpAuthenticator.verifyCode(trimmed)
 
-        // 2. Master Key / Owner Code Fallbacks
-        val isMasterValid = (enteredHash == MASTER_KEY_HASH || 
-                             enteredHash == BACKUP_KEY_HASH || 
-                             trimmed.equals("MATOSHREE-SHOP-OWNER-2026", ignoreCase = true) || 
-                             trimmed == "9876543210")
+        // 2. Master Key / Owner Code Fallbacks (SHA-256 salted only - no plaintext backdoors)
+        val isMasterValid = (enteredHash == MASTER_KEY_HASH || enteredHash == BACKUP_KEY_HASH)
 
         val isValid = isTotpValid || isMasterValid
 
@@ -100,6 +97,96 @@ class DeviceTrustManager(private val context: Context) {
         }
 
         return false
+    }
+
+    suspend fun checkCloudApproval(): Boolean {
+        return try {
+            FirebaseManager.ensureAuthenticated()
+            val devId = getHardwareDeviceId()
+            val doc = FirebaseManager.firestore.collection("authorized_devices").document(devId).get().await()
+            if (doc.exists()) {
+                val status = doc.getString("status")
+                if ("ACTIVE".equals(status, ignoreCase = true) || "APPROVED".equals(status, ignoreCase = true)) {
+                    val token = "AUTH-DEV-${UUID.randomUUID().toString().take(12).uppercase()}"
+                    prefs.edit()
+                        .putBoolean(KEY_IS_AUTHORIZED, true)
+                        .putString(KEY_DEVICE_TOKEN, token)
+                        .putLong(KEY_ACTIVATED_AT, System.currentTimeMillis())
+                        .apply()
+                    return true
+                }
+            } else {
+                registerPendingDevice()
+            }
+            false
+        } catch (e: Exception) {
+            Log.w(TAG, "Cloud approval check note: ${e.message}")
+            false
+        }
+    }
+
+    suspend fun registerPendingDevice() {
+        try {
+            FirebaseManager.ensureAuthenticated()
+            val devId = getHardwareDeviceId()
+            FirebaseManager.firestore.collection("authorized_devices").document(devId).set(
+                mapOf(
+                    "deviceId" to devId,
+                    "deviceName" to getDeviceName(),
+                    "deviceModel" to Build.MODEL,
+                    "osVersion" to Build.VERSION.RELEASE,
+                    "firstSeenAt" to System.currentTimeMillis(),
+                    "status" to "PENDING"
+                ),
+                SetOptions.merge()
+            ).await()
+            Log.d(TAG, "Device $devId registered as PENDING in cloud registry")
+        } catch (e: Exception) {
+            Log.w(TAG, "Failed to register pending device in cloud: ${e.message}")
+        }
+    }
+
+    fun listenForRemoteRevocation(onRevoked: () -> Unit): com.google.firebase.firestore.ListenerRegistration? {
+        val devId = getHardwareDeviceId()
+        return try {
+            FirebaseManager.firestore.collection("authorized_devices").document(devId)
+                .addSnapshotListener { snapshot, error ->
+                    if (error != null) return@addSnapshotListener
+                    if (snapshot != null && snapshot.exists()) {
+                        val status = snapshot.getString("status")
+                        if ("BLOCKED".equals(status, ignoreCase = true) || "REVOKED".equals(status, ignoreCase = true)) {
+                            revokeDeviceAuthorization()
+                            onRevoked()
+                        }
+                    }
+                }
+        } catch (e: Exception) {
+            null
+        }
+    }
+
+    fun listenForApproval(onApproved: () -> Unit): com.google.firebase.firestore.ListenerRegistration? {
+        val devId = getHardwareDeviceId()
+        return try {
+            FirebaseManager.firestore.collection("authorized_devices").document(devId)
+                .addSnapshotListener { snapshot, error ->
+                    if (error != null) return@addSnapshotListener
+                    if (snapshot != null && snapshot.exists()) {
+                        val status = snapshot.getString("status")
+                        if ("ACTIVE".equals(status, ignoreCase = true) || "APPROVED".equals(status, ignoreCase = true)) {
+                            val token = "AUTH-DEV-${UUID.randomUUID().toString().take(12).uppercase()}"
+                            prefs.edit()
+                                .putBoolean(KEY_IS_AUTHORIZED, true)
+                                .putString(KEY_DEVICE_TOKEN, token)
+                                .putLong(KEY_ACTIVATED_AT, System.currentTimeMillis())
+                                .apply()
+                            onApproved()
+                        }
+                    }
+                }
+        } catch (e: Exception) {
+            null
+        }
     }
 
     fun revokeDeviceAuthorization() {

@@ -64,6 +64,17 @@ class MainActivity : FragmentActivity() {
             MatoshreeTheme {
                 var isDeviceTrusted by remember { mutableStateOf(deviceTrustManager.isDeviceAuthorized()) }
 
+                DisposableEffect(isDeviceTrusted) {
+                    val listener = if (isDeviceTrusted) {
+                        deviceTrustManager.listenForRemoteRevocation {
+                            isDeviceTrusted = false
+                        }
+                    } else null
+                    onDispose {
+                        listener?.remove()
+                    }
+                }
+
                 if (!isDeviceTrusted) {
                     com.matoshree.shopmanager.ui.screens.lock.DeviceVerificationScreen(
                         securityStatus = securityStatus,

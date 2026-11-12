@@ -45,6 +45,22 @@ fun DeviceVerificationScreen(
     var isVerifying by remember { mutableStateOf(false) }
 
     val accountEmail = remember { TotpAuthenticator.ACCOUNT_EMAIL }
+    val hardwareId = remember { deviceTrustManager.getHardwareDeviceId() }
+    val deviceName = remember { deviceTrustManager.getDeviceName() }
+
+    LaunchedEffect(Unit) {
+        deviceTrustManager.registerPendingDevice()
+    }
+
+    DisposableEffect(Unit) {
+        val listener = deviceTrustManager.listenForApproval {
+            Toast.makeText(context, "डिव्हाइसला क्लाउडवरून अधिकृत करण्यात आले!", Toast.LENGTH_SHORT).show()
+            onVerificationSuccess()
+        }
+        onDispose {
+            listener?.remove()
+        }
+    }
 
     Surface(
         modifier = Modifier.fillMaxSize(),
@@ -92,7 +108,7 @@ fun DeviceVerificationScreen(
             Spacer(modifier = Modifier.height(8.dp))
 
             Text(
-                text = "हे डिव्हाइस अधिकृत करण्यासाठी $accountEmail च्या Google Authenticator ॲपमधील ६ अंकी कोड टाका.",
+                text = "हे डिव्हाइस अधिकृत करण्यासाठी $accountEmail च्या Google Authenticator ॲपमधील ६ अंकी कोड टाका, किंवा दुकान मालकाकडून या डिव्हाइसला क्लाउड मंजुरी घ्या.",
                 style = MaterialTheme.typography.bodyMedium.copy(
                     color = MutedCharcoal,
                     textAlign = TextAlign.Center,
@@ -102,7 +118,27 @@ fun DeviceVerificationScreen(
                 modifier = Modifier.padding(horizontal = 8.dp)
             )
 
-            Spacer(modifier = Modifier.height(28.dp))
+            Spacer(modifier = Modifier.height(14.dp))
+
+            Surface(
+                color = DeepEmeraldContainer.copy(alpha = 0.08f),
+                shape = RoundedCornerShape(8.dp),
+                border = androidx.compose.foundation.BorderStroke(1.dp, ChampagneGold.copy(alpha = 0.5f))
+            ) {
+                Row(
+                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Icon(Icons.Default.PhoneAndroid, contentDescription = null, tint = DeepEmerald, modifier = Modifier.size(16.dp))
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text(
+                        text = "$deviceName • ID: $hardwareId",
+                        style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold, color = DeepEmerald)
+                    )
+                }
+            }
+
+            Spacer(modifier = Modifier.height(20.dp))
 
             // 6-digit Code Input
             OutlinedTextField(
@@ -186,6 +222,34 @@ fun DeviceVerificationScreen(
                     Spacer(modifier = Modifier.width(8.dp))
                     Text("पडताळणी करा आणि अनलॉक करा", fontWeight = FontWeight.Bold, fontSize = 16.sp, color = WarmWhite)
                 }
+            }
+
+            Spacer(modifier = Modifier.height(12.dp))
+
+            OutlinedButton(
+                onClick = {
+                    isVerifying = true
+                    coroutineScope.launch {
+                        val authorized = deviceTrustManager.checkCloudApproval()
+                        isVerifying = false
+                        if (authorized) {
+                            Toast.makeText(context, "डिव्हाइसला क्लाउडवरून अधिकृत करण्यात आले!", Toast.LENGTH_SHORT).show()
+                            onVerificationSuccess()
+                        } else {
+                            errorMessage = "अद्याप क्लाउड मंजुरी मिळालेली नाही. दुकान मालकाला सांगा."
+                        }
+                    }
+                },
+                enabled = !isVerifying,
+                shape = RoundedCornerShape(12.dp),
+                border = androidx.compose.foundation.BorderStroke(1.dp, DeepEmerald),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(48.dp)
+            ) {
+                Icon(Icons.Default.CloudSync, contentDescription = null, modifier = Modifier.size(18.dp), tint = DeepEmerald)
+                Spacer(modifier = Modifier.width(6.dp))
+                Text("क्लाउड मंजुरी तपासा (Check Cloud Approval)", fontWeight = FontWeight.SemiBold, fontSize = 14.sp, color = DeepEmerald)
             }
         }
     }
