@@ -144,7 +144,7 @@ class SyncRepository(
 
                 // Check local recent bills to see if any bill is missing on Cloud
                 val localRecentBills = try {
-                    database.billDao().getBillsInDateRange(DateUtils.todayDate().take(7) + "-01", DateUtils.todayDate())
+                    database.billDao().getBillsInDateRange(DateUtils.todayDate().take(7) + "-01", DateUtils.todayDate() + " 23:59:59")
                 } catch (_: Exception) { emptyList() }
 
                 for (localB in localRecentBills) {
@@ -170,7 +170,6 @@ class SyncRepository(
                     try {
                         val existing = (if (b.transactionUuid.isNotBlank()) database.billDao().getBillByUuid(b.transactionUuid) else null)
                             ?: (if (b.id > 0) database.billDao().getBillByServerId(b.id) else null)
-                            ?: (if (b.billNumber.isNotBlank()) database.billDao().getBillByNumber(b.billNumber) else null)
 
                         if (existing != null &&
                             existing.bill.isVoided == b.isVoided &&

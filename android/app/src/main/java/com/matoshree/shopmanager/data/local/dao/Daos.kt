@@ -74,6 +74,12 @@ interface BillDao {
     @Query("SELECT * FROM bills WHERE billDate >= :startDate AND billDate <= :endDate")
     suspend fun getBillsInDateRange(startDate: String, endDate: String): List<BillWithItems>
 
+    @Query("UPDATE bills SET isVoided = 1, paymentStatus = 'VOID', voidReason = :reason WHERE id = :id OR (serverId IS NOT NULL AND serverId = :id) OR (transactionUuid IS NOT NULL AND transactionUuid != '' AND transactionUuid = :uuid) OR (billNumber IS NOT NULL AND billNumber != '' AND billNumber = :billNumber)")
+    suspend fun voidBillComprehensive(id: Long, uuid: String?, billNumber: String?, reason: String)
+
+    @Query("DELETE FROM bills WHERE id = :id OR (serverId IS NOT NULL AND serverId = :id) OR (transactionUuid IS NOT NULL AND transactionUuid != '' AND transactionUuid = :uuid) OR (billNumber IS NOT NULL AND billNumber != '' AND billNumber = :billNumber)")
+    suspend fun deleteBillComprehensive(id: Long, uuid: String?, billNumber: String?)
+
     @Query("UPDATE bills SET isVoided = 1, paymentStatus = 'VOID', voidReason = :reason WHERE id = :id")
     suspend fun voidBill(id: Long, reason: String)
 
@@ -91,17 +97,17 @@ interface BillDao {
     suspend fun deleteBillItems(billId: Long)
 
     @Transaction
-    @Query("SELECT * FROM bills WHERE customerId = :customerId OR (customerMobile IS NOT NULL AND customerMobile != '' AND (customerMobile = :mobile OR customerMobile LIKE '%' || :mobile || '%')) OR (customerName IS NOT NULL AND customerName != '' AND LOWER(customerName) = LOWER(:name))")
+    @Query("SELECT * FROM bills WHERE (customerId IS NOT NULL AND customerId > 0 AND customerId = :customerId) OR (customerMobile IS NOT NULL AND customerMobile != '' AND (customerMobile = :mobile OR customerMobile LIKE '%' || :mobile || '%')) OR (customerName IS NOT NULL AND customerName != '' AND LOWER(customerName) = LOWER(:name))")
     suspend fun getBillsByCustomerOrDetails(customerId: Long, mobile: String, name: String): List<BillWithItems>
 
-    @Query("DELETE FROM bills WHERE customerId = :customerId OR (customerMobile IS NOT NULL AND customerMobile != '' AND (customerMobile = :mobile OR customerMobile LIKE '%' || :mobile || '%')) OR (customerName IS NOT NULL AND customerName != '' AND LOWER(customerName) = LOWER(:name))")
+    @Query("DELETE FROM bills WHERE (customerId IS NOT NULL AND customerId > 0 AND customerId = :customerId) OR (customerMobile IS NOT NULL AND customerMobile != '' AND (customerMobile = :mobile OR customerMobile LIKE '%' || :mobile || '%')) OR (customerName IS NOT NULL AND customerName != '' AND LOWER(customerName) = LOWER(:name))")
     suspend fun deleteBillsByCustomerOrDetails(customerId: Long, mobile: String, name: String)
 
     @Transaction
-    @Query("SELECT * FROM bills WHERE customerId = :customerId OR (customerMobile IS NOT NULL AND customerMobile != '' AND customerMobile = :mobile)")
+    @Query("SELECT * FROM bills WHERE (customerId IS NOT NULL AND customerId > 0 AND customerId = :customerId) OR (customerMobile IS NOT NULL AND customerMobile != '' AND customerMobile = :mobile)")
     suspend fun getBillsByCustomer(customerId: Long, mobile: String): List<BillWithItems>
 
-    @Query("DELETE FROM bills WHERE customerId = :customerId OR (customerMobile IS NOT NULL AND customerMobile != '' AND customerMobile = :mobile)")
+    @Query("DELETE FROM bills WHERE (customerId IS NOT NULL AND customerId > 0 AND customerId = :customerId) OR (customerMobile IS NOT NULL AND customerMobile != '' AND customerMobile = :mobile)")
     suspend fun deleteBillsByCustomer(customerId: Long, mobile: String)
 
     @Query("DELETE FROM bills WHERE id = :id")
@@ -111,7 +117,6 @@ interface BillDao {
     suspend fun upsertServerBill(bill: BillEntity, items: List<BillItemEntity>) {
         val existing = (if (bill.transactionUuid.isNotBlank()) getBillByUuid(bill.transactionUuid) else null)
             ?: (if (bill.serverId != null && bill.serverId > 0) getBillByServerId(bill.serverId) else null)
-            ?: (if (bill.billNumber.isNotBlank()) getBillByNumber(bill.billNumber) else null)
 
         if (existing != null) {
             // Update existing bill with its existing local Room ID only if data changed
@@ -120,15 +125,29 @@ interface BillDao {
                 Math.abs(existing.bill.finalAmount - bill.finalAmount) > 0.01
 
             if (isDataChanged) {
-                val updated = bill.copy(id = existing.bill.id, syncStatus = SyncStatus.SYNCED)
+                val updated = bill.copy(
+                    id = existing.bill.id,
+                    syncStatus = SyncStatus.SYNCED,
+                    billDate = if (bill.billDate.isNotBlank()) bill.billDate else existing.bill.billDate,
+                    customerId = bill.customerId ?: existing.bill.customerId,
+                    customerMobile = if (!bill.customerMobile.isNullOrBlank()) bill.customerMobile else existing.bill.customerMobile,
+                    customerName = if (!bill.customerName.isNullOrBlank()) bill.customerName else existing.bill.customerName
+                )
                 insertBill(updated)
-            } else if (existing.bill.syncStatus != SyncStatus.SYNCED && bill.syncStatus == SyncStatus.SYNCED) {
-                updateSyncStatus(existing.bill.transactionUuid, SyncStatus.SYNCED, existing.bill.serverId ?: bill.serverId)
-            }
-
-            if (existing.items.isEmpty() && items.isNotEmpty()) {
-                val itemsWithId = items.map { it.copy(id = 0, billId = existing.bill.id) }
-                insertBillItems(itemsWithId)
+                // When REPLACE runs, SQLite CASCADE-deletes items; re-insert items to preserve them!
+                val itemsToInsert = if (items.isNotEmpty()) items else existing.items
+                if (itemsToInsert.isNotEmpty()) {
+                    val itemsWithId = itemsToInsert.map { it.copy(id = 0, billId = existing.bill.id) }
+                    insertBillItems(itemsWithId)
+                }
+            } else {
+                if (existing.bill.syncStatus != SyncStatus.SYNCED && bill.syncStatus == SyncStatus.SYNCED) {
+                    updateSyncStatus(existing.bill.transactionUuid, SyncStatus.SYNCED, existing.bill.serverId ?: bill.serverId)
+                }
+                if (existing.items.isEmpty() && items.isNotEmpty()) {
+                    val itemsWithId = items.map { it.copy(id = 0, billId = existing.bill.id) }
+                    insertBillItems(itemsWithId)
+                }
             }
             return
         }

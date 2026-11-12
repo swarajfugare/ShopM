@@ -132,15 +132,20 @@ class BillViewModel(
         return if (res.isSuccess) Result.success(tx) else Result.failure(res.exceptionOrNull() ?: Exception("Payment failed"))
     }
 
-    fun voidBill(billId: Long, reason: String = "Voided by manager") {
+    fun voidBill(billId: Long, reason: String = "Voided by manager", billNumber: String? = null, transactionUuid: String? = null) {
         viewModelScope.launch {
-            val bill = _bills.value.find { it.id == billId }
+            val bill = _bills.value.find { it.id == billId || (billNumber != null && it.billNumber == billNumber) || (transactionUuid != null && it.transactionUuid == transactionUuid) }
+            val bNum = bill?.billNumber ?: billNumber
+            val tUuid = bill?.transactionUuid ?: transactionUuid
+
             billRepository.voidBill(
                 billId = billId,
                 reason = reason,
-                billNumber = bill?.billNumber,
-                transactionUuid = bill?.transactionUuid
+                billNumber = bNum,
+                transactionUuid = tUuid
             )
+            // Optimistically update _bills so it immediately updates UI
+            _bills.value = _bills.value.filterNot { it.id == billId || (bNum != null && it.billNumber == bNum) || (tUuid != null && it.transactionUuid == tUuid) }
         }
     }
 
@@ -207,6 +212,7 @@ fun BillsHistoryScreen(
     val filteredBills = remember(allBills, filter, search) {
         val today = DateUtils.todayDate()
         allBills.filter { bill ->
+            if (bill.isVoided) return@filter false
             val matchesSearch = search.isBlank() ||
                     bill.billNumber.contains(search, ignoreCase = true) ||
                     (bill.customerName?.contains(search, ignoreCase = true) == true) ||
@@ -218,7 +224,7 @@ fun BillsHistoryScreen(
             }
 
             matchesSearch && matchesFilter
-        }.sortedWith(compareByDescending<Bill> { it.id }.thenByDescending { it.billDate })
+        }.sortedWith(compareByDescending<Bill> { it.billDate }.thenByDescending { it.id })
     }
 
     if (showBulkDeleteDialog) {
@@ -1447,7 +1453,11 @@ fun BillPreviewScreen(
             confirmButton = {
                 Button(
                     onClick = {
-                        viewModel.voidBill(billId)
+                        viewModel.voidBill(
+                            billId = billId,
+                            billNumber = bill?.billNumber,
+                            transactionUuid = bill?.transactionUuid
+                        )
                         showVoidDialog = false
                         Toast.makeText(context, "बिल रद्द करण्यात आले", Toast.LENGTH_SHORT).show()
                         onBackClick()

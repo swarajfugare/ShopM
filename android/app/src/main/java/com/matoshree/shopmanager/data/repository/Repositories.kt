@@ -191,7 +191,7 @@ class BillRepository(
                             for (b in cloudBills) {
                                 try {
                                     val existing = (if (b.transactionUuid.isNotBlank()) database.billDao().getBillByUuid(b.transactionUuid) else null)
-                                        ?: (if (b.billNumber.isNotBlank()) database.billDao().getBillByNumber(b.billNumber) else null)
+                                        ?: (if (b.id > 0) database.billDao().getBillByServerId(b.id) else null)
                                     val needsSync = existing == null ||
                                         existing.bill.isVoided != b.isVoided ||
                                         existing.bill.paymentStatus != b.paymentStatus ||
@@ -374,7 +374,7 @@ class BillRepository(
     ): Bill {
         val nowIso = DateUtils.nowIso()
         val year = nowIso.take(4)
-        val seq = System.currentTimeMillis() % 100000
+        val seq = ((System.currentTimeMillis() / 1000) % 900000 + 100000).toInt()
         val billNumber = "MC-$year-$seq"
         val txUuid = UUID.randomUUID().toString()
 
@@ -469,7 +469,7 @@ class BillRepository(
             Log.w("BillRepo", "Cloud void sync note: ${e.message}")
         }
         val targetLocalId = localBill?.bill?.id ?: billId
-        database?.billDao()?.voidBill(targetLocalId, reason)
+        database?.billDao()?.voidBillComprehensive(targetLocalId, targetUuid, targetBillNumber, reason)
     }
 }
 

@@ -1280,41 +1280,83 @@ class FirestoreBillRepository {
             }
         }
 
-        val rootListener = FirebaseManager.billsCollection()
-            .limit(limit.toLong())
-            .addSnapshotListener { snapshot, error ->
-                if (error != null) {
-                    Log.w(TAG, "Bills root snapshot notice: ${error.message} (code: ${error.code})")
-                    return@addSnapshotListener
-                }
-                if (snapshot != null) {
-                    rootMap.clear()
-                    snapshot.documents.forEach { doc ->
-                        doc.toBillDomain()?.let { bill ->
-                            rootMap[doc.id] = bill
-                        }
+        val rootListener = try {
+            FirebaseManager.billsCollection()
+                .orderBy("createdAt", Query.Direction.DESCENDING)
+                .limit(limit.toLong())
+                .addSnapshotListener { snapshot, error ->
+                    if (error != null) {
+                        Log.w(TAG, "Bills root snapshot notice: ${error.message} (code: ${error.code})")
+                        return@addSnapshotListener
                     }
-                    emitCombined()
+                    if (snapshot != null) {
+                        rootMap.clear()
+                        snapshot.documents.forEach { doc ->
+                            doc.toBillDomain()?.let { bill ->
+                                rootMap[doc.id] = bill
+                            }
+                        }
+                        emitCombined()
+                    }
                 }
-            }
+        } catch (e: Exception) {
+            FirebaseManager.billsCollection()
+                .limit(limit.toLong())
+                .addSnapshotListener { snapshot, error ->
+                    if (error != null) {
+                        Log.w(TAG, "Bills root fallback snapshot notice: ${error.message}")
+                        return@addSnapshotListener
+                    }
+                    if (snapshot != null) {
+                        rootMap.clear()
+                        snapshot.documents.forEach { doc ->
+                            doc.toBillDomain()?.let { bill ->
+                                rootMap[doc.id] = bill
+                            }
+                        }
+                        emitCombined()
+                    }
+                }
+        }
 
-        val shopListener = FirebaseManager.shopBillsCollection()
-            .limit(limit.toLong())
-            .addSnapshotListener { snapshot, error ->
-                if (error != null) {
-                    Log.w(TAG, "Bills shop snapshot notice: ${error.message} (code: ${error.code})")
-                    return@addSnapshotListener
-                }
-                if (snapshot != null) {
-                    shopMap.clear()
-                    snapshot.documents.forEach { doc ->
-                        doc.toBillDomain()?.let { bill ->
-                            shopMap[doc.id] = bill
-                        }
+        val shopListener = try {
+            FirebaseManager.shopBillsCollection()
+                .orderBy("createdAt", Query.Direction.DESCENDING)
+                .limit(limit.toLong())
+                .addSnapshotListener { snapshot, error ->
+                    if (error != null) {
+                        Log.w(TAG, "Bills shop snapshot notice: ${error.message} (code: ${error.code})")
+                        return@addSnapshotListener
                     }
-                    emitCombined()
+                    if (snapshot != null) {
+                        shopMap.clear()
+                        snapshot.documents.forEach { doc ->
+                            doc.toBillDomain()?.let { bill ->
+                                shopMap[doc.id] = bill
+                            }
+                        }
+                        emitCombined()
+                    }
                 }
-            }
+        } catch (e: Exception) {
+            FirebaseManager.shopBillsCollection()
+                .limit(limit.toLong())
+                .addSnapshotListener { snapshot, error ->
+                    if (error != null) {
+                        Log.w(TAG, "Bills shop fallback snapshot notice: ${error.message}")
+                        return@addSnapshotListener
+                    }
+                    if (snapshot != null) {
+                        shopMap.clear()
+                        snapshot.documents.forEach { doc ->
+                            doc.toBillDomain()?.let { bill ->
+                                shopMap[doc.id] = bill
+                            }
+                        }
+                        emitCombined()
+                    }
+                }
+        }
 
         awaitClose {
             rootListener.remove()
@@ -1374,7 +1416,7 @@ class FirestoreBillRepository {
         // Count bills for year sequence
         val existingBills = try {
             if (isOnline) {
-                kotlinx.coroutines.withTimeoutOrNull(600) {
+                kotlinx.coroutines.withTimeoutOrNull(1500) {
                     FirebaseManager.billsCollection().get().await()
                 }
             } else null
@@ -1383,8 +1425,25 @@ class FirestoreBillRepository {
                 FirebaseManager.billsCollection().get(com.google.firebase.firestore.Source.CACHE).await()
             } catch (e: Exception) { null }
 
-        val seqCount = (existingBills?.size() ?: (System.currentTimeMillis() % 100000).toInt()) + 1
-        val billNumber = "MC-$currentYear-$seqCount"
+        var maxSeq = 0
+        existingBills?.documents?.forEach { doc ->
+            val num = doc.getString("billNumber") ?: ""
+            if (num.startsWith("MC-$currentYear-")) {
+                val seqPart = num.removePrefix("MC-$currentYear-").takeWhile { it.isDigit() }.toIntOrNull() ?: 0
+                if (seqPart > maxSeq) maxSeq = seqPart
+            }
+        }
+        val billNumber = if (maxSeq > 0) {
+            "MC-$currentYear-${maxSeq + 1}"
+        } else {
+            val count = (existingBills?.size() ?: 0)
+            if (count > 0) {
+                "MC-$currentYear-${count + 1}"
+            } else {
+                val timeSeq = ((System.currentTimeMillis() / 1000) % 900000 + 100000).toInt()
+                "MC-$currentYear-$timeSeq"
+            }
+        }
 
         val subtotal: Double
         val finalAmount: Double

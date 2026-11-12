@@ -114,13 +114,6 @@ class CustomerViewModel(
     init {
         observeCustomers()
         observeSettings()
-        // Ensure requested Rohini Dandage, 9272035042 account and any orphan bills are permanently wiped clean
-        viewModelScope.launch {
-            try {
-                customerRepository.purgeSpecificCustomerPermanently("Rohini Dandage", "9272035042")
-                customerRepository.unTrashCustomerIfAccidental("Maina Patil")
-            } catch (_: Exception) {}
-        }
     }
 
     private fun observeCustomers() {
@@ -173,21 +166,30 @@ class CustomerViewModel(
                     it.id == customerId || (cleanTargetPhone.length == 10 && PhoneUtils.clean10DigitMobileInput(it.mobile) == cleanTargetPhone) 
                 } ?: cust
                 val custCleanMobile = PhoneUtils.clean10DigitMobileInput(currentCust?.mobile ?: targetMobile)
+                val custName = currentCust?.name?.trim() ?: ""
 
-                val customerSpecificBills = allBills.filter {
-                    !it.isVoided &&
-                    (it.customerId == customerId || (custCleanMobile.length == 10 && PhoneUtils.clean10DigitMobileInput(it.customerMobile ?: "") == custCleanMobile))
+                val customerSpecificBills = allBills.filter { b ->
+                    if (b.isVoided) return@filter false
+                    val bCleanMob = PhoneUtils.clean10DigitMobileInput(b.customerMobile ?: "")
+                    val idMatches = (b.customerId != null && b.customerId > 0 && (b.customerId == customerId || b.customerId == currentCust?.id))
+                    val mobMatches = (custCleanMobile.length == 10 && bCleanMob.length == 10 && bCleanMob == custCleanMobile)
+                    val nameMatches = (custName.isNotBlank() && b.customerName != null && b.customerName.trim().equals(custName, ignoreCase = true))
+                    idMatches || mobMatches || nameMatches
                 }
                 
                 val voidedBillIds = allBills.filter { it.isVoided }.map { it.id }.toSet()
                 val voidedBillNumbers = allBills.filter { it.isVoided && it.billNumber.isNotBlank() }.map { it.billNumber }.toSet()
 
-                val validTxs = txs.filter { 
-                    !it.isReversed && 
-                    it.status != "TRASH" &&
-                    !voidedBillIds.contains(it.billId) && 
-                    !(it.billNumber.isNotBlank() && voidedBillNumbers.contains(it.billNumber)) &&
-                    (it.customerId == customerId || (custCleanMobile.length == 10 && PhoneUtils.clean10DigitMobileInput(it.customerMobile) == custCleanMobile))
+                val validTxs = txs.filter { tx ->
+                    if (tx.isReversed || tx.status == "TRASH") return@filter false
+                    if (voidedBillIds.contains(tx.billId)) return@filter false
+                    if (tx.billNumber.isNotBlank() && voidedBillNumbers.contains(tx.billNumber)) return@filter false
+
+                    val txCleanMob = PhoneUtils.clean10DigitMobileInput(tx.customerMobile)
+                    val idMatches = (tx.customerId == customerId || tx.customerId == currentCust?.id)
+                    val mobMatches = (custCleanMobile.length == 10 && txCleanMob.length == 10 && txCleanMob == custCleanMobile)
+                    val nameMatches = (custName.isNotBlank() && tx.customerName.trim().equals(custName, ignoreCase = true))
+                    idMatches || mobMatches || nameMatches
                 }
 
                 if (customerBills.value != customerSpecificBills) {
@@ -800,17 +802,19 @@ class CustomerViewModel(
         return res
     }
 
-    fun deleteOrArchiveCustomer(customerId: Long, onComplete: (String) -> Unit) {
+    fun deleteOrArchiveCustomer(customerId: Long, hintMobile: String = "", hintName: String = "", onComplete: (String) -> Unit) {
         viewModelScope.launch {
             if (customerOutstandingDue.value > 0.01) {
                 onComplete("Cannot delete customer with active outstanding balance of ${CurrencyFormatter.format(customerOutstandingDue.value)}.")
                 return@launch
             }
             val profile = selectedCustomerProfile.value
+            val mob = hintMobile.ifBlank { profile?.mobile ?: "" }
+            val name = hintName.ifBlank { profile?.name ?: "" }
             val result = customerRepository.deleteOrArchiveCustomer(
                 customerId = customerId,
-                hintMobile = profile?.mobile ?: "",
-                hintName = profile?.name ?: ""
+                hintMobile = mob,
+                hintName = name
             )
             _customers.value = _customers.value.filter { it.id != customerId }
             selectedCustomerProfile.value = null
@@ -2206,7 +2210,7 @@ fun CustomerProfileScreen(
                 if (outstandingDue <= 0.01) {
                     Button(
                         onClick = {
-                            viewModel.deleteOrArchiveCustomer(customerId) { msg ->
+                            viewModel.deleteOrArchiveCustomer(customerId, customer?.mobile ?: "", customer?.name ?: "") { msg ->
                                 Toast.makeText(context, msg, Toast.LENGTH_SHORT).show()
                                 showDeleteDialog = false
                                 onBackClick()
