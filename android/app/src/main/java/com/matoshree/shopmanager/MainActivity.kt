@@ -56,6 +56,7 @@ class MainActivity : FragmentActivity() {
         syncManager = SyncManager.getInstance(this, database, apiService)
 
         val deviceTrustManager = com.matoshree.shopmanager.security.DeviceTrustManager(this)
+        val googleAuthManager = com.matoshree.shopmanager.security.GoogleAuthManager(this)
         val securityStatus = com.matoshree.shopmanager.security.AppSecurityShield.performFullSecurityScan(this)
 
         // Schedule periodic background sync
@@ -63,6 +64,7 @@ class MainActivity : FragmentActivity() {
 
         setContent {
             MatoshreeTheme {
+                var isGoogleLoggedIn: Boolean by remember { mutableStateOf(googleAuthManager.isUserLoggedIn()) }
                 var isDeviceTrusted: Boolean by remember { mutableStateOf(deviceTrustManager.isDeviceAuthorized()) }
 
                 DisposableEffect(isDeviceTrusted) {
@@ -76,7 +78,14 @@ class MainActivity : FragmentActivity() {
                     }
                 }
 
-                if (!isDeviceTrusted) {
+                if (!isGoogleLoggedIn) {
+                    com.matoshree.shopmanager.ui.screens.lock.GoogleLoginScreen(
+                        googleAuthManager = googleAuthManager,
+                        onLoginSuccess = {
+                            isGoogleLoggedIn = true
+                        }
+                    )
+                } else if (!isDeviceTrusted) {
                     com.matoshree.shopmanager.ui.screens.lock.DeviceVerificationScreen(
                         securityStatus = securityStatus,
                         onVerificationSuccess = {
