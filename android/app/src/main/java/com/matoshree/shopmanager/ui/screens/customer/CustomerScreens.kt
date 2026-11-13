@@ -1210,7 +1210,7 @@ fun CustomersListScreen(
                         verticalArrangement = Arrangement.spacedBy(10.dp),
                         contentPadding = PaddingValues(bottom = 80.dp)
                     ) {
-                        itemsIndexed(filteredCustomers, key = { index, customer -> "cust_${customer.id}_${customer.canonicalKey()}_$index" }) { _, customer ->
+                        items(filteredCustomers, key = { customer -> "cust_${customer.id}_${customer.canonicalKey()}" }) { customer ->
                             val isSelected = selectedIds.contains(customer.id)
                             CustomerListItemCard(
                                 customer = customer,
@@ -1689,7 +1689,7 @@ fun CustomerProfileScreen(
                             }
                         } else {
                             if (isTablet) {
-                                itemsIndexed(bills.chunked(2), key = { index, pair -> "bill_pair_${pair[0].id}_$index" }) { _, pair ->
+                                items(bills.chunked(2), key = { pair -> "bill_pair_${pair[0].id}_${pair[0].transactionUuid}_${pair.getOrNull(1)?.id ?: "end"}" }) { pair ->
                                     Row(
                                         modifier = Modifier.fillMaxWidth(),
                                         horizontalArrangement = Arrangement.spacedBy(12.dp)
@@ -1707,7 +1707,7 @@ fun CustomerProfileScreen(
                                     }
                                 }
                             } else {
-                                itemsIndexed(bills, key = { index, bill -> "bill_${bill.id}_${bill.transactionUuid}_$index" }) { _, bill ->
+                                items(bills, key = { bill -> "bill_${bill.id}_${bill.transactionUuid}" }) { bill ->
                                     CustomerBillCardItem(bill = bill, onBillClick = onBillClick)
                                 }
                             }
@@ -1761,7 +1761,7 @@ fun CustomerProfileScreen(
                             }
                         } else {
                             if (isTablet) {
-                                itemsIndexed(ledger.chunked(2), key = { index, pair -> "ledger_pair_${pair[0].id}_$index" }) { _, pair ->
+                                items(ledger.chunked(2), key = { pair -> "ledger_pair_${pair[0].id}_${pair.getOrNull(1)?.id ?: "end"}" }) { pair ->
                                     Row(
                                         modifier = Modifier.fillMaxWidth(),
                                         horizontalArrangement = Arrangement.spacedBy(12.dp)
@@ -1779,7 +1779,7 @@ fun CustomerProfileScreen(
                                     }
                                 }
                             } else {
-                                itemsIndexed(ledger, key = { index, entry -> "ledger_${entry.id}_$index" }) { _, entry ->
+                                items(ledger, key = { entry -> "ledger_${entry.id}" }) { entry ->
                                     CustomerLedgerCardItem(entry = entry, onActionClick = { if (entry.transaction != null) selectedUdhariForAction = entry.transaction })
                                 }
                             }
@@ -1822,7 +1822,7 @@ fun CustomerProfileScreen(
                             }
                         } else {
                             if (isTablet) {
-                                itemsIndexed(allPayments.chunked(2), key = { index, pair -> "pay_pair_${pair[0].id}_$index" }) { _, pair ->
+                                items(allPayments.chunked(2), key = { pair -> "pay_pair_${pair[0].id}_${pair.getOrNull(1)?.id ?: "end"}" }) { pair ->
                                     Row(
                                         modifier = Modifier.fillMaxWidth(),
                                         horizontalArrangement = Arrangement.spacedBy(12.dp)
@@ -1850,7 +1850,7 @@ fun CustomerProfileScreen(
                                     }
                                 }
                             } else {
-                                itemsIndexed(allPayments, key = { index, record -> "pay_${record.id}_$index" }) { _, record ->
+                                items(allPayments, key = { record -> "pay_${record.id}" }) { record ->
                                     CustomerPaymentCardItem(
                                         record = record,
                                         onBillClick = onBillClick,

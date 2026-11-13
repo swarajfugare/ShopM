@@ -448,7 +448,7 @@ fun BillsHistoryScreen(
                         verticalArrangement = Arrangement.spacedBy(10.dp),
                         contentPadding = PaddingValues(bottom = 24.dp)
                     ) {
-                        itemsIndexed(filteredBills.chunked(2), key = { index, pair -> "bill_pair_${pair[0].id}_${pair[0].transactionUuid}_$index" }) { _, pair ->
+                        items(filteredBills.chunked(2), key = { pair -> "bill_pair_${pair[0].id}_${pair[0].transactionUuid}_${pair.getOrNull(1)?.id ?: "end"}" }) { pair ->
                             Row(
                                 modifier = Modifier.fillMaxWidth(),
                                 horizontalArrangement = Arrangement.spacedBy(12.dp)
@@ -504,7 +504,7 @@ fun BillsHistoryScreen(
                         verticalArrangement = Arrangement.spacedBy(10.dp),
                         contentPadding = PaddingValues(bottom = 24.dp)
                     ) {
-                        itemsIndexed(filteredBills, key = { index, bill -> "bill_${bill.id}_${bill.transactionUuid}_${bill.billNumber}_$index" }) { _, bill ->
+                        items(filteredBills, key = { bill -> "bill_${bill.id}_${bill.transactionUuid}" }) { bill ->
                             val isSelected = selectedBillIds.contains(bill.id)
                             BillListHistoryItemCard(
                                 bill = bill,

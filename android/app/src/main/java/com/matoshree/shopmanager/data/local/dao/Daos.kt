@@ -134,13 +134,13 @@ interface BillDao {
     suspend fun deleteBillById(id: Long)
 
     @Transaction
-    suspend fun upsertServerBill(bill: BillEntity, items: List<BillItemEntity>) {
+    suspend fun upsertServerBill(bill: BillEntity, items: List<BillItemEntity>): Long {
         val existingByUuid = if (bill.transactionUuid.isNotBlank()) getBillByUuid(bill.transactionUuid) else null
         val existingByServer = if (existingByUuid == null && bill.serverId != null && bill.serverId > 0) getBillByServerId(bill.serverId) else null
-        val existingByNumber = if (existingByUuid == null && existingByServer == null && bill.billNumber.isNotBlank()) getBillByNumber(bill.billNumber) else null
-        val existing = existingByUuid ?: existingByServer ?: existingByNumber
+        val existing = existingByUuid ?: existingByServer
 
         if (existing != null) {
+            val localId = existing.bill.id
             // Update existing bill with its existing local Room ID only if data changed
             val isDataChanged = existing.bill.isVoided != bill.isVoided ||
                 existing.bill.paymentStatus != bill.paymentStatus ||
@@ -191,16 +191,17 @@ interface BillDao {
                     insertBillItems(itemsWithId)
                 }
             }
-            return
+            return localId
         }
 
-        // Fresh bill from server: ensure local id is 0 so SQLite auto-generates unique primary key
+        // Fresh bill: ensure local id is 0 so SQLite auto-generates unique primary key
         val freshBill = bill.copy(id = 0)
         val billId = insertBill(freshBill)
         if (items.isNotEmpty()) {
             val itemsWithId = items.map { it.copy(id = 0, billId = billId) }
             insertBillItems(itemsWithId)
         }
+        return billId
     }
 
     @Transaction
@@ -296,7 +297,12 @@ interface CustomerDao {
         val cleanMob = com.matoshree.shopmanager.utils.PhoneUtils.clean10DigitMobileInput(customer.mobile)
         val existingByServer = if (customer.serverId != null && customer.serverId > 0) getCustomerByServerId(customer.serverId) else null
         val existingByMobile = if (existingByServer == null && cleanMob.length == 10) getCustomerByMobileFuzzy(customer.mobile, cleanMob) else null
-        val existingByName = if (existingByServer == null && existingByMobile == null && customer.name.isNotBlank()) getCustomerByName(customer.name) else null
+        val existingByName = if (existingByServer == null && existingByMobile == null && cleanMob.isBlank() && customer.name.isNotBlank()) {
+            val byName = getCustomerByName(customer.name)
+            if (byName != null && com.matoshree.shopmanager.utils.PhoneUtils.clean10DigitMobileInput(byName.mobile).isBlank()) {
+                byName
+            } else null
+        } else null
         val existing = existingByServer ?: existingByMobile ?: existingByName
 
         if (existing != null) {

@@ -7,6 +7,7 @@ import com.matoshree.shopmanager.data.local.dao.BillWithItems
 import com.matoshree.shopmanager.data.local.entity.*
 import com.matoshree.shopmanager.domain.model.*
 import com.matoshree.shopmanager.utils.DateUtils
+import androidx.room.withTransaction
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.callbackFlow
@@ -249,6 +250,13 @@ class BillRepository(
         }.distinctUntilChanged()
     }
 
+    fun getWeekBills(startDate: String): Flow<List<Bill>> {
+        if (database == null) return kotlinx.coroutines.flow.flowOf(emptyList())
+        return database.billDao().getWeekBillsFlow(startDate).map { entities ->
+            entities.map { it.toDomain() }
+        }.distinctUntilChanged()
+    }
+
     suspend fun getBillById(id: Long): Bill? {
         val cloudBill = try {
             firestoreRepo.getBillById(id)
@@ -304,29 +312,35 @@ class BillRepository(
         )
 
         val targetStatus = if (cloudBill != null) SyncStatus.SYNCED else SyncStatus.PENDING
+        var localRoomId: Long = billToSave.id
 
         database?.let { db ->
             try {
-                cacheBillToRoom(db, billToSave, targetStatus)
-                items.forEach { item ->
-                    item.productId?.let { pid ->
-                        db.productDao().recordSaleStockDeduction(pid, item.quantity)
+                db.withTransaction {
+                    localRoomId = cacheBillToRoom(db, billToSave, targetStatus)
+                    items.forEach { item ->
+                        item.productId?.let { pid ->
+                            db.productDao().recordSaleStockDeduction(pid, item.quantity)
+                        }
+                    }
+                    if (billToSave.customerId != null && billToSave.customerId > 0) {
+                        db.customerDao().incrementCustomerSpend(billToSave.customerId, billToSave.finalAmount, billToSave.billDate)
                     }
                 }
-                if (billToSave.customerId != null && billToSave.customerId > 0) {
-                    db.customerDao().incrementCustomerSpend(billToSave.customerId, billToSave.finalAmount, billToSave.billDate)
-                }
             } catch (re: Exception) {
-                Log.e("BillRepo", "Error persisting bill to Room: ${re.message}")
+                Log.e("BillRepo", "Error persisting bill to Room: ${re.message}", re)
+                if (cloudBill == null) {
+                    throw re
+                }
             }
         }
 
-        return billToSave
+        return billToSave.copy(id = localRoomId)
     }
 
-    private suspend fun cacheBillToRoom(database: AppDatabase, bill: Bill, syncStatus: SyncStatus = SyncStatus.SYNCED) {
+    private suspend fun cacheBillToRoom(database: AppDatabase, bill: Bill, syncStatus: SyncStatus = SyncStatus.SYNCED): Long {
         val pair = toBillEntities(bill, syncStatus)
-        database.billDao().upsertServerBill(pair.first, pair.second)
+        return database.billDao().upsertServerBill(pair.first, pair.second)
         // Note: incrementCustomerSpend is deliberately NOT called here to prevent double-counting during sync
     }
 

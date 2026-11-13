@@ -150,5 +150,8 @@ data class DashboardSummary(
     val cashPayments: Double = 0.0,
     val upiPayments: Double = 0.0,
     val recentBills: List<Bill> = emptyList(),
-    val businessInsight: String = "Welcome to Matoshree Collection."
+    val businessInsight: String = "Welcome to Matoshree Collection.",
+    val isShowingTodayBills: Boolean = true,
+    val billsHeaderTitle: String = "आजची बिले (0)",
+    val hasLoadedOnce: Boolean = false
 )

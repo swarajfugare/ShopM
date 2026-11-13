@@ -132,7 +132,7 @@ fun ExpensesListScreen(
                     }
                 }
             } else {
-                itemsIndexed(expenses, key = { index, ex -> "exp_${ex.id}_$index" }) { _, ex ->
+                items(expenses, key = { ex -> "exp_${ex.id}" }) { ex ->
                     MatoshreeCard {
                         Row(
                             modifier = Modifier.fillMaxWidth(),

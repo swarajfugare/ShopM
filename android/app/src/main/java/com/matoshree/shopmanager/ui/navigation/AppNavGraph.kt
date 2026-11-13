@@ -70,51 +70,34 @@ fun AppNavGraph(
     val dashboardViewModel = remember { DashboardViewModel(billRepository, udhariRepository, productRepository) }
     val saleViewModel = remember { SaleViewModel(billRepository, customerRepository, productRepository) }
 
-    // Lazy on-demand ViewModels: Prevent 8 heavy ViewModels from initializing simultaneously on unlock
-    var productViewModelState by remember { mutableStateOf<ProductViewModel?>(null) }
-    fun getProductViewModel(): ProductViewModel {
-        return productViewModelState ?: ProductViewModel(productRepository).also { productViewModelState = it }
-    }
+    // Lazy on-demand ViewModels: Prevent 8 heavy ViewModels from initializing simultaneously on unlock,
+    // using Kotlin lazy delegates inside remember so no snapshot state mutations occur during composition.
+    val lazyProductViewModel = remember { lazy { ProductViewModel(productRepository) } }
+    fun getProductViewModel(): ProductViewModel = lazyProductViewModel.value
 
-    var billViewModelState by remember { mutableStateOf<BillViewModel?>(null) }
-    fun getBillViewModel(): BillViewModel {
-        return billViewModelState ?: BillViewModel(billRepository, settingsDao, udhariRepository).also { billViewModelState = it }
-    }
+    val lazyBillViewModel = remember { lazy { BillViewModel(billRepository, settingsDao, udhariRepository) } }
+    fun getBillViewModel(): BillViewModel = lazyBillViewModel.value
 
-    var customerViewModelState by remember { mutableStateOf<CustomerViewModel?>(null) }
-    fun getCustomerViewModel(): CustomerViewModel {
-        return customerViewModelState ?: CustomerViewModel(customerRepository, billRepository, udhariRepository).also { customerViewModelState = it }
-    }
+    val lazyCustomerViewModel = remember { lazy { CustomerViewModel(customerRepository, billRepository, udhariRepository) } }
+    fun getCustomerViewModel(): CustomerViewModel = lazyCustomerViewModel.value
 
-    var udhariViewModelState by remember { mutableStateOf<com.matoshree.shopmanager.ui.screens.udhari.UdhariViewModel?>(null) }
-    fun getUdhariViewModel(): com.matoshree.shopmanager.ui.screens.udhari.UdhariViewModel {
-        return udhariViewModelState ?: com.matoshree.shopmanager.ui.screens.udhari.UdhariViewModel(udhariRepository, customerRepository, billRepository).also { udhariViewModelState = it }
-    }
+    val lazyUdhariViewModel = remember { lazy { com.matoshree.shopmanager.ui.screens.udhari.UdhariViewModel(udhariRepository, customerRepository, billRepository) } }
+    fun getUdhariViewModel(): com.matoshree.shopmanager.ui.screens.udhari.UdhariViewModel = lazyUdhariViewModel.value
 
-    var closingViewModelState by remember { mutableStateOf<DailyClosingViewModel?>(null) }
-    fun getClosingViewModel(): DailyClosingViewModel {
-        return closingViewModelState ?: DailyClosingViewModel(billRepository, dailyClosingRepository, udhariRepository, expenseRepository).also { closingViewModelState = it }
-    }
+    val lazyClosingViewModel = remember { lazy { DailyClosingViewModel(billRepository, dailyClosingRepository, udhariRepository, expenseRepository) } }
+    fun getClosingViewModel(): DailyClosingViewModel = lazyClosingViewModel.value
 
-    var analyticsViewModelState by remember { mutableStateOf<AnalyticsViewModel?>(null) }
-    fun getAnalyticsViewModel(): AnalyticsViewModel {
-        return analyticsViewModelState ?: AnalyticsViewModel(billRepository, customerRepository, productRepository, expenseRepository, dailyClosingRepository).also { analyticsViewModelState = it }
-    }
+    val lazyAnalyticsViewModel = remember { lazy { AnalyticsViewModel(billRepository, customerRepository, productRepository, expenseRepository, dailyClosingRepository) } }
+    fun getAnalyticsViewModel(): AnalyticsViewModel = lazyAnalyticsViewModel.value
 
-    var inventoryViewModelState by remember { mutableStateOf<com.matoshree.shopmanager.ui.screens.inventory.InventoryViewModel?>(null) }
-    fun getInventoryViewModel(): com.matoshree.shopmanager.ui.screens.inventory.InventoryViewModel {
-        return inventoryViewModelState ?: com.matoshree.shopmanager.ui.screens.inventory.InventoryViewModel(productRepository).also { inventoryViewModelState = it }
-    }
+    val lazyInventoryViewModel = remember { lazy { com.matoshree.shopmanager.ui.screens.inventory.InventoryViewModel(productRepository) } }
+    fun getInventoryViewModel(): com.matoshree.shopmanager.ui.screens.inventory.InventoryViewModel = lazyInventoryViewModel.value
 
-    var expenseViewModelState by remember { mutableStateOf<ExpenseViewModel?>(null) }
-    fun getExpenseViewModel(): ExpenseViewModel {
-        return expenseViewModelState ?: ExpenseViewModel(expenseRepository).also { expenseViewModelState = it }
-    }
+    val lazyExpenseViewModel = remember { lazy { ExpenseViewModel(expenseRepository) } }
+    fun getExpenseViewModel(): ExpenseViewModel = lazyExpenseViewModel.value
 
-    var settingsViewModelState by remember { mutableStateOf<SettingsViewModel?>(null) }
-    fun getSettingsViewModel(): SettingsViewModel {
-        return settingsViewModelState ?: SettingsViewModel(syncRepository, pinManager, settingsDao).also { settingsViewModelState = it }
-    }
+    val lazySettingsViewModel = remember { lazy { SettingsViewModel(syncRepository, pinManager, settingsDao) } }
+    fun getSettingsViewModel(): SettingsViewModel = lazySettingsViewModel.value
 
     val navBackStackEntry by navController.currentBackStackEntryAsState()
     val currentRoute = navBackStackEntry?.destination?.route

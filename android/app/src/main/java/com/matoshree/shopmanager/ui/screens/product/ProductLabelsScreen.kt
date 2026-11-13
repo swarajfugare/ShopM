@@ -505,7 +505,7 @@ fun ProductLabelsScreen(
                     verticalArrangement = Arrangement.spacedBy(10.dp),
                     contentPadding = PaddingValues(bottom = 80.dp)
                 ) {
-                    itemsIndexed(filtered, key = { index, product -> "plabel_${product.id}_$index" }) { _, product ->
+                    items(filtered, key = { product -> "plabel_${product.id}" }) { product ->
                         val isSelected = selectedIds.contains(product.id)
                         val qty = quantities[product.id] ?: 1
 

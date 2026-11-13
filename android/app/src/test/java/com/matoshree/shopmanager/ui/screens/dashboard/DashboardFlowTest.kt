@@ -1,0 +1,130 @@
+package com.matoshree.shopmanager.ui.screens.dashboard
+
+import com.matoshree.shopmanager.domain.model.*
+import org.junit.Assert.*
+import org.junit.Test
+
+class DashboardFlowTest {
+
+    @Test
+    fun testDashboardHeader_showsTodayBillsWhenPresent() {
+        val todayBills = listOf(
+            createTestBill(id = 1, amount = 1000.0, date = "2026-11-13 10:00:00", voided = false),
+            createTestBill(id = 2, amount = 500.0, date = "2026-11-13 11:30:00", voided = false)
+        )
+        val weekBills = listOf(
+            createTestBill(id = 10, amount = 2000.0, date = "2026-11-10 14:00:00", voided = false)
+        )
+
+        val activeTodayBills = todayBills.filter { !it.isVoided }
+        val activeWeekBills = weekBills.filter { !it.isVoided }
+
+        val isShowingToday = activeTodayBills.isNotEmpty()
+        val displayBills = if (isShowingToday) activeTodayBills else activeWeekBills
+        val billsHeaderTitle = if (isShowingToday) {
+            "आजची बिले (${activeTodayBills.size})"
+        } else if (activeWeekBills.isNotEmpty()) {
+            "या आठवड्याची बिले (${activeWeekBills.size})"
+        } else {
+            "आजची बिले (०)"
+        }
+
+        assertTrue(isShowingToday)
+        assertEquals(2, displayBills.size)
+        assertEquals("आजची बिले (2)", billsHeaderTitle)
+    }
+
+    @Test
+    fun testDashboardHeader_fallsBackToWeekBillsWhenTodayEmpty() {
+        val todayBills = emptyList<Bill>()
+        val weekBills = listOf(
+            createTestBill(id = 10, amount = 2000.0, date = "2026-11-10 14:00:00", voided = false),
+            createTestBill(id = 11, amount = 1500.0, date = "2026-11-11 16:00:00", voided = false),
+            createTestBill(id = 12, amount = 800.0, date = "2026-11-12 11:00:00", voided = true) // Voided should be excluded
+        )
+
+        val activeTodayBills = todayBills.filter { !it.isVoided }
+        val activeWeekBills = weekBills.filter { !it.isVoided }
+
+        val isShowingToday = activeTodayBills.isNotEmpty()
+        val displayBills = if (isShowingToday) activeTodayBills else activeWeekBills
+        val billsHeaderTitle = if (isShowingToday) {
+            "आजची बिले (${activeTodayBills.size})"
+        } else if (activeWeekBills.isNotEmpty()) {
+            "या आठवड्याची बिले (${activeWeekBills.size})"
+        } else {
+            "आजची बिले (०)"
+        }
+
+        assertFalse(isShowingToday)
+        assertEquals(2, displayBills.size)
+        assertEquals("या आठवड्याची बिले (2)", billsHeaderTitle)
+        assertFalse(displayBills.any { it.isVoided })
+    }
+
+    @Test
+    fun testDashboardHeader_showsZeroWhenBothTodayAndWeekEmpty() {
+        val todayBills = emptyList<Bill>()
+        val weekBills = emptyList<Bill>()
+
+        val activeTodayBills = todayBills.filter { !it.isVoided }
+        val activeWeekBills = weekBills.filter { !it.isVoided }
+
+        val isShowingToday = activeTodayBills.isNotEmpty()
+        val displayBills = if (isShowingToday) activeTodayBills else activeWeekBills
+        val billsHeaderTitle = if (isShowingToday) {
+            "आजची बिले (${activeTodayBills.size})"
+        } else if (activeWeekBills.isNotEmpty()) {
+            "या आठवड्याची बिले (${activeWeekBills.size})"
+        } else {
+            "आजची बिले (०)"
+        }
+
+        assertFalse(isShowingToday)
+        assertTrue(displayBills.isEmpty())
+        assertEquals("आजची बिले (०)", billsHeaderTitle)
+    }
+
+    @Test
+    fun testBillCanonicalKey_stableAcrossRecomposition() {
+        val bill1 = createTestBill(id = 42, amount = 1000.0, date = "2026-11-13 10:00:00", uuid = "uuid-fixed-1")
+        val bill2 = createTestBill(id = 42, amount = 1000.0, date = "2026-11-13 10:00:00", uuid = "uuid-fixed-1")
+
+        assertEquals(bill1.canonicalKey(), bill2.canonicalKey())
+        assertEquals("bill_42_uuid-fixed-1", "bill_${bill1.id}_${bill1.transactionUuid}")
+    }
+
+    private fun createTestBill(
+        id: Long,
+        amount: Double,
+        date: String,
+        voided: Boolean = false,
+        uuid: String = "uuid-$id"
+    ): Bill {
+        return Bill(
+            id = id,
+            shopId = 1,
+            customerId = null,
+            customerName = "Customer $id",
+            customerMobile = "98000000$id",
+            billNumber = "BILL-$id",
+            transactionUuid = uuid,
+            saleType = SaleType.QUICK,
+            subtotal = amount,
+            discountType = DiscountType.NONE,
+            discountValue = 0.0,
+            discountAmount = 0.0,
+            taxAmount = 0.0,
+            finalAmount = amount,
+            paidAmount = amount,
+            pendingAmount = 0.0,
+            actualProfit = 0.0,
+            estimatedProfit = 0.0,
+            paymentMethod = PaymentMethod.CASH,
+            paymentStatus = PaymentStatus.PAID,
+            billDate = date,
+            isVoided = voided,
+            items = emptyList()
+        )
+    }
+}

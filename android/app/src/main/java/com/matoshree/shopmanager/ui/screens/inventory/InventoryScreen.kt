@@ -486,7 +486,7 @@ fun InventoryScreen(
                             }
                         }
                     } else {
-                        itemsIndexed(filteredProducts, key = { index, product -> "inv_prod_${product.id}_$index" }) { _, product ->
+                        items(filteredProducts, key = { product -> "inv_prod_${product.id}" }) { product ->
                             val catName = categories.find { it.id == product.categoryId }?.name ?: "इतर"
                             ProductInventoryCard(
                                 product = product,
@@ -521,7 +521,7 @@ fun InventoryScreen(
                         verticalArrangement = Arrangement.spacedBy(8.dp),
                         contentPadding = PaddingValues(top = 10.dp, bottom = 40.dp)
                     ) {
-                        itemsIndexed(movements, key = { index, movement -> "inv_mov_${movement.id}_$index" }) { _, movement ->
+                        items(movements, key = { movement -> "inv_mov_${movement.id}" }) { movement ->
                             StockMovementRow(movement)
                         }
                     }

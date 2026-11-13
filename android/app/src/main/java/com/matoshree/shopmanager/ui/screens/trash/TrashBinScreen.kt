@@ -437,7 +437,7 @@ fun TrashBinScreen(
                     verticalArrangement = Arrangement.spacedBy(10.dp),
                     contentPadding = PaddingValues(bottom = 24.dp)
                 ) {
-                    itemsIndexed(currentList, key = { index, item -> "trash_${item.docId}_$index" }) { _, item ->
+                    items(currentList, key = { item -> "trash_${item.entityType}_${item.docId}" }) { item ->
                         val isSelected = selectedDocIds.contains(item.docId)
                         MatoshreeCard(
                             onClick = {

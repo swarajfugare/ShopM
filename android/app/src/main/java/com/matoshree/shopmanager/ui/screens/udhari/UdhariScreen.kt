@@ -542,10 +542,10 @@ fun UdhariScreen(
                     }
                 }
             } else {
-                itemsIndexed(
+                items(
                     items = uniqueCustomerList,
-                    key = { index, item -> "udhari_${item.customer.id}_${item.customer.canonicalKey()}_$index" }
-                ) { _, summary ->
+                    key = { item -> "udhari_${item.customer.id}_${item.customer.canonicalKey()}" }
+                ) { summary ->
                     UdhariCustomerCard(
                         summary = summary,
                         onClick = { onCustomerClick(summary.customer.id) },

@@ -630,7 +630,7 @@ fun ProductsListScreen(
                         verticalArrangement = Arrangement.spacedBy(10.dp),
                         contentPadding = PaddingValues(bottom = 96.dp)
                     ) {
-                        itemsIndexed(filtered, key = { index, product -> "prod_${product.id}_$index" }) { _, product ->
+                        items(filtered, key = { product -> "prod_${product.id}" }) { product ->
                             val catName = categories.find { it.id == product.categoryId }?.name ?: "इतर"
                             val isSelected = selectedProductIds.contains(product.id)
                             ProductListItemCard(
@@ -1059,7 +1059,7 @@ fun ProductsListScreen(
                                 .heightIn(max = 260.dp),
                             verticalArrangement = Arrangement.spacedBy(6.dp)
                         ) {
-                            itemsIndexed(categories, key = { index, cat -> "cat_${cat.id}_$index" }) { _, cat ->
+                            items(categories, key = { cat -> "cat_${cat.id}" }) { cat ->
                                 val pCount = products.count { it.categoryId == cat.id }
                                 Surface(
                                     color = WarmIvory,

@@ -8,6 +8,7 @@ import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.firestore.DocumentChange
 import com.google.firebase.firestore.FirebaseFirestoreException
 import com.google.firebase.firestore.ListenerRegistration
+import com.google.firebase.firestore.MetadataChanges
 import com.matoshree.shopmanager.data.firebase.*
 import com.matoshree.shopmanager.data.local.AppDatabase
 import com.matoshree.shopmanager.data.local.entity.BillEntity
@@ -172,7 +173,7 @@ class RealtimeSyncManager private constructor(
     private fun startBillsListener() {
         try {
             rootBillsListener = FirebaseManager.billsCollection()
-                .addSnapshotListener { snapshot, error ->
+                .addSnapshotListener(MetadataChanges.INCLUDE) { snapshot, error ->
                     if (error != null) {
                         handleListenerError("root_bills", error)
                         return@addSnapshotListener
@@ -187,7 +188,7 @@ class RealtimeSyncManager private constructor(
     private fun startShopBillsListener() {
         try {
             shopBillsListener = FirebaseManager.shopBillsCollection()
-                .addSnapshotListener { snapshot, error ->
+                .addSnapshotListener(MetadataChanges.INCLUDE) { snapshot, error ->
                     if (error != null) {
                         handleListenerError("shop_bills", error)
                         return@addSnapshotListener
@@ -274,7 +275,7 @@ class RealtimeSyncManager private constructor(
     private fun startCustomersListener() {
         try {
             rootCustListener = FirebaseManager.customersCollection()
-                .addSnapshotListener { snapshot, error ->
+                .addSnapshotListener(MetadataChanges.INCLUDE) { snapshot, error ->
                     if (error != null) {
                         handleListenerError("root_customers", error)
                         return@addSnapshotListener
@@ -289,7 +290,7 @@ class RealtimeSyncManager private constructor(
     private fun startShopCustomersListener() {
         try {
             shopCustListener = FirebaseManager.shopCustomersCollection()
-                .addSnapshotListener { snapshot, error ->
+                .addSnapshotListener(MetadataChanges.INCLUDE) { snapshot, error ->
                     if (error != null) {
                         handleListenerError("shop_customers", error)
                         return@addSnapshotListener
@@ -349,7 +350,7 @@ class RealtimeSyncManager private constructor(
     private fun startUdhariListener() {
         try {
             udhariListener = FirebaseManager.udhariTransactionsCollection()
-                .addSnapshotListener { snapshot, error ->
+                .addSnapshotListener(MetadataChanges.INCLUDE) { snapshot, error ->
                     if (error != null) {
                         handleListenerError("udhari_transactions", error)
                         return@addSnapshotListener
