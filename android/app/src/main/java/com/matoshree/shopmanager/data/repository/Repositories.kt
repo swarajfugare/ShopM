@@ -171,6 +171,14 @@ fun toBillEntities(
     createdAt: Long? = null
 ): Pair<BillEntity, List<BillItemEntity>> {
     val effectiveCreatedAt = createdAt ?: com.matoshree.shopmanager.utils.DateUtils.parseDateToMillis(bill.billDate).takeIf { it > 0 } ?: System.currentTimeMillis()
+    val effectiveBillDate = if (bill.billDate.isNotBlank()) {
+        bill.billDate
+    } else {
+        val sdf = java.text.SimpleDateFormat("yyyy-MM-dd HH:mm:ss", java.util.Locale.ENGLISH).apply {
+            timeZone = com.matoshree.shopmanager.utils.DateUtils.kolkataTimeZone
+        }
+        sdf.format(java.util.Date(effectiveCreatedAt))
+    }
     val billEntity = BillEntity(
         id = 0L,
         serverId = bill.id,
@@ -194,7 +202,7 @@ fun toBillEntities(
         paymentMethod = bill.paymentMethod,
         paymentStatus = bill.paymentStatus,
         note = bill.note,
-        billDate = bill.billDate,
+        billDate = effectiveBillDate,
         shopNameSnapshot = bill.shopNameSnapshot,
         shopAddressSnapshot = bill.shopAddressSnapshot,
         shopMobileSnapshot = bill.shopMobileSnapshot,

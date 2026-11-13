@@ -16,6 +16,9 @@ import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.tasks.await
 import java.util.UUID
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 
 // DocumentSnapshot resilient parsers that gracefully handle missing/differently-typed fields
 fun DocumentSnapshot.toCustomerDomain(): Customer? {
@@ -158,7 +161,16 @@ fun DocumentSnapshot.toBillDomain(): Bill? {
 
         val custName = getString("customerName") ?: getString("customer_name")
         val custMobile = getString("customerMobile") ?: getString("customer_mobile")
-        val billDate = getString("billDate") ?: getString("date") ?: ""
+        val rawDate = getString("billDate") ?: getString("date")
+        val billDate = if (!rawDate.isNullOrBlank()) {
+            rawDate
+        } else {
+            val docCreatedAt = getLong("createdAt") ?: getLong("updatedAt") ?: System.currentTimeMillis()
+            val sdf = SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.ENGLISH).apply {
+                timeZone = DateUtils.kolkataTimeZone
+            }
+            sdf.format(Date(docCreatedAt))
+        }
 
         val status = getString("status") ?: "COMPLETED"
         val isVoid = status.equals("VOIDED", ignoreCase = true) || status.equals("TRASH", ignoreCase = true) || getBoolean("isVoided") == true

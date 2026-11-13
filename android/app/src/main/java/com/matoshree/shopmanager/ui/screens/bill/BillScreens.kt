@@ -217,6 +217,12 @@ fun BillsHistoryScreen(
     val search by viewModel.searchQuery.collectAsState()
     val selectedBillIds by viewModel.selectedBillIds.collectAsState()
 
+    DisposableEffect(Unit) {
+        onDispose {
+            viewModel.searchQuery.value = ""
+        }
+    }
+
     var showBulkDeleteDialog by remember { mutableStateOf(false) }
 
     val filteredBills = remember(allBills, filter, search) {

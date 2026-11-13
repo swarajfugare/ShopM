@@ -83,12 +83,8 @@ class UdhariViewModel(
 
             val custBills = activeBills.filter { b ->
                 val bCleanMob = com.matoshree.shopmanager.utils.PhoneUtils.clean10DigitMobileInput(b.customerMobile ?: "")
-                if (cleanCustMob.length == 10 && bCleanMob.length == 10) {
+                if (cleanCustMob.length == 10) {
                     cleanCustMob == bCleanMob
-                } else if (cleanCustMob.length == 10 && bCleanMob.isBlank()) {
-                    custName.isNotBlank() && b.customerName != null && b.customerName.trim().equals(custName, ignoreCase = true)
-                } else if (cleanCustMob.isBlank() && bCleanMob.length == 10) {
-                    false
                 } else {
                     (custName.isNotBlank() && b.customerName != null && b.customerName.trim().equals(custName, ignoreCase = true)) ||
                     (customer.id > 0 && b.customerId == customer.id)
@@ -96,12 +92,8 @@ class UdhariViewModel(
             }
             val custTxs = validTxs.filter { tx ->
                 val txCleanMob = com.matoshree.shopmanager.utils.PhoneUtils.clean10DigitMobileInput(tx.customerMobile)
-                if (cleanCustMob.length == 10 && txCleanMob.length == 10) {
+                if (cleanCustMob.length == 10) {
                     cleanCustMob == txCleanMob
-                } else if (cleanCustMob.length == 10 && txCleanMob.isBlank()) {
-                    custName.isNotBlank() && tx.customerName.trim().equals(custName, ignoreCase = true)
-                } else if (cleanCustMob.isBlank() && txCleanMob.length == 10) {
-                    false
                 } else {
                     (custName.isNotBlank() && tx.customerName.trim().equals(custName, ignoreCase = true)) ||
                     (customer.id > 0 && tx.customerId == customer.id)
@@ -324,6 +316,12 @@ fun UdhariScreen(
     val searchQuery by viewModel.searchQuery.collectAsState()
     val selectedFilter by viewModel.selectedFilter.collectAsState()
 
+    DisposableEffect(Unit) {
+        onDispose {
+            viewModel.onSearchChange("")
+        }
+    }
+
     val uniqueCustomerList = remember(customerList) {
         customerList.distinctBy { it.customer.canonicalKey() }
     }
@@ -339,16 +337,7 @@ fun UdhariScreen(
             MatoshreeTopAppBar(
                 title = "उधारी वही (खाते)",
                 showBackButton = true,
-                onBackClick = onBackClick,
-                actions = {
-                    IconButton(
-                        onClick = {
-                            showBulkReminderDialog = true
-                        }
-                    ) {
-                        Icon(Icons.Default.Send, contentDescription = "व्हॉट्सॲप रिमाइंडर पाठवा", tint = DeepEmerald)
-                    }
-                }
+                onBackClick = onBackClick
             )
         }
     ) { padding ->
@@ -415,51 +404,6 @@ fun UdhariScreen(
                                 Text("थकीत उधारी", style = MaterialTheme.typography.bodySmall.copy(color = MutedCharcoal))
                                 Text(CurrencyFormatter.format(metrics.overdueAmount), fontWeight = FontWeight.Bold, color = if (metrics.overdueAmount > 0) BoutiqueError else MutedCharcoal)
                             }
-                        }
-                    }
-                }
-            }
-
-            // 1.5 BULK WHATSAPP REMINDER BANNER BUTTON
-            item {
-                Surface(
-                    shape = RoundedCornerShape(12.dp),
-                    color = BoutiqueSuccess.copy(alpha = 0.08f),
-                    border = androidx.compose.foundation.BorderStroke(1.dp, BoutiqueSuccess.copy(alpha = 0.35f)),
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(12.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.SpaceBetween
-                    ) {
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            modifier = Modifier.weight(1f)
-                        ) {
-                            Box(
-                                modifier = Modifier
-                                    .size(38.dp)
-                                    .background(BoutiqueSuccess, CircleShape),
-                                contentAlignment = Alignment.Center
-                            ) {
-                                Icon(Icons.Default.Send, contentDescription = null, tint = WarmWhite, modifier = Modifier.size(18.dp))
-                            }
-                            Spacer(modifier = Modifier.width(10.dp))
-                            Column {
-                                Text("उधारी आठवण (WhatsApp Reminder)", fontWeight = FontWeight.Bold, fontSize = 13.sp, color = DeepCharcoal)
-                                Text("सर्व थकबाकीदारांना एका क्लिकवर आठवण पाठवा", fontSize = 11.sp, color = MutedCharcoal)
-                            }
-                        }
-                        Button(
-                            onClick = { showBulkReminderDialog = true },
-                            colors = ButtonDefaults.buttonColors(containerColor = BoutiqueSuccess),
-                            shape = RoundedCornerShape(8.dp),
-                            contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp)
-                        ) {
-                            Text("आता पाठवा", fontSize = 12.sp, fontWeight = FontWeight.Bold)
                         }
                     }
                 }

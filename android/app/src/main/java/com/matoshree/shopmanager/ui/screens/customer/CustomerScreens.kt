@@ -167,8 +167,8 @@ class CustomerViewModel(
             }
 
             combine(
-                billRepository.getAllBills(limit = 500),
-                udhariRepository.getTransactionsForCustomer(customerId, targetMobile)
+                billRepository.getAllBills(limit = 1000),
+                udhariRepository.getAllTransactions()
             ) { allBills, txs ->
                 val cleanTargetPhone = PhoneUtils.clean10DigitMobileInput(targetMobile)
                 val currentCust = _customers.value.find { 
@@ -180,12 +180,8 @@ class CustomerViewModel(
                 val customerSpecificBills = allBills.filter { b ->
                     if (b.isVoided) return@filter false
                     val bCleanMob = PhoneUtils.clean10DigitMobileInput(b.customerMobile ?: "")
-                    if (custCleanMobile.length == 10 && bCleanMob.length == 10) {
+                    if (custCleanMobile.length == 10) {
                         custCleanMobile == bCleanMob
-                    } else if (custCleanMobile.length == 10 && bCleanMob.isBlank()) {
-                        custName.isNotBlank() && b.customerName != null && b.customerName.trim().equals(custName, ignoreCase = true)
-                    } else if (custCleanMobile.isBlank() && bCleanMob.length == 10) {
-                        false
                     } else {
                         (custName.isNotBlank() && b.customerName != null && b.customerName.trim().equals(custName, ignoreCase = true)) ||
                         (b.customerId != null && b.customerId > 0 && (b.customerId == customerId || b.customerId == currentCust?.id))
@@ -201,12 +197,8 @@ class CustomerViewModel(
                     if (tx.billNumber.isNotBlank() && voidedBillNumbers.contains(tx.billNumber)) return@filter false
 
                     val txCleanMob = PhoneUtils.clean10DigitMobileInput(tx.customerMobile)
-                    if (custCleanMobile.length == 10 && txCleanMob.length == 10) {
+                    if (custCleanMobile.length == 10) {
                         custCleanMobile == txCleanMob
-                    } else if (custCleanMobile.length == 10 && txCleanMob.isBlank()) {
-                        custName.isNotBlank() && tx.customerName.trim().equals(custName, ignoreCase = true)
-                    } else if (custCleanMobile.isBlank() && txCleanMob.length == 10) {
-                        false
                     } else {
                         (custName.isNotBlank() && tx.customerName.trim().equals(custName, ignoreCase = true)) ||
                         (tx.customerId == customerId || tx.customerId == currentCust?.id)
@@ -220,7 +212,7 @@ class CustomerViewModel(
                     customerTransactions.value = validTxs
                 }
 
-                // 1. Authoritative Outstanding Balance Calculation
+                // 1. Authoritative Outstanding Balance Calculation (Unified with UdhariScreen)
                 val txBillIds = validTxs.filter { it.type == UdhariTransactionType.PAYMENT && it.billId != 0L }.map { it.billId }.toSet()
                 val txBillNumbers = validTxs.filter { it.type == UdhariTransactionType.PAYMENT && it.billNumber.isNotBlank() }.map { it.billNumber }.toSet()
 
@@ -229,12 +221,15 @@ class CustomerViewModel(
                 val totalCharges = totalBillCharges + manualUdhariDebits
 
                 val txPayments = validTxs.filter { it.type == UdhariTransactionType.PAYMENT }.sumOf { it.amount }
+                val txReversals = validTxs.filter { it.type == UdhariTransactionType.REVERSAL }.sumOf { it.amount }
+                val netTxPayments = (txPayments - txReversals).coerceAtLeast(0.0)
+
                 val pureCashCheckoutPayments = customerSpecificBills.filter { b ->
                     b.paymentStatus == PaymentStatus.PAID &&
                     !txBillIds.contains(b.id) &&
                     !txBillNumbers.contains(b.billNumber)
                 }.sumOf { it.finalAmount }
-                val totalCredits = txPayments + pureCashCheckoutPayments
+                val totalCredits = netTxPayments + pureCashCheckoutPayments
 
                 val totalPending = (totalCharges - totalCredits).coerceAtLeast(0.0)
 
@@ -868,12 +863,17 @@ fun CustomersListScreen(
     val coroutineScope = rememberCoroutineScope()
     val context = androidx.compose.ui.platform.LocalContext.current
 
-    val userCreatedLists by viewModel.userCreatedLists.collectAsState()
-    val allCustomTags = remember(customers, userCreatedLists) {
-        val set = linkedSetOf("VIP", "Regular", "Kondharki")
-        set.addAll(userCreatedLists)
-        customers.forEach { set.addAll(it.listTags) }
-        set.toList()
+    DisposableEffect(Unit) {
+        onDispose {
+            viewModel.searchQuery.value = ""
+        }
+    }
+
+    val allVillages = remember(customers) {
+        customers.mapNotNull { it.address?.trim() }
+            .filter { it.isNotBlank() }
+            .distinct()
+            .sortedWith(String.CASE_INSENSITIVE_ORDER)
     }
 
     var tagToDeleteList by remember { mutableStateOf<String?>(null) }
@@ -952,12 +952,9 @@ fun CustomersListScreen(
                 cust.mobile.contains(cleanSearch) ||
                 (cust.address?.contains(cleanSearch, ignoreCase = true) == true)
             
-            val matchesTag = when (selectedTagFilter) {
-                "All" -> true
-                "VIP" -> cust.tier == "VIP" || cust.listTags.contains("VIP")
-                "Regular" -> cust.totalBills >= 3 || cust.listTags.contains("Regular")
-                "Kondharki" -> (cust.address?.contains("Kondharki", ignoreCase = true) == true) || cust.listTags.contains("Kondharki")
-                else -> cust.listTags.contains(selectedTagFilter)
+            val matchesTag = when {
+                selectedTagFilter == "All" || selectedTagFilter.isBlank() -> true
+                else -> cust.address?.trim().equals(selectedTagFilter.trim(), ignoreCase = true)
             }
             matchesSearch && matchesTag
         }.distinctBy { it.canonicalKey() }
@@ -1121,58 +1118,28 @@ fun CustomersListScreen(
             ) {
                 item {
                     FilterChip(
-                        selected = selectedTagFilter == "All",
+                        selected = selectedTagFilter == "All" || selectedTagFilter.isBlank(),
                         onClick = { viewModel.selectedListTag.value = "All" },
-                        label = { Text("All (${customers.size})") },
+                        label = { Text("सर्व गाव (${customers.size})", fontSize = 12.sp) },
                         colors = FilterChipDefaults.filterChipColors(
                             selectedContainerColor = DeepEmerald,
                             selectedLabelColor = WarmWhite
                         )
                     )
                 }
-                items(allCustomTags) { tag ->
-                    val count = remember(customers, tag) {
-                        customers.count {
-                            when (tag) {
-                                "VIP" -> it.tier == "VIP" || it.listTags.contains("VIP")
-                                "Regular" -> it.totalBills >= 3 || it.listTags.contains("Regular")
-                                "Kondharki" -> (it.address?.contains("Kondharki", ignoreCase = true) == true) || it.listTags.contains("Kondharki")
-                                else -> it.listTags.contains(tag)
-                            }
-                        }
+                items(allVillages) { village ->
+                    val count = remember(customers, village) {
+                        customers.count { it.address?.trim().equals(village.trim(), ignoreCase = true) }
                     }
-                    val isDeletable = tag !in listOf("VIP", "Regular", "Kondharki")
                     FilterChip(
-                        selected = selectedTagFilter == tag,
-                        onClick = { viewModel.selectedListTag.value = tag },
-                        label = { Text("$tag ($count)") },
-                        trailingIcon = if (isDeletable && selectedTagFilter == tag) {
-                            {
-                                IconButton(
-                                    onClick = { tagToDeleteList = tag },
-                                    modifier = Modifier.size(16.dp)
-                                ) {
-                                    Icon(Icons.Default.Close, contentDescription = "Delete list", tint = WarmWhite, modifier = Modifier.size(12.dp))
-                                }
-                            }
-                        } else null,
+                        selected = selectedTagFilter.equals(village, ignoreCase = true),
+                        onClick = {
+                            viewModel.selectedListTag.value = if (selectedTagFilter == village) "All" else village
+                        },
+                        label = { Text("$village ($count)", fontSize = 12.sp) },
                         colors = FilterChipDefaults.filterChipColors(
                             selectedContainerColor = DeepEmerald,
                             selectedLabelColor = WarmWhite
-                        )
-                    )
-                }
-                item {
-                    FilterChip(
-                        selected = false,
-                        onClick = { showAddToListDialog = true },
-                        leadingIcon = {
-                            Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(16.dp), tint = DeepEmerald)
-                        },
-                        label = { Text("New List", color = DeepEmerald, fontWeight = FontWeight.Bold) },
-                        colors = FilterChipDefaults.filterChipColors(
-                            containerColor = WarmWhite,
-                            labelColor = DeepEmerald
                         )
                     )
                 }
@@ -1275,13 +1242,14 @@ fun CustomersListScreen(
                         shape = RoundedCornerShape(8.dp)
                     )
 
-                    if (allCustomTags.isNotEmpty()) {
+                    if (allVillages.isNotEmpty()) {
                         Text("Or select existing list:", style = MaterialTheme.typography.labelSmall.copy(color = MutedCharcoal))
                         androidx.compose.foundation.lazy.LazyRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                            items(allCustomTags) { existingTag ->
+                            items(allVillages.size) { idx ->
+                                val village = allVillages[idx]
                                 AssistChip(
-                                    onClick = { newListNameInput = existingTag },
-                                    label = { Text(existingTag) }
+                                    onClick = { newListNameInput = village },
+                                    label = { Text(village) }
                                 )
                             }
                         }
@@ -1529,10 +1497,8 @@ fun CustomerProfileScreen(
     var showUdhariReminderDialog by remember { mutableStateOf(false) }
 
     val nonVoidedBills = remember(bills) { bills.filter { !it.isVoided } }
-    val calculatedLifetimeSpend = remember(nonVoidedBills) { nonVoidedBills.sumOf { it.finalAmount } }
-    val totalValidBills = nonVoidedBills.size
-    val effectiveTotalBills = if (totalValidBills > 0) totalValidBills else (customer?.totalBills ?: 0)
-    val effectiveLifetimeSpend = if (calculatedLifetimeSpend > 0.0) calculatedLifetimeSpend else (customer?.lifetimeSpend ?: 0.0)
+    val effectiveLifetimeSpend = remember(nonVoidedBills) { nonVoidedBills.sumOf { it.finalAmount } }
+    val effectiveTotalBills = nonVoidedBills.size
     val effectiveAvgBill = if (effectiveTotalBills > 0) effectiveLifetimeSpend / effectiveTotalBills else 0.0
 
     Scaffold(

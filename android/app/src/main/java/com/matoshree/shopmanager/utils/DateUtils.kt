@@ -30,12 +30,28 @@ object DateUtils {
     fun isToday(dateString: String?): Boolean {
         if (dateString.isNullOrBlank()) return false
         val today = todayDate()
-        return dateString.startsWith(today)
+        if (dateString.startsWith(today)) return true
+        return try {
+            val millis = parseDateToMillis(dateString)
+            if (millis <= 0L) return false
+            val calToday = java.util.Calendar.getInstance(kolkataTimeZone)
+            val calBill = java.util.Calendar.getInstance(kolkataTimeZone).apply { timeInMillis = millis }
+            calToday.get(java.util.Calendar.YEAR) == calBill.get(java.util.Calendar.YEAR) &&
+            calToday.get(java.util.Calendar.DAY_OF_YEAR) == calBill.get(java.util.Calendar.DAY_OF_YEAR)
+        } catch (_: Exception) {
+            false
+        }
     }
 
     fun isThisWeek(dateString: String?): Boolean {
         if (dateString.isNullOrBlank()) return false
         return try {
+            val millis = parseDateToMillis(dateString)
+            if (millis > 0L) {
+                val now = System.currentTimeMillis()
+                val diffMillis = now - millis
+                return diffMillis in -(24L * 60 * 60 * 1000)..(7L * 24 * 60 * 60 * 1000)
+            }
             val dateStr = if (dateString.length >= 10) dateString.substring(0, 10) else dateString
             val sdf = SimpleDateFormat(DATE_ONLY_FORMAT, Locale.ENGLISH).apply { timeZone = kolkataTimeZone }
             val billDate = sdf.parse(dateStr) ?: return false
@@ -112,17 +128,24 @@ object DateUtils {
 
     fun parseDateToMillis(dateStr: String?): Long {
         if (dateStr.isNullOrBlank()) return 0L
+        val clean = dateStr.trim()
         val patterns = listOf(
             "yyyy-MM-dd HH:mm:ss",
             "yyyy-MM-dd'T'HH:mm:ss",
-            "yyyy-MM-dd"
+            "yyyy-MM-dd",
+            "dd-MM-yyyy HH:mm:ss",
+            "dd-MM-yyyy",
+            "dd/MM/yyyy HH:mm:ss",
+            "dd/MM/yyyy",
+            "yyyy/MM/dd HH:mm:ss",
+            "yyyy/MM/dd"
         )
         for (pattern in patterns) {
             try {
-                val sdf = SimpleDateFormat(pattern, Locale.getDefault()).apply {
+                val sdf = SimpleDateFormat(pattern, Locale.ENGLISH).apply {
                     timeZone = kolkataTimeZone
                 }
-                val d = sdf.parse(dateStr)
+                val d = sdf.parse(clean)
                 if (d != null) return d.time
             } catch (_: Exception) {}
         }

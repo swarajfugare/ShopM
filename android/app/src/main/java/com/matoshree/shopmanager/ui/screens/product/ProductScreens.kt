@@ -227,6 +227,12 @@ fun ProductsListScreen(
     val products by viewModel.products.collectAsState()
     val categories by viewModel.categories.collectAsState()
     val search by viewModel.searchQuery.collectAsState()
+
+    DisposableEffect(Unit) {
+        onDispose {
+            viewModel.searchQuery.value = ""
+        }
+    }
     val selectedCatId by viewModel.selectedCategoryId.collectAsState()
     val currentSort by viewModel.sortOption.collectAsState()
 

@@ -105,36 +105,45 @@ class DashboardViewModel(
                     udhariRepository.getAllTransactions().distinctUntilChanged()
                 ) { todayBills, weekBills, allBills, transactions ->
                     runCatching {
-                        val activeTodayBills = todayBills
+                        val allActiveBills = allBills
                             .filter { !it.isVoided }
                             .distinctBy { it.canonicalKey() }
                             .sortedWith(
                                 compareByDescending<Bill> { it.billDate }.thenByDescending { it.id }
                             )
 
-                        val activeWeekBills = weekBills
-                            .filter { !it.isVoided }
+                        val activeTodayBills = (todayBills.filter { !it.isVoided } + allActiveBills.filter { DateUtils.isToday(it.billDate) })
+                            .distinctBy { it.canonicalKey() }
+                            .sortedWith(
+                                compareByDescending<Bill> { it.billDate }.thenByDescending { it.id }
+                            )
+
+                        val activeWeekBills = (weekBills.filter { !it.isVoided } + allActiveBills.filter { DateUtils.isThisWeek(it.billDate) })
                             .distinctBy { it.canonicalKey() }
                             .sortedWith(
                                 compareByDescending<Bill> { it.billDate }.thenByDescending { it.id }
                             )
 
                         val isShowingToday = activeTodayBills.isNotEmpty()
-                        val displayBills = if (isShowingToday) activeTodayBills else activeWeekBills
-                        val billsHeaderTitle = if (isShowingToday) {
-                            "आजची बिले (${activeTodayBills.size})"
-                        } else if (activeWeekBills.isNotEmpty()) {
-                            "या आठवड्याची बिले (${activeWeekBills.size})"
-                        } else {
-                            "आजची बिले (०)"
+                        val displayBills = when {
+                            isShowingToday -> activeTodayBills
+                            activeWeekBills.isNotEmpty() -> activeWeekBills
+                            allActiveBills.isNotEmpty() -> allActiveBills.take(15)
+                            else -> emptyList()
+                        }
+                        val billsHeaderTitle = when {
+                            isShowingToday -> "आजची बिले (${activeTodayBills.size})"
+                            activeWeekBills.isNotEmpty() -> "या आठवड्याची बिले (${activeWeekBills.size})"
+                            allActiveBills.isNotEmpty() -> "अलीकडील बिले (${displayBills.size})"
+                            else -> "आजची बिले (०)"
                         }
 
-                        val todaySales = ShopMetricsCalculator.calculateTodaySales(todayBills, today)
+                        val todaySales = ShopMetricsCalculator.calculateTodaySales(activeTodayBills, today)
                         val todayBillsCount = activeTodayBills.size
                         val avgOrder = if (todayBillsCount > 0) todaySales / todayBillsCount else 0.0
 
-                        val cashSales = ShopMetricsCalculator.calculateCashSales(todayBills)
-                        val upiSales = ShopMetricsCalculator.calculateUpiSales(todayBills)
+                        val cashSales = ShopMetricsCalculator.calculateCashSales(activeTodayBills)
+                        val upiSales = ShopMetricsCalculator.calculateUpiSales(activeTodayBills)
 
                         val allMonthSales = ShopMetricsCalculator.calculateMonthlySales(allBills, monthPrefix)
                         val target = 500000.0
@@ -143,7 +152,7 @@ class DashboardViewModel(
                         val totalPending = ShopMetricsCalculator.calculateTotalPendingUdhari(allBills, transactions)
                         val pendingCustCount = ShopMetricsCalculator.calculatePendingCustomersCount(allBills, transactions)
                         val todayCollected = ShopMetricsCalculator.calculateTodayCollectedCredit(transactions, today)
-                        val estProfit = ShopMetricsCalculator.calculateTodayProfit(todayBills, today)
+                        val estProfit = ShopMetricsCalculator.calculateTodayProfit(activeTodayBills, today)
 
                         val newSummary = DashboardSummary(
                             todaySales = todaySales,
@@ -562,7 +571,7 @@ fun DashboardScreen(
                                     modifier = Modifier.size(36.dp)
                                 )
                                 Text(
-                                    text = "आज किंवा या आठवड्यात कोणतीही बिले तयार केलेली नाहीत.",
+                                    text = "अद्याप कोणतीही बिले तयार केलेली नाहीत.",
                                     color = MutedCharcoal,
                                     fontSize = 13.sp,
                                     textAlign = androidx.compose.ui.text.style.TextAlign.Center

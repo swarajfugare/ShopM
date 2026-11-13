@@ -1,5 +1,6 @@
 package com.matoshree.shopmanager.ui.screens.trash
 
+import android.content.Context
 import android.util.Log
 import android.widget.Toast
 import androidx.compose.foundation.background
@@ -115,10 +116,37 @@ class TrashBinViewModel(
         }
     }
 
-    fun permanentDeleteItem(item: TrashedItem, onComplete: () -> Unit) {
+    fun permanentDeleteItem(item: TrashedItem, context: Context? = null, onComplete: () -> Unit) {
         viewModelScope.launch {
             try {
                 trashRepository.permanentDeleteItem(item)
+                context?.let { ctx ->
+                    try {
+                        val db = com.matoshree.shopmanager.data.local.AppDatabase.getInstance(ctx)
+                        when (item.entityType) {
+                            "CUSTOMER" -> {
+                                db.customerDao().hardDeleteCustomerComprehensive(
+                                    serverId = if (item.legacyId > 0) item.legacyId else null,
+                                    cleanMobile = "",
+                                    name = item.title
+                                )
+                                db.billDao().deleteBillsByCustomerOrDetails(
+                                    customerId = item.legacyId,
+                                    mobile = "",
+                                    name = item.title
+                                )
+                            }
+                            "PRODUCT" -> {
+                                db.productDao().deleteProduct(item.legacyId)
+                            }
+                            "BILL" -> {
+                                db.billDao().deleteBillComprehensive(item.legacyId, item.docId, item.title)
+                            }
+                        }
+                    } catch (e: Exception) {
+                        Log.w("TrashViewModel", "Room cleanup note: ${e.message}")
+                    }
+                }
                 onComplete()
             } catch (e: Exception) {
                 Log.w("TrashViewModel", "Permanent delete error: ${e.message}")
@@ -142,7 +170,7 @@ class TrashBinViewModel(
         }
     }
 
-    fun deleteSelectedPermanently(currentList: List<TrashedItem>, onComplete: (Int) -> Unit) {
+    fun deleteSelectedPermanently(currentList: List<TrashedItem>, context: Context? = null, onComplete: (Int) -> Unit) {
         val targetDocs = selectedDocIds.value
         val itemsToDelete = currentList.filter { targetDocs.contains(it.docId) }
         viewModelScope.launch {
@@ -150,6 +178,31 @@ class TrashBinViewModel(
             itemsToDelete.forEach { item ->
                 try {
                     trashRepository.permanentDeleteItem(item)
+                    context?.let { ctx ->
+                        try {
+                            val db = com.matoshree.shopmanager.data.local.AppDatabase.getInstance(ctx)
+                            when (item.entityType) {
+                                "CUSTOMER" -> {
+                                    db.customerDao().hardDeleteCustomerComprehensive(
+                                        serverId = if (item.legacyId > 0) item.legacyId else null,
+                                        cleanMobile = "",
+                                        name = item.title
+                                    )
+                                    db.billDao().deleteBillsByCustomerOrDetails(
+                                        customerId = item.legacyId,
+                                        mobile = "",
+                                        name = item.title
+                                    )
+                                }
+                                "PRODUCT" -> {
+                                    db.productDao().deleteProduct(item.legacyId)
+                                }
+                                "BILL" -> {
+                                    db.billDao().deleteBillComprehensive(item.legacyId, item.docId, item.title)
+                                }
+                            }
+                        } catch (_: Exception) {}
+                    }
                     count++
                 } catch (e: Exception) {}
             }
@@ -234,7 +287,7 @@ fun TrashBinScreen(
             confirmButton = {
                 Button(
                     onClick = {
-                        viewModel.permanentDeleteItem(item) {
+                        viewModel.permanentDeleteItem(item, context) {
                             Toast.makeText(context, "'${item.title}' कायमचे डिलीट करण्यात आले", Toast.LENGTH_SHORT).show()
                             itemToPermanentDelete = null
                         }
@@ -325,7 +378,7 @@ fun TrashBinScreen(
                                 Icon(Icons.Default.Restore, contentDescription = "निवडलेले पूर्ववत करा", tint = WarmWhite)
                             }
                             IconButton(onClick = {
-                                viewModel.deleteSelectedPermanently(currentList) { count ->
+                                viewModel.deleteSelectedPermanently(currentList, context) { count ->
                                     Toast.makeText(context, "$count नोंद(ी) कायमच्या डिलीट करण्यात आल्या", Toast.LENGTH_SHORT).show()
                                 }
                             }) {

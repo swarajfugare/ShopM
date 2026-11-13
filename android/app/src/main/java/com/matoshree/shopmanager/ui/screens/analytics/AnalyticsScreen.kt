@@ -427,6 +427,46 @@ fun AnalyticsScreen(
         AnalyticsPeriod.CUSTOM -> "कस्टम कालावधी अहवाल (${viewModel.customStartDate.value} ते ${viewModel.customEndDate.value})"
     }
 
+    val performDirectPrint: () -> Unit = {
+        if (!isPrintingReport) {
+            coroutineScope.launch {
+                isPrintingReport = true
+                val res = thermalPrinterManager.printAnalyticsReport(
+                    periodLabel = periodReportTitle,
+                    totalSales = totalSales,
+                    totalBillsCount = totalBillsCount,
+                    avgBillValue = avgBillValue,
+                    cashAmount = cashAmount,
+                    upiAmount = upiAmount,
+                    otherAmount = otherAmount,
+                    totalExpenses = totalExpensesAmount,
+                    netProfit = netProfit,
+                    topProducts = productStats.take(5),
+                    settings = shopSettings
+                )
+                isPrintingReport = false
+                if (res.isSuccess) {
+                    Toast.makeText(context, "प्रिंटरवर अहवाल पाठवला!", Toast.LENGTH_SHORT).show()
+                } else {
+                    PrintShareHelper.printAnalyticsReportSystem(
+                        context = context,
+                        periodLabel = periodReportTitle,
+                        totalSales = totalSales,
+                        totalBillsCount = totalBillsCount,
+                        avgBillValue = avgBillValue,
+                        cashAmount = cashAmount,
+                        upiAmount = upiAmount,
+                        otherAmount = otherAmount,
+                        totalExpenses = totalExpensesAmount,
+                        netProfit = netProfit,
+                        topProducts = productStats.take(5),
+                        settings = shopSettings
+                    )
+                }
+            }
+        }
+    }
+
     // Rush Hour / Peak Sales Distribution
     val hourlyStats = remember(validBills) {
         var morningSales = 0.0
@@ -513,7 +553,7 @@ fun AnalyticsScreen(
                     ) {
                         Icon(Icons.Default.Share, contentDescription = "कलर रिपोर्ट शेअर करा", tint = DeepEmerald)
                     }
-                    IconButton(onClick = { showPrintOptionsDialog = true }) {
+                    IconButton(onClick = { performDirectPrint() }) {
                         Icon(Icons.Default.Print, contentDescription = "रिपोर्ट प्रिंट करा", tint = DeepEmerald)
                     }
                     IconButton(onClick = { viewModel.refreshData() }) {
@@ -654,15 +694,21 @@ fun AnalyticsScreen(
                         horizontalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
                         OutlinedButton(
-                            onClick = { showPrintOptionsDialog = true },
+                            onClick = { performDirectPrint() },
                             modifier = Modifier
                                 .weight(1f)
                                 .height(44.dp),
                             shape = RoundedCornerShape(10.dp)
                         ) {
-                            Icon(Icons.Default.Print, contentDescription = null, tint = DeepEmerald, modifier = Modifier.size(16.dp))
-                            Spacer(modifier = Modifier.width(6.dp))
-                            Text("प्रिंट करा", fontWeight = FontWeight.Bold, color = DeepEmerald, fontSize = 13.sp)
+                            if (isPrintingReport) {
+                                CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp, color = DeepEmerald)
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Text("प्रिंट होत आहे...", fontSize = 12.sp, color = DeepEmerald)
+                            } else {
+                                Icon(Icons.Default.Print, contentDescription = null, tint = DeepEmerald, modifier = Modifier.size(16.dp))
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Text("प्रिंट करा", fontWeight = FontWeight.Bold, color = DeepEmerald, fontSize = 13.sp)
+                            }
                         }
 
                         Button(
@@ -692,7 +738,7 @@ fun AnalyticsScreen(
                         ) {
                             Icon(Icons.Default.Share, contentDescription = null, tint = WarmWhite, modifier = Modifier.size(16.dp))
                             Spacer(modifier = Modifier.width(6.dp))
-                            Text("कलर अहवाल शेअर", fontWeight = FontWeight.Bold, color = WarmWhite, fontSize = 13.sp)
+                            Text("रंगीत रिपोर्ट शेअर / सेव्ह करा (WhatsApp इमेज)", fontWeight = FontWeight.Bold, color = WarmWhite, fontSize = 11.sp, maxLines = 1, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis)
                         }
                     }
                 }

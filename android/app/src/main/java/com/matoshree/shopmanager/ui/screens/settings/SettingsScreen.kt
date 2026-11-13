@@ -810,14 +810,17 @@ fun SettingsScreen(
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Icon(Icons.Default.Send, contentDescription = null, tint = DeepEmerald, modifier = Modifier.size(22.dp))
+                    Row(modifier = Modifier.weight(1f), verticalAlignment = Alignment.CenterVertically) {
+                        Icon(Icons.Default.Send, contentDescription = null, tint = DeepEmerald, modifier = Modifier.size(20.dp))
                         Spacer(modifier = Modifier.width(8.dp))
                         Text(
-                            "व्हॉट्सॲप उधारी स्मरण (WhatsApp Reminders)",
-                            style = MaterialTheme.typography.titleMedium.copy(color = DeepEmerald, fontWeight = FontWeight.Bold)
+                            "व्हॉट्सॲप उधारी आठवण",
+                            style = MaterialTheme.typography.titleMedium.copy(color = DeepEmerald, fontWeight = FontWeight.Bold, fontSize = 15.sp),
+                            maxLines = 1,
+                            overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
                         )
                     }
+                    Spacer(modifier = Modifier.width(6.dp))
                     Surface(
                         color = ChampagneGoldContainer.copy(alpha = 0.5f),
                         shape = RoundedCornerShape(4.dp)
@@ -832,13 +835,13 @@ fun SettingsScreen(
                     }
                 }
 
-                Spacer(modifier = Modifier.height(6.dp))
+                Spacer(modifier = Modifier.height(4.dp))
                 Text(
-                    "wa-crm.refixer.in API द्वारे थकबाकीदार ग्राहकांना उधारी वसुलीची थेट आठवण पाठवा.",
-                    style = MaterialTheme.typography.bodySmall.copy(color = MutedCharcoal)
+                    "wa-crm.refixer.in द्वारे ग्राहकांना उधारी वसुलीची आठवण पाठवा.",
+                    style = MaterialTheme.typography.bodySmall.copy(color = MutedCharcoal, fontSize = 11.sp)
                 )
 
-                Spacer(modifier = Modifier.height(14.dp))
+                Spacer(modifier = Modifier.height(10.dp))
 
                 // Auto Udhari Due Reminder Toggle
                 Row(
@@ -847,9 +850,10 @@ fun SettingsScreen(
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Column(modifier = Modifier.weight(1f)) {
-                        Text("सोमवार साप्ताहिक उधारी आठवण (Weekly Monday Automation)", fontWeight = FontWeight.Bold, fontSize = 14.sp)
-                        Text("दर सोमवारी सकाळी आपोआप सर्व थकबाकीदार ग्राहकांना व्हॉट्सॲपवर आठवण मेसेज जाईल", style = MaterialTheme.typography.bodySmall.copy(color = MutedCharcoal))
+                        Text("सोमवार साप्ताहिक उधारी आठवण", fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                        Text("दर सोमवारी थकबाकीदारांना आपोआप आठवण पाठवा", style = MaterialTheme.typography.bodySmall.copy(color = MutedCharcoal, fontSize = 11.sp))
                     }
+                    Spacer(modifier = Modifier.width(8.dp))
                     Switch(
                         checked = waUdhariReminderEnabled,
                         onCheckedChange = {
@@ -861,7 +865,7 @@ fun SettingsScreen(
                     )
                 }
 
-                Spacer(modifier = Modifier.height(12.dp))
+                Spacer(modifier = Modifier.height(10.dp))
 
                 // Credentials status and secure edit button
                 val isWaConfigured = WhatsAppWebhookManager.isConfigured(context)
@@ -1307,181 +1311,7 @@ fun SettingsScreen(
                     }
                 }
         }
-        val renderAppControlsCard: @Composable () -> Unit = {
-            MatoshreeCard(hasGoldTopBorder = true) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Icon(Icons.Default.Tune, contentDescription = null, tint = DeepEmerald, modifier = Modifier.size(22.dp))
-                    Spacer(modifier = Modifier.width(8.dp))
-                    Text(
-                        "ॲप प्रगत नियंत्रक (Advanced Controls)",
-                        style = MaterialTheme.typography.titleMedium.copy(color = DeepEmerald, fontWeight = FontWeight.Bold)
-                    )
-                }
-
-                Spacer(modifier = Modifier.height(14.dp))
-
-                // Control 1: Quick Sale Default Payment Mode
-                Text("क्विक सेल डीफॉल्ट पेमेंट पर्याय", fontWeight = FontWeight.SemiBold, fontSize = 13.sp)
-                Spacer(modifier = Modifier.height(6.dp))
-                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    listOf("CASH" to "रोख (CASH)", "UPI" to "यूपीआय (UPI)").forEach { (key, label) ->
-                        val isSelected = defaultQuickSalePaymentMethod == key
-                        OutlinedButton(
-                            onClick = {
-                                defaultQuickSalePaymentMethod = key
-                                appControlPrefs.edit().putString("default_payment_method", key).apply()
-                            },
-                            modifier = Modifier.weight(1f),
-                            shape = RoundedCornerShape(8.dp),
-                            border = BorderStroke(1.5.dp, if (isSelected) DeepEmerald else OutlineVariantGrey),
-                            colors = ButtonDefaults.outlinedButtonColors(
-                                containerColor = if (isSelected) ChampagneGoldContainer.copy(alpha = 0.4f) else Color.Transparent
-                            )
-                        ) {
-                            Text(label, fontSize = 12.sp, fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal, color = if (isSelected) DeepEmerald else MutedCharcoal)
-                        }
-                    }
-                }
-
-                HorizontalDivider(modifier = Modifier.padding(vertical = 10.dp), color = OutlineVariantGrey.copy(alpha = 0.2f))
-
-                // Control 2: Bill Receipt Copies
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Column(modifier = Modifier.weight(1f)) {
-                        Text("बिल पावती प्रिंट प्रती", fontWeight = FontWeight.SemiBold, fontSize = 13.sp)
-                        Text("प्रत्येक बिलावर किती पावत्या प्रिंट व्हाव्यात", style = MaterialTheme.typography.bodySmall.copy(color = MutedCharcoal))
-                    }
-                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                        listOf(1 to "१ प्रत", 2 to "२ प्रती").forEach { (count, label) ->
-                            val isSelected = receiptCopiesCount == count
-                            OutlinedButton(
-                                onClick = {
-                                    receiptCopiesCount = count
-                                    appControlPrefs.edit().putInt("receipt_copies_count", count).apply()
-                                },
-                                shape = RoundedCornerShape(8.dp),
-                                border = BorderStroke(1.dp, if (isSelected) DeepEmerald else OutlineVariantGrey),
-                                colors = ButtonDefaults.outlinedButtonColors(
-                                    containerColor = if (isSelected) ChampagneGoldContainer.copy(alpha = 0.4f) else Color.Transparent
-                                ),
-                                contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
-                                modifier = Modifier.height(34.dp)
-                            ) {
-                                Text(label, fontSize = 11.sp, fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal, color = if (isSelected) DeepEmerald else MutedCharcoal)
-                            }
-                        }
-                    }
-                }
-
-                HorizontalDivider(modifier = Modifier.padding(vertical = 10.dp), color = OutlineVariantGrey.copy(alpha = 0.2f))
-
-                // Control 3: Scanner and Billing Haptic / Audio
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Column(modifier = Modifier.weight(1f)) {
-                        Text("स्कॅनर व बिलिंग बीप / व्हायब्रेशन", fontWeight = FontWeight.SemiBold, fontSize = 13.sp)
-                        Text("बारकोड स्कॅन केल्यावर आणि बिल तयार झाल्यावर फीडबॅक", style = MaterialTheme.typography.bodySmall.copy(color = MutedCharcoal))
-                    }
-                    Switch(
-                        checked = audioHapticFeedbackEnabled,
-                        onCheckedChange = {
-                            audioHapticFeedbackEnabled = it
-                            appControlPrefs.edit().putBoolean("audio_haptic_feedback", it).apply()
-                        },
-                        colors = SwitchDefaults.colors(checkedThumbColor = WarmWhite, checkedTrackColor = DeepEmerald)
-                    )
-                }
-
-                HorizontalDivider(modifier = Modifier.padding(vertical = 10.dp), color = OutlineVariantGrey.copy(alpha = 0.2f))
-
-                // Control 4: Low Stock Alert Limit
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Column(modifier = Modifier.weight(1f)) {
-                        Text("कमी स्टॉक इशारा मर्यादा", fontWeight = FontWeight.SemiBold, fontSize = 13.sp)
-                        Text("स्टॉक या मर्यादेपेक्षा कमी झाल्यास अलर्ट दिसेल", style = MaterialTheme.typography.bodySmall.copy(color = MutedCharcoal))
-                    }
-                    Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                        listOf(2, 5, 10).forEach { limit ->
-                            val isSelected = lowStockThreshold == limit
-                            OutlinedButton(
-                                onClick = {
-                                    lowStockThreshold = limit
-                                    appControlPrefs.edit().putInt("low_stock_threshold", limit).apply()
-                                },
-                                shape = RoundedCornerShape(8.dp),
-                                border = BorderStroke(1.dp, if (isSelected) DeepEmerald else OutlineVariantGrey),
-                                colors = ButtonDefaults.outlinedButtonColors(
-                                    containerColor = if (isSelected) ChampagneGoldContainer.copy(alpha = 0.4f) else Color.Transparent
-                                ),
-                                contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp),
-                                modifier = Modifier.height(32.dp)
-                            ) {
-                                Text("$limit नग", fontSize = 11.sp, fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal, color = if (isSelected) DeepEmerald else MutedCharcoal)
-                            }
-                        }
-                    }
-                }
-
-                HorizontalDivider(modifier = Modifier.padding(vertical = 10.dp), color = OutlineVariantGrey.copy(alpha = 0.2f))
-
-                // Control 5: Allow Sale on Zero Stock
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Column(modifier = Modifier.weight(1f)) {
-                        Text("शून्य स्टॉक असताना विक्री परवानगी", fontWeight = FontWeight.SemiBold, fontSize = 13.sp)
-                        Text("स्टॉक शून्य असला तरी बिल बनवण्याची परवानगी द्या", style = MaterialTheme.typography.bodySmall.copy(color = MutedCharcoal))
-                    }
-                    Switch(
-                        checked = allowZeroStockSale,
-                        onCheckedChange = {
-                            allowZeroStockSale = it
-                            appControlPrefs.edit().putBoolean("allow_zero_stock_sale", it).apply()
-                        },
-                        colors = SwitchDefaults.colors(checkedThumbColor = WarmWhite, checkedTrackColor = DeepEmerald)
-                    )
-                }
-
-                HorizontalDivider(modifier = Modifier.padding(vertical = 10.dp), color = OutlineVariantGrey.copy(alpha = 0.2f))
-
-                // Control 6: Screen & Recents Protection (FLAG_SECURE)
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Column(modifier = Modifier.weight(1f)) {
-                        Text("ॲप स्क्रीन व रेकॉर्डिंग सुरक्षा (FLAG_SECURE)", fontWeight = FontWeight.SemiBold, fontSize = 13.sp)
-                        Text("स्क्रीनशॉट, स्क्रीन रेकॉर्डिंग व रिसेंट ॲप्स प्रिव्ह्यू ब्लॉक करा (सुरक्षित मोड)", style = MaterialTheme.typography.bodySmall.copy(color = MutedCharcoal))
-                    }
-                    Switch(
-                        checked = screenProtectionEnabled,
-                        onCheckedChange = { enabled ->
-                            screenProtectionEnabled = enabled
-                            com.matoshree.shopmanager.security.AppLockManager.setScreenProtectionEnabled(context, enabled)
-                            if (context is android.app.Activity) {
-                                com.matoshree.shopmanager.security.AppLockManager.applyScreenProtection(context)
-                            }
-                            Toast.makeText(context, if (enabled) "स्क्रीन सुरक्षा चालू केली" else "स्क्रीन सुरक्षा बंद केली", Toast.LENGTH_SHORT).show()
-                        },
-                        colors = SwitchDefaults.colors(checkedThumbColor = WarmWhite, checkedTrackColor = DeepEmerald)
-                    )
-                }
-            }
-        }
+        val renderAppControlsCard: @Composable () -> Unit = {}
         val renderTrashCard: @Composable () -> Unit = {
             MatoshreeCard(hasGoldTopBorder = true) {
                     Row(

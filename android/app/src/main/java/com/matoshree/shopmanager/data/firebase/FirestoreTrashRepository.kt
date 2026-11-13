@@ -222,16 +222,42 @@ class FirestoreTrashRepository {
         when (item.entityType) {
             "PRODUCT" -> FirebaseManager.productsCollection().document(item.docId).delete().await()
             "CUSTOMER" -> {
-                FirebaseManager.customersCollection().document(item.docId).delete().await()
+                val custDoc = try {
+                    FirebaseManager.customersCollection().document(item.docId).get().await()
+                } catch (_: Exception) { null }
+                val mobile = custDoc?.getString("mobile") ?: ""
+                val cleanMobile = com.matoshree.shopmanager.utils.PhoneUtils.clean10DigitMobileInput(mobile)
+
+                try {
+                    FirebaseManager.customersCollection().document(item.docId).delete().await()
+                } catch (_: Exception) {}
+                try {
+                    FirebaseManager.shopCustomersCollection().document(item.docId).delete().await()
+                } catch (_: Exception) {}
+
                 try {
                     val batch = FirebaseManager.firestore.batch()
-                    val bills = FirebaseManager.billsCollection().whereEqualTo("customerId", item.docId).get().await()
-                    bills.documents.forEach { batch.delete(it.reference) }
+                    val bills1 = FirebaseManager.billsCollection().whereEqualTo("customerId", item.docId).get().await()
+                    bills1.documents.forEach { batch.delete(it.reference) }
+                    val shopBills1 = FirebaseManager.shopBillsCollection().whereEqualTo("customerId", item.docId).get().await()
+                    shopBills1.documents.forEach { batch.delete(it.reference) }
+
                     if (item.legacyId != null && item.legacyId > 0) {
-                        val legacyBills = FirebaseManager.billsCollection().whereEqualTo("legacyCustomerId", item.legacyId).get().await()
-                        legacyBills.documents.forEach { batch.delete(it.reference) }
-                        val txs = FirebaseManager.udhariTransactionsCollection().whereEqualTo("customerId", item.legacyId).get().await()
-                        txs.documents.forEach { batch.delete(it.reference) }
+                        val bills2 = FirebaseManager.billsCollection().whereEqualTo("legacyCustomerId", item.legacyId).get().await()
+                        bills2.documents.forEach { batch.delete(it.reference) }
+                        val shopBills2 = FirebaseManager.shopBillsCollection().whereEqualTo("legacyCustomerId", item.legacyId).get().await()
+                        shopBills2.documents.forEach { batch.delete(it.reference) }
+                        val txs1 = FirebaseManager.udhariTransactionsCollection().whereEqualTo("customerId", item.legacyId).get().await()
+                        txs1.documents.forEach { batch.delete(it.reference) }
+                    }
+
+                    if (cleanMobile.length == 10) {
+                        val bills3 = FirebaseManager.billsCollection().whereEqualTo("customerMobile", cleanMobile).get().await()
+                        bills3.documents.forEach { batch.delete(it.reference) }
+                        val shopBills3 = FirebaseManager.shopBillsCollection().whereEqualTo("customerMobile", cleanMobile).get().await()
+                        shopBills3.documents.forEach { batch.delete(it.reference) }
+                        val txs2 = FirebaseManager.udhariTransactionsCollection().whereEqualTo("customerMobile", cleanMobile).get().await()
+                        txs2.documents.forEach { batch.delete(it.reference) }
                     }
                     batch.commit().await()
                 } catch (e: Exception) {
