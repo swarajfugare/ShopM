@@ -133,6 +133,9 @@ interface BillDao {
     @Query("DELETE FROM bills WHERE id = :id")
     suspend fun deleteBillById(id: Long)
 
+    @Query("UPDATE bills SET customerId = NULL, customerMobile = NULL WHERE customerId = :customerId")
+    suspend fun disassociateCustomerBills(customerId: Long)
+
     @Transaction
     suspend fun upsertServerBill(bill: BillEntity, items: List<BillItemEntity>): Long {
         val existingByUuid = if (bill.transactionUuid.isNotBlank()) getBillByUuid(bill.transactionUuid) else null

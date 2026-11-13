@@ -36,6 +36,7 @@ import com.matoshree.shopmanager.data.repository.BillRepository
 import com.matoshree.shopmanager.data.repository.CustomerRepository
 import com.matoshree.shopmanager.data.repository.UdhariRepository
 import com.matoshree.shopmanager.domain.model.*
+import com.matoshree.shopmanager.domain.usecase.ShopMetricsCalculator
 import com.matoshree.shopmanager.ui.components.MatoshreeCard
 import com.matoshree.shopmanager.ui.components.MatoshreeTopAppBar
 import com.matoshree.shopmanager.ui.components.PaymentMethodPill
@@ -109,12 +110,12 @@ class UdhariViewModel(
             val txBillNumbers = custTxs.filter { it.type == UdhariTransactionType.PAYMENT && it.billNumber.isNotBlank() }.map { it.billNumber }.toSet()
 
             val totalPurchases = custBills.sumOf { it.finalAmount } + manualCredits
-            val pureCashCheckoutPayments = custBills.filter { b ->
-                b.paymentStatus == PaymentStatus.PAID &&
-                !txBillIds.contains(b.id) &&
-                !txBillNumbers.contains(b.billNumber)
-            }.sumOf { it.finalAmount }
-            val totalCredits = netCustPayments + pureCashCheckoutPayments
+            val upfrontCheckoutPayments = custBills.filter { b ->
+                !txBillIds.contains(b.id) && !txBillNumbers.contains(b.billNumber)
+            }.sumOf { b ->
+                if (b.paymentStatus == PaymentStatus.PAID) b.finalAmount else b.paidAmount
+            }
+            val totalCredits = netCustPayments + upfrontCheckoutPayments
 
             val totalPendingFromBills = (totalPurchases - totalCredits).coerceAtLeast(0.0)
             val totalPaid = (totalPurchases - totalPendingFromBills).coerceAtLeast(0.0)
@@ -193,17 +194,9 @@ class UdhariViewModel(
         val activeBills = bills.filter { !it.isVoided }
         val validTxs = transactions.filter { !it.isReversed }
 
-        val manualCredits = validTxs.filter { it.billId == 0L && it.type == UdhariTransactionType.PURCHASE_CREDIT }.sumOf { it.amount }
-        val allPayments = validTxs.filter { it.type == UdhariTransactionType.PAYMENT }.sumOf { it.amount }
-        val allReversals = validTxs.filter { it.type == UdhariTransactionType.REVERSAL }.sumOf { it.amount }
-        val netPayments = (allPayments - allReversals).coerceAtLeast(0.0)
-        val unpaidCreditFromBills = activeBills.filter { it.paymentStatus != PaymentStatus.PAID }.sumOf { it.finalAmount }
-        val totalOutstanding = (unpaidCreditFromBills + manualCredits - netPayments).coerceAtLeast(0.0)
-
+        val totalOutstanding = ShopMetricsCalculator.calculateTotalPendingUdhari(activeBills, validTxs)
+        val pendingCustomersCount = ShopMetricsCalculator.calculatePendingCustomersCount(activeBills, validTxs)
         val pendingBills = activeBills.filter { it.pendingAmount > 0.01 }
-        val pendingCustIds = pendingBills.mapNotNull { it.customerId }.toMutableSet()
-        validTxs.filter { it.billId == 0L && it.type == UdhariTransactionType.PURCHASE_CREDIT }.forEach { pendingCustIds.add(it.customerId) }
-        val pendingCustomersCount = pendingCustIds.size
 
         val todayIso = DateUtils.todayDate()
         val currentMonthIso = todayIso.take(7)

@@ -100,13 +100,14 @@ object ShopMetricsCalculator {
             val txReversals = custTxs.filter { it.type == UdhariTransactionType.REVERSAL }.sumOf { it.amount }
             val netTxPayments = (txPayments - txReversals).coerceAtLeast(0.0)
 
-            val pureCashCheckoutPayments = custBills.filter { b ->
-                b.paymentStatus == PaymentStatus.PAID &&
-                !txBillIds.contains(b.id) &&
-                !txBillNumbers.contains(b.billNumber)
-            }.sumOf { it.finalAmount }
+            // CRITICAL: Include upfront checkout payments on all bills (PAID and PARTIAL) when not already represented by a payment transaction!
+            val upfrontCheckoutPayments = custBills.filter { b ->
+                !txBillIds.contains(b.id) && !txBillNumbers.contains(b.billNumber)
+            }.sumOf { b ->
+                if (b.paymentStatus == PaymentStatus.PAID) b.finalAmount else b.paidAmount
+            }
 
-            val totalCredits = netTxPayments + pureCashCheckoutPayments
+            val totalCredits = netTxPayments + upfrontCheckoutPayments
             val due = (totalCharges - totalCredits).coerceAtLeast(0.0)
             balances[key] = due
         }

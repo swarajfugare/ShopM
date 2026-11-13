@@ -503,6 +503,10 @@ class FirestoreCustomerRepository {
             FirebaseManager.ensureAuthenticated()
             val task = FirebaseManager.customersCollection().document(docId).set(dto)
             FirebaseManager.awaitWriteTask(task)
+            try {
+                val shopTask = FirebaseManager.shopCustomersCollection().document(docId).set(dto)
+                FirebaseManager.awaitWriteTask(shopTask)
+            } catch (_: Exception) {}
             Log.d(TAG, "FIRESTORE_WRITE entity=CUSTOMER path=$docPath result=SUCCESS")
         } catch (e: Exception) {
             Log.e(TAG, "FIRESTORE_WRITE entity=CUSTOMER path=$docPath result=FAILURE code=${e.javaClass.simpleName}", e)

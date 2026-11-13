@@ -500,13 +500,23 @@ class CustomerRepository(
     }
 
     suspend fun searchCustomers(query: String): List<Customer> {
-        val cloud = try {
-            firestoreRepo.searchCustomers(query)
+        val cleanQuery = query.trim()
+        if (cleanQuery.isBlank()) return emptyList()
+
+        // 1. Query local Room database FIRST (instant, reflects latest local edits immediately!)
+        val localList = database?.customerDao()?.searchCustomers(cleanQuery)?.map { it.toDomain() } ?: emptyList()
+
+        // 2. Query cloud as well
+        val cloudList = try {
+            firestoreRepo.searchCustomers(cleanQuery)
         } catch (e: Exception) {
             emptyList()
         }
-        if (cloud.isNotEmpty()) return cloud
-        return database?.customerDao()?.searchCustomers(query)?.map { it.toDomain() } ?: emptyList()
+
+        // 3. Merge: Local Room results take STRICT PRIORITY over any stale cloud duplicates!
+        return (localList + cloudList)
+            .distinctBy { it.canonicalKey() }
+            .sortedBy { it.name }
     }
 
     suspend fun findCustomerByMobile(mobile: String): Customer? {

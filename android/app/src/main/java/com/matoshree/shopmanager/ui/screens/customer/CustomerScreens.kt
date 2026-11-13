@@ -224,12 +224,13 @@ class CustomerViewModel(
                 val txReversals = validTxs.filter { it.type == UdhariTransactionType.REVERSAL }.sumOf { it.amount }
                 val netTxPayments = (txPayments - txReversals).coerceAtLeast(0.0)
 
-                val pureCashCheckoutPayments = customerSpecificBills.filter { b ->
-                    b.paymentStatus == PaymentStatus.PAID &&
-                    !txBillIds.contains(b.id) &&
-                    !txBillNumbers.contains(b.billNumber)
-                }.sumOf { it.finalAmount }
-                val totalCredits = netTxPayments + pureCashCheckoutPayments
+                // CRITICAL: Include upfront checkout payments on all bills (PAID and PARTIAL) when not already represented by a payment transaction!
+                val upfrontCheckoutPayments = customerSpecificBills.filter { b ->
+                    !txBillIds.contains(b.id) && !txBillNumbers.contains(b.billNumber)
+                }.sumOf { b ->
+                    if (b.paymentStatus == PaymentStatus.PAID) b.finalAmount else b.paidAmount
+                }
+                val totalCredits = netTxPayments + upfrontCheckoutPayments
 
                 val totalPending = (totalCharges - totalCredits).coerceAtLeast(0.0)
 

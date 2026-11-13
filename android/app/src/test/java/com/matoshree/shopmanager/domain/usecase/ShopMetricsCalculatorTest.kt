@@ -139,6 +139,41 @@ class ShopMetricsCalculatorTest {
         assertEquals(3500.0, dashboardTotalPending, 0.001)
     }
 
+    @Test
+    fun testPartialPaymentBill_calculatesCorrectOutstanding() {
+        // Bill total ₹520, customer pays ₹300 upfront, remaining ₹220 is udhari
+        val partialBill = Bill(
+            id = 1,
+            shopId = 1,
+            customerId = 10,
+            customerName = "Kajal Salgar",
+            customerMobile = "9876543210",
+            billNumber = "BILL-1",
+            transactionUuid = "uuid-1",
+            saleType = SaleType.QUICK,
+            subtotal = 520.0,
+            discountType = DiscountType.NONE,
+            discountValue = 0.0,
+            discountAmount = 0.0,
+            taxAmount = 0.0,
+            finalAmount = 520.0,
+            paidAmount = 300.0,
+            pendingAmount = 220.0,
+            actualProfit = 0.0,
+            estimatedProfit = 0.0,
+            paymentMethod = PaymentMethod.CASH,
+            paymentStatus = PaymentStatus.PARTIAL,
+            billDate = "2026-11-13 14:00:00",
+            isVoided = false,
+            items = emptyList()
+        )
+
+        val balances = ShopMetricsCalculator.calculateCustomerLedgerBalances(listOf(partialBill), emptyList())
+        assertEquals(220.0, balances["mob_9876543210"] ?: 0.0, 0.001)
+        assertEquals(220.0, ShopMetricsCalculator.calculateTotalPendingUdhari(listOf(partialBill), emptyList()), 0.001)
+        assertEquals(1, ShopMetricsCalculator.calculatePendingCustomersCount(listOf(partialBill), emptyList()))
+    }
+
     private fun createBill(
         id: Long,
         amount: Double,

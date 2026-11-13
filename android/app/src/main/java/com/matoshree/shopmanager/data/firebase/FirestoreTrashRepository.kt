@@ -17,7 +17,8 @@ data class TrashedItem(
     val subtitle: String,
     val amount: Double? = null,
     val deletedAt: Long,
-    val daysLeft: Int
+    val daysLeft: Int,
+    val extraIdentifier: String = ""
 )
 
 class FirestoreTrashRepository {
@@ -48,7 +49,8 @@ class FirestoreTrashRepository {
                         subtitle = "Price: ${CurrencyFormatter.format(dto.sellingPrice)} • SKU: ${dto.sku ?: "N/A"}",
                         amount = dto.sellingPrice,
                         deletedAt = dAt,
-                        daysLeft = daysRemaining
+                        daysLeft = daysRemaining,
+                        extraIdentifier = dto.sku ?: ""
                     )
                 }?.sortedByDescending { it.deletedAt } ?: emptyList()
 
@@ -72,6 +74,7 @@ class FirestoreTrashRepository {
                     val elapsed = now - dAt
                     val daysRemaining = (((SEVEN_DAYS_MS - elapsed) / (24L * 60L * 60L * 1000L)) + 1).toInt().coerceIn(1, 7)
                     val idNum = dto.legacyId ?: (doc.id.hashCode().toLong() and 0x7FFFFFFFFFFFFFFFL)
+                    val cleanMob = com.matoshree.shopmanager.utils.PhoneUtils.clean10DigitMobileInput(dto.mobile)
 
                     TrashedItem(
                         docId = doc.id,
@@ -81,7 +84,8 @@ class FirestoreTrashRepository {
                         subtitle = "Mobile: ${dto.mobile.ifBlank { "No Mobile" }} • ${dto.address ?: "No Address"}",
                         amount = dto.outstandingAmount,
                         deletedAt = dAt,
-                        daysLeft = daysRemaining
+                        daysLeft = daysRemaining,
+                        extraIdentifier = cleanMob
                     )
                 }?.sortedByDescending { it.deletedAt } ?: emptyList()
 
@@ -114,7 +118,8 @@ class FirestoreTrashRepository {
                         subtitle = "${dto.customerName ?: "Walk-in"} • ${CurrencyFormatter.format(dto.finalAmount)} (${dto.paymentMethod})",
                         amount = dto.finalAmount,
                         deletedAt = dAt,
-                        daysLeft = daysRemaining
+                        daysLeft = daysRemaining,
+                        extraIdentifier = dto.transactionUuid.ifBlank { doc.id }
                     )
                 }?.sortedByDescending { it.deletedAt } ?: emptyList()
 
@@ -149,7 +154,8 @@ class FirestoreTrashRepository {
                         subtitle = "${dto.customerName.ifBlank { "ग्राहक" }} • ${dto.customerMobile.ifBlank { "No Mobile" }}",
                         amount = dto.amount,
                         deletedAt = dAt,
-                        daysLeft = daysRemaining
+                        daysLeft = daysRemaining,
+                        extraIdentifier = dto.transactionUuid.ifBlank { doc.id }
                     )
                 }?.sortedByDescending { it.deletedAt } ?: emptyList()
 
@@ -222,11 +228,12 @@ class FirestoreTrashRepository {
         when (item.entityType) {
             "PRODUCT" -> FirebaseManager.productsCollection().document(item.docId).delete().await()
             "CUSTOMER" -> {
-                val custDoc = try {
-                    FirebaseManager.customersCollection().document(item.docId).get().await()
-                } catch (_: Exception) { null }
-                val mobile = custDoc?.getString("mobile") ?: ""
-                val cleanMobile = com.matoshree.shopmanager.utils.PhoneUtils.clean10DigitMobileInput(mobile)
+                val cleanMobile = if (item.extraIdentifier.length == 10) item.extraIdentifier else {
+                    val custDoc = try {
+                        FirebaseManager.customersCollection().document(item.docId).get().await()
+                    } catch (_: Exception) { null }
+                    com.matoshree.shopmanager.utils.PhoneUtils.clean10DigitMobileInput(custDoc?.getString("mobile") ?: "")
+                }
 
                 try {
                     FirebaseManager.customersCollection().document(item.docId).delete().await()
@@ -235,33 +242,28 @@ class FirestoreTrashRepository {
                     FirebaseManager.shopCustomersCollection().document(item.docId).delete().await()
                 } catch (_: Exception) {}
 
+                // SAFE POLICY: Disassociate bills from customer so the customer's history is detached,
+                // while preserving the shop's total sales history, tax records, and daily closings!
                 try {
                     val batch = FirebaseManager.firestore.batch()
                     val bills1 = FirebaseManager.billsCollection().whereEqualTo("customerId", item.docId).get().await()
-                    bills1.documents.forEach { batch.delete(it.reference) }
+                    bills1.documents.forEach { batch.update(it.reference, mapOf("customerId" to null, "customerMobile" to null)) }
                     val shopBills1 = FirebaseManager.shopBillsCollection().whereEqualTo("customerId", item.docId).get().await()
-                    shopBills1.documents.forEach { batch.delete(it.reference) }
-
-                    if (item.legacyId != null && item.legacyId > 0) {
-                        val bills2 = FirebaseManager.billsCollection().whereEqualTo("legacyCustomerId", item.legacyId).get().await()
-                        bills2.documents.forEach { batch.delete(it.reference) }
-                        val shopBills2 = FirebaseManager.shopBillsCollection().whereEqualTo("legacyCustomerId", item.legacyId).get().await()
-                        shopBills2.documents.forEach { batch.delete(it.reference) }
-                        val txs1 = FirebaseManager.udhariTransactionsCollection().whereEqualTo("customerId", item.legacyId).get().await()
-                        txs1.documents.forEach { batch.delete(it.reference) }
-                    }
+                    shopBills1.documents.forEach { batch.update(it.reference, mapOf("customerId" to null, "customerMobile" to null)) }
 
                     if (cleanMobile.length == 10) {
-                        val bills3 = FirebaseManager.billsCollection().whereEqualTo("customerMobile", cleanMobile).get().await()
-                        bills3.documents.forEach { batch.delete(it.reference) }
-                        val shopBills3 = FirebaseManager.shopBillsCollection().whereEqualTo("customerMobile", cleanMobile).get().await()
-                        shopBills3.documents.forEach { batch.delete(it.reference) }
-                        val txs2 = FirebaseManager.udhariTransactionsCollection().whereEqualTo("customerMobile", cleanMobile).get().await()
-                        txs2.documents.forEach { batch.delete(it.reference) }
+                        val bills2 = FirebaseManager.billsCollection().whereEqualTo("customerMobile", cleanMobile).get().await()
+                        bills2.documents.forEach { batch.update(it.reference, mapOf("customerId" to null, "customerMobile" to null)) }
+                        val shopBills2 = FirebaseManager.shopBillsCollection().whereEqualTo("customerMobile", cleanMobile).get().await()
+                        shopBills2.documents.forEach { batch.update(it.reference, mapOf("customerId" to null, "customerMobile" to null)) }
+
+                        // Purge Udhari debt transactions for this customer so they start fresh upon re-add
+                        val txs = FirebaseManager.udhariTransactionsCollection().whereEqualTo("customerMobile", cleanMobile).get().await()
+                        txs.documents.forEach { batch.delete(it.reference) }
                     }
                     batch.commit().await()
                 } catch (e: Exception) {
-                    Log.w(TAG, "Permanent delete customer cleanup note: ${e.message}")
+                    Log.w(TAG, "Permanent delete customer safe cleanup note: ${e.message}")
                 }
             }
             "BILL" -> FirebaseManager.billsCollection().document(item.docId).delete().await()

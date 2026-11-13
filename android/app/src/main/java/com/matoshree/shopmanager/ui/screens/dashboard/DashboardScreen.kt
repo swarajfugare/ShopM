@@ -88,6 +88,7 @@ class DashboardViewModel(
 
     private val allBillsState = MutableStateFlow<List<Bill>>(emptyList())
     private val allTransactionsState = MutableStateFlow<List<UdhariTransaction>>(emptyList())
+    val isUdhariLoaded = MutableStateFlow(false)
 
     private val currentDateFlow = flow {
         while (true) {
@@ -101,7 +102,11 @@ class DashboardViewModel(
         viewModelScope.launch(errorHandler) {
             billRepository.getAllBills(limit = 500)
                 .distinctUntilChanged()
-                .catch { e -> android.util.Log.e("DashboardViewModel", "Bills flow error: ${e.message}", e) }
+                .retryWhen { cause, attempt ->
+                    android.util.Log.w("DashboardViewModel", "Retrying bills flow after error (attempt $attempt): ${cause.message}")
+                    delay(minOf(1000L * (attempt + 1), 5000L))
+                    true
+                }
                 .collectLatest { bills ->
                     allBillsState.value = bills
                     recalculateMetrics()
@@ -112,9 +117,14 @@ class DashboardViewModel(
         viewModelScope.launch(errorHandler) {
             udhariRepository.getAllTransactions()
                 .distinctUntilChanged()
-                .catch { e -> android.util.Log.e("DashboardViewModel", "Udhari flow error: ${e.message}", e) }
+                .retryWhen { cause, attempt ->
+                    android.util.Log.w("DashboardViewModel", "Retrying udhari flow after error (attempt $attempt): ${cause.message}")
+                    delay(minOf(1000L * (attempt + 1), 5000L))
+                    true
+                }
                 .collectLatest { txs ->
                     allTransactionsState.value = txs
+                    isUdhariLoaded.value = true
                     recalculateMetrics()
                 }
         }

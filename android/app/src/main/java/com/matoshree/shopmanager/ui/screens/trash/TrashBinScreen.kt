@@ -125,22 +125,37 @@ class TrashBinViewModel(
                         val db = com.matoshree.shopmanager.data.local.AppDatabase.getInstance(ctx)
                         when (item.entityType) {
                             "CUSTOMER" -> {
-                                db.customerDao().hardDeleteCustomerComprehensive(
-                                    serverId = if (item.legacyId > 0) item.legacyId else null,
-                                    cleanMobile = "",
-                                    name = item.title
-                                )
-                                db.billDao().deleteBillsByCustomerOrDetails(
-                                    customerId = item.legacyId,
-                                    mobile = "",
-                                    name = item.title
-                                )
+                                val cleanMob = item.extraIdentifier.trim()
+                                val targetCust = if (cleanMob.length == 10) {
+                                    db.customerDao().getCustomerByMobile(cleanMob)
+                                } else if (item.legacyId > 0) {
+                                    db.customerDao().getCustomerByServerId(item.legacyId)
+                                } else null
+
+                                if (targetCust != null) {
+                                    db.customerDao().hardDeleteCustomer(targetCust.id)
+                                    db.billDao().disassociateCustomerBills(targetCust.id)
+                                }
                             }
                             "PRODUCT" -> {
-                                db.productDao().deleteProduct(item.legacyId)
+                                val prod = if (item.extraIdentifier.isNotBlank()) {
+                                    db.productDao().getProductBySku(item.extraIdentifier)
+                                } else if (item.legacyId > 0) {
+                                    db.productDao().getProductByServerId(item.legacyId)
+                                } else null
+
+                                if (prod != null) {
+                                    db.productDao().deleteProduct(prod.id)
+                                }
                             }
                             "BILL" -> {
-                                db.billDao().deleteBillComprehensive(item.legacyId, item.docId, item.title)
+                                val bill = if (item.extraIdentifier.isNotBlank()) {
+                                    db.billDao().getBillByUuid(item.extraIdentifier)
+                                } else null
+
+                                if (bill != null) {
+                                    db.billDao().deleteBillById(bill.bill.id)
+                                }
                             }
                         }
                     } catch (e: Exception) {
@@ -183,22 +198,37 @@ class TrashBinViewModel(
                             val db = com.matoshree.shopmanager.data.local.AppDatabase.getInstance(ctx)
                             when (item.entityType) {
                                 "CUSTOMER" -> {
-                                    db.customerDao().hardDeleteCustomerComprehensive(
-                                        serverId = if (item.legacyId > 0) item.legacyId else null,
-                                        cleanMobile = "",
-                                        name = item.title
-                                    )
-                                    db.billDao().deleteBillsByCustomerOrDetails(
-                                        customerId = item.legacyId,
-                                        mobile = "",
-                                        name = item.title
-                                    )
+                                    val cleanMob = item.extraIdentifier.trim()
+                                    val targetCust = if (cleanMob.length == 10) {
+                                        db.customerDao().getCustomerByMobile(cleanMob)
+                                    } else if (item.legacyId > 0) {
+                                        db.customerDao().getCustomerByServerId(item.legacyId)
+                                    } else null
+
+                                    if (targetCust != null) {
+                                        db.customerDao().hardDeleteCustomer(targetCust.id)
+                                        db.billDao().disassociateCustomerBills(targetCust.id)
+                                    }
                                 }
                                 "PRODUCT" -> {
-                                    db.productDao().deleteProduct(item.legacyId)
+                                    val prod = if (item.extraIdentifier.isNotBlank()) {
+                                        db.productDao().getProductBySku(item.extraIdentifier)
+                                    } else if (item.legacyId > 0) {
+                                        db.productDao().getProductByServerId(item.legacyId)
+                                    } else null
+
+                                    if (prod != null) {
+                                        db.productDao().deleteProduct(prod.id)
+                                    }
                                 }
                                 "BILL" -> {
-                                    db.billDao().deleteBillComprehensive(item.legacyId, item.docId, item.title)
+                                    val bill = if (item.extraIdentifier.isNotBlank()) {
+                                        db.billDao().getBillByUuid(item.extraIdentifier)
+                                    } else null
+
+                                    if (bill != null) {
+                                        db.billDao().deleteBillById(bill.bill.id)
+                                    }
                                 }
                             }
                         } catch (_: Exception) {}
