@@ -77,6 +77,12 @@ class SyncManager(
     private var foregroundPollingJob: Job? = null
     private val syncScope = CoroutineScope(Dispatchers.IO + SupervisorJob())
 
+    val realtimeSync = RealtimeSyncManager.getInstance(context, database)
+
+    fun startRealtimeSync() = realtimeSync.start()
+    fun stopRealtimeSync() = realtimeSync.stop()
+    val allUdhariTransactions: StateFlow<List<com.matoshree.shopmanager.domain.model.UdhariTransaction>> = realtimeSync.allUdhariTransactions
+
     val deviceId: String by lazy {
         var id = prefs.getString(PREF_DEVICE_ID, null)
         if (id.isNullOrBlank()) {

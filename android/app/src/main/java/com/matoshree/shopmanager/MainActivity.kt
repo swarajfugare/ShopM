@@ -72,6 +72,7 @@ class MainActivity : FragmentActivity() {
 
                 DisposableEffect(isGoogleLoggedIn) {
                     val listener = if (isGoogleLoggedIn) {
+                        syncManager.startRealtimeSync()
                         deviceTrustManager.listenForRemoteRevocation {
                             googleAuthManager.signOut()
                             deviceTrustManager.revokeDeviceAuthorization()
@@ -80,6 +81,7 @@ class MainActivity : FragmentActivity() {
                     } else null
                     onDispose {
                         listener?.remove()
+                        syncManager.stopRealtimeSync()
                     }
                 }
 

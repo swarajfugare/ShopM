@@ -65,7 +65,7 @@ fun AppNavGraph(
     val dailyClosingRepository = remember { DailyClosingRepository(database) }
     val syncRepository = remember { SyncRepository(database) }
     val settingsDao = remember { database.settingsDao() }
-    val udhariRepository = remember { UdhariRepository() }
+    val udhariRepository = remember { UdhariRepository(syncManager = syncManager) }
 
     val dashboardViewModel = remember { DashboardViewModel(billRepository, udhariRepository, productRepository) }
     val saleViewModel = remember { SaleViewModel(billRepository, customerRepository, productRepository) }

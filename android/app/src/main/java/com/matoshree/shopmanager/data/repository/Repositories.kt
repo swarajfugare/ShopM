@@ -11,6 +11,7 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.callbackFlow
 import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.channels.awaitClose
 import kotlinx.coroutines.launch
 import java.util.UUID
@@ -163,65 +164,85 @@ fun BillWithItems.toDomain(): Bill {
     )
 }
 
+fun toBillEntities(bill: Bill, syncStatus: SyncStatus = SyncStatus.SYNCED): Pair<BillEntity, List<BillItemEntity>> {
+    val billEntity = BillEntity(
+        id = 0L,
+        serverId = bill.id,
+        shopId = bill.shopId,
+        customerId = bill.customerId,
+        customerName = bill.customerName,
+        customerMobile = bill.customerMobile,
+        billNumber = bill.billNumber,
+        transactionUuid = bill.transactionUuid,
+        saleType = bill.saleType,
+        subtotal = bill.subtotal,
+        discountType = bill.discountType,
+        discountValue = bill.discountValue,
+        discountAmount = bill.discountAmount,
+        taxAmount = bill.taxAmount,
+        finalAmount = bill.finalAmount,
+        costAmount = bill.costAmount,
+        estimatedProfit = bill.estimatedProfit,
+        actualProfit = bill.actualProfit,
+        profitType = bill.profitType,
+        paymentMethod = bill.paymentMethod,
+        paymentStatus = bill.paymentStatus,
+        note = bill.note,
+        billDate = bill.billDate,
+        shopNameSnapshot = bill.shopNameSnapshot,
+        shopAddressSnapshot = bill.shopAddressSnapshot,
+        shopMobileSnapshot = bill.shopMobileSnapshot,
+        shopGstinSnapshot = bill.shopGstinSnapshot,
+        showGstinSnapshot = bill.showGstinSnapshot,
+        syncStatus = syncStatus,
+        isVoided = bill.isVoided,
+        voidReason = bill.voidReason,
+        createdAt = System.currentTimeMillis()
+    )
+    val itemEntities = bill.items.map { item ->
+        BillItemEntity(
+            id = 0,
+            billId = 0L,
+            productId = item.productId,
+            productNameSnapshot = item.productName,
+            skuSnapshot = item.sku,
+            categoryId = item.categoryId,
+            quantity = item.quantity,
+            sellingPrice = item.sellingPrice,
+            costPrice = item.costPrice,
+            discountAmount = item.discountAmount,
+            lineTotal = item.lineTotal,
+            lineCost = item.lineCost,
+            lineProfit = item.lineProfit
+        )
+    }
+    return Pair(billEntity, itemEntities)
+}
+
 class BillRepository(
     private val database: AppDatabase? = null,
     private val firestoreRepo: FirestoreBillRepository = FirestoreBillRepository()
 ) {
     fun getRecentBills(limit: Int = 100): Flow<List<Bill>> {
         if (database == null) return firestoreRepo.getRecentBills(limit)
-        return callbackFlow {
-            // 1. Observe Room reactively - whenever ANY bill is added/changed locally, emit immediately!
-            val roomJob = kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.IO).launch {
-                try {
-                    database.billDao().getAllBills(limit).distinctUntilChanged().collect { entities ->
-                        val domainBills = entities.map { it.toDomain() }
-                            .distinctBy { it.canonicalKey() }
-                        trySend(domainBills)
-                    }
-                } catch (e: Exception) {
-                    Log.w("BillRepo", "Room bills observation notice: ${e.message}")
-                }
-            }
-
-            // 2. In parallel, sync new cloud bills from Firestore and cache to Room only if missing or updated
-            val cloudJob = kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.IO).launch {
-                try {
-                    firestoreRepo.getRecentBills(limit).collect { cloudBills ->
-                        if (cloudBills.isNotEmpty()) {
-                            val billsToUpsert = mutableListOf<Pair<BillEntity, List<BillItemEntity>>>()
-                            for (b in cloudBills) {
-                                try {
-                                    val existing = (if (b.transactionUuid.isNotBlank()) database.billDao().getBillByUuid(b.transactionUuid) else null)
-                                        ?: (if (b.id > 0) database.billDao().getBillByServerId(b.id) else null)
-                                    val needsSync = existing == null ||
-                                        existing.bill.isVoided != b.isVoided ||
-                                        existing.bill.paymentStatus != b.paymentStatus ||
-                                        Math.abs(existing.bill.finalAmount - b.finalAmount) > 0.01 ||
-                                        (b.items.isNotEmpty() && existing.items.isEmpty())
-
-                                    if (needsSync) {
-                                        billsToUpsert.add(toBillEntities(b))
-                                    }
-                                } catch (_: Exception) {}
-                            }
-                            if (billsToUpsert.isNotEmpty()) {
-                                database.billDao().upsertServerBills(billsToUpsert)
-                            }
-                        }
-                    }
-                } catch (e: Exception) {
-                    Log.w("BillRepo", "Cloud bills collection notice: ${e.message}")
-                }
-            }
-
-            awaitClose {
-                roomJob.cancel()
-                cloudJob.cancel()
-            }
+        return database.billDao().getRecentBills(limit).map { entities ->
+            entities.map { it.toDomain() }
         }.distinctUntilChanged()
     }
 
-    fun getAllBills(limit: Int = 500): Flow<List<Bill>> = getRecentBills(limit)
+    fun getAllBills(limit: Int = 500): Flow<List<Bill>> {
+        if (database == null) return firestoreRepo.getAllBills(limit)
+        return database.billDao().getAllBills(limit).map { entities ->
+            entities.map { it.toDomain() }
+        }.distinctUntilChanged()
+    }
+
+    fun getTodayBills(todayDatePrefix: String): Flow<List<Bill>> {
+        if (database == null) return kotlinx.coroutines.flow.flowOf(emptyList())
+        return database.billDao().getTodayBillsFlow(todayDatePrefix).map { entities ->
+            entities.map { it.toDomain() }
+        }.distinctUntilChanged()
+    }
 
     suspend fun getBillById(id: Long): Bill? {
         val cloudBill = try {
@@ -296,61 +317,6 @@ class BillRepository(
         }
 
         return billToSave
-    }
-
-    private fun toBillEntities(bill: Bill, syncStatus: SyncStatus = SyncStatus.SYNCED): Pair<BillEntity, List<BillItemEntity>> {
-        val billEntity = BillEntity(
-            id = 0L,
-            serverId = bill.id,
-            shopId = bill.shopId,
-            customerId = bill.customerId,
-            customerName = bill.customerName,
-            customerMobile = bill.customerMobile,
-            billNumber = bill.billNumber,
-            transactionUuid = bill.transactionUuid,
-            saleType = bill.saleType,
-            subtotal = bill.subtotal,
-            discountType = bill.discountType,
-            discountValue = bill.discountValue,
-            discountAmount = bill.discountAmount,
-            taxAmount = bill.taxAmount,
-            finalAmount = bill.finalAmount,
-            costAmount = bill.costAmount,
-            estimatedProfit = bill.estimatedProfit,
-            actualProfit = bill.actualProfit,
-            profitType = bill.profitType,
-            paymentMethod = bill.paymentMethod,
-            paymentStatus = bill.paymentStatus,
-            note = bill.note,
-            billDate = bill.billDate,
-            shopNameSnapshot = bill.shopNameSnapshot,
-            shopAddressSnapshot = bill.shopAddressSnapshot,
-            shopMobileSnapshot = bill.shopMobileSnapshot,
-            shopGstinSnapshot = bill.shopGstinSnapshot,
-            showGstinSnapshot = bill.showGstinSnapshot,
-            syncStatus = syncStatus,
-            isVoided = bill.isVoided,
-            voidReason = bill.voidReason,
-            createdAt = System.currentTimeMillis()
-        )
-        val itemEntities = bill.items.map { item ->
-            BillItemEntity(
-                id = 0,
-                billId = 0L,
-                productId = item.productId,
-                productNameSnapshot = item.productName,
-                skuSnapshot = item.sku,
-                categoryId = item.categoryId,
-                quantity = item.quantity,
-                sellingPrice = item.sellingPrice,
-                costPrice = item.costPrice,
-                discountAmount = item.discountAmount,
-                lineTotal = item.lineTotal,
-                lineCost = item.lineCost,
-                lineProfit = item.lineProfit
-            )
-        }
-        return Pair(billEntity, itemEntities)
     }
 
     private suspend fun cacheBillToRoom(database: AppDatabase, bill: Bill, syncStatus: SyncStatus = SyncStatus.SYNCED) {
@@ -475,9 +441,10 @@ class BillRepository(
 }
 
 class UdhariRepository(
-    private val firestoreRepo: FirestoreUdhariRepository = FirestoreUdhariRepository()
+    private val firestoreRepo: FirestoreUdhariRepository = FirestoreUdhariRepository(),
+    private val syncManager: com.matoshree.shopmanager.sync.SyncManager? = null
 ) {
-    fun getAllTransactions(): Flow<List<UdhariTransaction>> = firestoreRepo.getAllTransactions()
+    fun getAllTransactions(): Flow<List<UdhariTransaction>> = syncManager?.allUdhariTransactions ?: firestoreRepo.getAllTransactions()
     fun getTransactionsForCustomer(customerId: Long, customerMobile: String? = null): Flow<List<UdhariTransaction>> = firestoreRepo.getTransactionsForCustomer(customerId, customerMobile)
     fun getTransactionsForBill(billId: Long): Flow<List<UdhariTransaction>> = firestoreRepo.getTransactionsForBill(billId)
     suspend fun recordPayment(payment: UdhariTransaction): Result<Unit> = firestoreRepo.recordPayment(payment)
@@ -500,54 +467,8 @@ class CustomerRepository(
 ) {
     fun getAllCustomers(): Flow<List<Customer>> {
         if (database == null) return firestoreRepo.getAllCustomers()
-        return callbackFlow {
-            // 1. Observe Room reactively - authoritative local store with stable persistent IDs
-            val roomJob = kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.IO).launch {
-                try {
-                    database.customerDao().getAllCustomers().distinctUntilChanged().collect { entities ->
-                        val domainCustomers = entities.map { it.toDomain() }
-                            .distinctBy { it.canonicalKey() }
-                        trySend(domainCustomers)
-                    }
-                } catch (e: Exception) {
-                    Log.w("CustomerRepo", "Room customers observation note: ${e.message}")
-                }
-            }
-
-            // 2. In parallel, sync cloud customers into Room without emitting raw unstable cloud models
-            val cloudJob = kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.IO).launch {
-                try {
-                    firestoreRepo.getAllCustomers().collect { cloudCusts ->
-                        val custsToUpsert = mutableListOf<CustomerEntity>()
-                        for (c in cloudCusts) {
-                            try {
-                                val existing = if (c.mobile.isNotBlank()) database.customerDao().getCustomerByMobile(c.mobile) else null
-                                val needsUpsert = existing == null ||
-                                    existing.name != c.name ||
-                                    existing.address != c.address ||
-                                    existing.totalBills != c.totalBills ||
-                                    Math.abs(existing.lifetimeSpend - c.lifetimeSpend) > 0.01 ||
-                                    existing.isActive != c.isActive
-
-                                if (needsUpsert) {
-                                    val entity = c.toEntity().copy(serverId = if (c.id > 0) c.id else null)
-                                    custsToUpsert.add(entity)
-                                }
-                            } catch (_: Exception) {}
-                        }
-                        if (custsToUpsert.isNotEmpty()) {
-                            database.customerDao().upsertServerCustomers(custsToUpsert)
-                        }
-                    }
-                } catch (e: Exception) {
-                    Log.w("CustomerRepo", "Cloud customers sync note: ${e.message}")
-                }
-            }
-
-            awaitClose {
-                roomJob.cancel()
-                cloudJob.cancel()
-            }
+        return database.customerDao().getAllCustomers().map { entities ->
+            entities.map { it.toDomain() }.distinctBy { it.canonicalKey() }
         }.distinctUntilChanged()
     }
 

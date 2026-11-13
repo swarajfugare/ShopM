@@ -19,6 +19,9 @@ interface BillDao {
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertBill(bill: BillEntity): Long
 
+    @Update
+    suspend fun updateBill(bill: BillEntity)
+
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertBillItems(items: List<BillItemEntity>)
 
@@ -33,6 +36,14 @@ interface BillDao {
     @Transaction
     @Query("SELECT * FROM bills WHERE isVoided = 0 ORDER BY billDate DESC, id DESC LIMIT :limit")
     fun getRecentBills(limit: Int = 50): Flow<List<BillWithItems>>
+
+    @Transaction
+    @Query("SELECT * FROM bills WHERE billDate LIKE :datePrefix || '%' AND isVoided = 0 ORDER BY billDate DESC, id DESC")
+    fun getTodayBillsFlow(datePrefix: String): Flow<List<BillWithItems>>
+
+    @Transaction
+    @Query("SELECT * FROM bills WHERE billDate >= :startDate AND isVoided = 0 ORDER BY billDate DESC, id DESC")
+    fun getWeekBillsFlow(startDate: String): Flow<List<BillWithItems>>
 
     @Transaction
     @Query("SELECT * FROM bills WHERE id = :id LIMIT 1")
@@ -127,23 +138,41 @@ interface BillDao {
             // Update existing bill with its existing local Room ID only if data changed
             val isDataChanged = existing.bill.isVoided != bill.isVoided ||
                 existing.bill.paymentStatus != bill.paymentStatus ||
-                Math.abs(existing.bill.finalAmount - bill.finalAmount) > 0.01
+                Math.abs(existing.bill.finalAmount - bill.finalAmount) > 0.01 ||
+                existing.bill.customerName != bill.customerName ||
+                existing.bill.customerMobile != bill.customerMobile ||
+                existing.bill.note != bill.note ||
+                existing.bill.paymentMethod != bill.paymentMethod ||
+                existing.bill.billDate != bill.billDate ||
+                existing.bill.voidReason != bill.voidReason ||
+                (items.isNotEmpty() && existing.items.isEmpty())
 
             if (isDataChanged) {
                 val updated = bill.copy(
                     id = existing.bill.id,
+                    serverId = existing.bill.serverId ?: bill.serverId,
                     syncStatus = SyncStatus.SYNCED,
                     billDate = if (bill.billDate.isNotBlank()) bill.billDate else existing.bill.billDate,
                     customerId = bill.customerId ?: existing.bill.customerId,
                     customerMobile = if (!bill.customerMobile.isNullOrBlank()) bill.customerMobile else existing.bill.customerMobile,
                     customerName = if (!bill.customerName.isNullOrBlank()) bill.customerName else existing.bill.customerName
                 )
-                insertBill(updated)
-                // When REPLACE runs, SQLite CASCADE-deletes items; re-insert items to preserve them!
-                val itemsToInsert = if (items.isNotEmpty()) items else existing.items
-                if (itemsToInsert.isNotEmpty()) {
-                    val itemsWithId = itemsToInsert.map { it.copy(id = 0, billId = existing.bill.id) }
-                    insertBillItems(itemsWithId)
+                // IN-PLACE UPDATE! Do NOT use REPLACE so SQLite foreign key cascade delete on items is NOT triggered!
+                updateBill(updated)
+
+                // Only replace items if items actually differ to prevent unnecessary DB churn
+                if (items.isNotEmpty()) {
+                    val itemsDiffer = existing.items.size != items.size ||
+                        items.zip(existing.items).any { (inc, cur) ->
+                            inc.quantity != cur.quantity ||
+                            Math.abs(inc.sellingPrice - cur.sellingPrice) > 0.01 ||
+                            inc.productNameSnapshot != cur.productNameSnapshot
+                        }
+                    if (itemsDiffer) {
+                        deleteBillItems(existing.bill.id)
+                        val itemsWithId = items.map { it.copy(id = 0, billId = existing.bill.id) }
+                        insertBillItems(itemsWithId)
+                    }
                 }
             } else {
                 if (existing.bill.syncStatus != SyncStatus.SYNCED && bill.syncStatus == SyncStatus.SYNCED) {

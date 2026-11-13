@@ -425,13 +425,18 @@ class FirestoreCustomerRepository {
     }
 
     suspend fun saveCustomer(customer: Customer): String {
-        // If updating an existing customer, check if document already exists
-        var docId = if (customer.id > 0) "cust_${customer.id}" else "cust_${System.currentTimeMillis()}_${UUID.randomUUID().toString().take(5)}"
         val cleanMobile = com.matoshree.shopmanager.utils.PhoneUtils.clean10DigitMobileInput(customer.mobile)
+        var docId = if (cleanMobile.length == 10) {
+            "cust_m_$cleanMobile"
+        } else if (customer.id > 0) {
+            "cust_${customer.id}"
+        } else {
+            "cust_${System.currentTimeMillis()}_${UUID.randomUUID().toString().take(5)}"
+        }
 
         val snapshot = try {
             if (FirebaseManager.isNetworkAvailable()) {
-                kotlinx.coroutines.withTimeoutOrNull(600) {
+                kotlinx.coroutines.withTimeoutOrNull(2500) {
                     FirebaseManager.customersCollection().get().await()
                 } ?: FirebaseManager.customersCollection().get(com.google.firebase.firestore.Source.CACHE).await()
             } else {
@@ -443,8 +448,9 @@ class FirestoreCustomerRepository {
 
         val existingDoc = snapshot?.documents?.find {
             val dto = it.toObject(CustomerDto::class.java)
+            (cleanMobile.length == 10 && dto?.mobile?.isNotBlank() == true && com.matoshree.shopmanager.utils.PhoneUtils.clean10DigitMobileInput(dto.mobile) == cleanMobile) ||
             (customer.id > 0 && (dto?.legacyId == customer.id || (it.id.hashCode().toLong() and 0x7FFFFFFFFFFFFFFFL) == customer.id)) ||
-            (cleanMobile.length == 10 && dto?.mobile?.isNotBlank() == true && com.matoshree.shopmanager.utils.PhoneUtils.clean10DigitMobileInput(dto.mobile) == cleanMobile)
+            (customer.name.isNotBlank() && dto?.name?.isNotBlank() == true && dto.name.trim().equals(customer.name.trim(), ignoreCase = true))
         }
         if (existingDoc != null) {
             docId = existingDoc.id

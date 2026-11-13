@@ -30,15 +30,20 @@ import com.matoshree.shopmanager.ui.components.MatoshreeCard
 import com.matoshree.shopmanager.ui.components.MatoshreeTopAppBar
 import com.matoshree.shopmanager.ui.components.StatusBadge
 import com.matoshree.shopmanager.ui.theme.*
+import com.matoshree.shopmanager.domain.usecase.ShopMetricsCalculator
 import com.matoshree.shopmanager.utils.CurrencyFormatter
 import com.matoshree.shopmanager.utils.DateUtils
-import kotlinx.coroutines.flow.MutableStateFlow
-import kotlinx.coroutines.flow.StateFlow
-import kotlinx.coroutines.flow.collectLatest
-import kotlinx.coroutines.flow.combine
-import kotlinx.coroutines.flow.debounce
-import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
+
+private data class DashboardMetrics(
+    val summary: DashboardSummary,
+    val todayCollected: Double,
+    val estProfit: Double,
+    val totalPending: Double,
+    val pendingCustCount: Int
+)
 
 class DashboardViewModel(
     private val billRepository: BillRepository,
@@ -73,103 +78,78 @@ class DashboardViewModel(
         }
     }
 
-    @OptIn(kotlinx.coroutines.FlowPreview::class)
+    private val currentDateFlow = flow {
+        while (true) {
+            emit(DateUtils.todayDate())
+            delay(60_000L)
+        }
+    }.distinctUntilChanged()
+
+    @OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class, kotlinx.coroutines.FlowPreview::class)
     private fun observeBills() {
         viewModelScope.launch {
-            combine(
-                billRepository.getAllBills(limit = 500).distinctUntilChanged(),
-                udhariRepository.getAllTransactions().distinctUntilChanged()
-            ) { bills, transactions ->
-                Pair(bills, transactions)
-            }.debounce(200).collectLatest { (bills, transactions) ->
-                val today = DateUtils.todayDate()
-                val currentMonthPrefix = today.take(7)
-                val todayBills = bills.filter { it.billDate.startsWith(today) && !it.isVoided }
+            currentDateFlow.flatMapLatest { today ->
+                val monthPrefix = today.take(7)
+                combine(
+                    billRepository.getTodayBills(today).distinctUntilChanged(),
+                    billRepository.getAllBills(limit = 1000).distinctUntilChanged(),
+                    udhariRepository.getAllTransactions().distinctUntilChanged()
+                ) { todayBills, allBills, transactions ->
+                    Triple(todayBills, allBills, transactions)
+                }.debounce(150).map { (todayBills, allBills, transactions) ->
+                    val todaySales = ShopMetricsCalculator.calculateTodaySales(todayBills)
+                    val todayBillsCount = todayBills.count { !it.isVoided }
+                    val avgOrder = if (todayBillsCount > 0) todaySales / todayBillsCount else 0.0
 
-                val todaySales = todayBills.sumOf { it.finalAmount }
-                val todayBillsCount = todayBills.size
-                val avgOrder = if (todayBillsCount > 0) todaySales / todayBillsCount else 0.0
+                    val cashSales = ShopMetricsCalculator.calculateCashSales(todayBills)
+                    val upiSales = ShopMetricsCalculator.calculateUpiSales(todayBills)
 
-                val cashSales = todayBills.filter { it.paymentMethod.name == "CASH" }.sumOf { it.paidAmount }
-                val upiSales = todayBills.filter { it.paymentMethod.name == "UPI" }.sumOf { it.paidAmount }
+                    val allMonthSales = ShopMetricsCalculator.calculateMonthlySales(allBills, monthPrefix)
+                    val target = 500000.0
+                    val progress = ((allMonthSales / target) * 100).coerceAtMost(100.0)
 
-                val allMonthSales = bills.filter { it.billDate.startsWith(currentMonthPrefix) && !it.isVoided }.sumOf { it.finalAmount }
-                val target = 500000.0
-                val progress = ((allMonthSales / target) * 100).coerceAtMost(100.0)
+                    val totalPending = ShopMetricsCalculator.calculateTotalPendingUdhari(allBills, transactions)
+                    val pendingCustCount = ShopMetricsCalculator.calculatePendingCustomersCount(allBills, transactions)
+                    val todayCollected = ShopMetricsCalculator.calculateTodayCollectedCredit(transactions, today)
+                    val estProfit = ShopMetricsCalculator.calculateTodayProfit(todayBills)
 
-                val activeBills = bills.filter { !it.isVoided }
-                val validTxs = transactions.filter { !it.isReversed }
-                val txBillIds = validTxs.filter { it.type == com.matoshree.shopmanager.domain.model.UdhariTransactionType.PAYMENT && it.billId != 0L }.map { it.billId }.toSet()
-                val txBillNumbers = validTxs.filter { it.type == com.matoshree.shopmanager.domain.model.UdhariTransactionType.PAYMENT && it.billNumber.isNotBlank() }.map { it.billNumber }.toSet()
+                    val sortedTodayBills = todayBills
+                        .filter { !it.isVoided }
+                        .distinctBy { it.canonicalKey() }
+                        .sortedWith(
+                            compareByDescending<Bill> { it.billDate }.thenByDescending { it.id }
+                        )
 
-                val totalBillCharges = activeBills.sumOf { it.finalAmount }
-                val manualCredits = validTxs.filter { it.billId == 0L && it.type == com.matoshree.shopmanager.domain.model.UdhariTransactionType.PURCHASE_CREDIT }.sumOf { it.amount }
-                val totalCharges = totalBillCharges + manualCredits
-
-                val txPayments = validTxs.filter { it.type == com.matoshree.shopmanager.domain.model.UdhariTransactionType.PAYMENT }.sumOf { it.amount }
-                val pureCashCheckoutPayments = activeBills.filter { b ->
-                    b.paymentStatus == com.matoshree.shopmanager.domain.model.PaymentStatus.PAID &&
-                    !txBillIds.contains(b.id) &&
-                    !txBillNumbers.contains(b.billNumber)
-                }.sumOf { it.finalAmount }
-                val totalCredits = txPayments + pureCashCheckoutPayments
-
-                val totalPending = (totalCharges - totalCredits).coerceAtLeast(0.0)
-                val unpaidBills = activeBills.filter { it.paymentStatus != com.matoshree.shopmanager.domain.model.PaymentStatus.PAID }
-
-                val pendingCustIds = unpaidBills.mapNotNull { it.customerId }.toMutableSet()
-                validTxs.filter { it.billId == 0L && it.type == com.matoshree.shopmanager.domain.model.UdhariTransactionType.PURCHASE_CREDIT }.forEach { pendingCustIds.add(it.customerId) }
-                val pendingCustCount = if (totalPending <= 0.01) 0 else pendingCustIds.size
-
-                val todayCollected = validTxs.filter { it.date.startsWith(today) && it.type == com.matoshree.shopmanager.domain.model.UdhariTransactionType.PAYMENT }.sumOf { it.amount }
-                if (todayCollectedCredit.value != todayCollected) {
-                    todayCollectedCredit.value = todayCollected
-                }
-
-                val estProfit = todayBills.sumOf { bill ->
-                    if (bill.actualProfit > 0) bill.actualProfit else bill.finalAmount * 0.25
-                }
-                if (todayProfitEstimate.value != estProfit) {
-                    todayProfitEstimate.value = estProfit
-                }
-
-                if (udhariOutstanding.value != totalPending) {
-                    udhariOutstanding.value = totalPending
-                }
-                if (udhariPendingCount.value != pendingCustCount) {
-                    udhariPendingCount.value = pendingCustCount
-                }
-
-                // Task 1: Most recently added bills on top. Show today's bills only; if none, show this week's bills only
-                val sortedActiveBills = activeBills
-                    .distinctBy { it.canonicalKey() }
-                    .sortedWith(
-                        compareByDescending<Bill> { it.billDate }.thenByDescending { it.id }
+                    val newSummary = DashboardSummary(
+                        todaySales = todaySales,
+                        todayBillsCount = todayBillsCount,
+                        todayProfit = estProfit,
+                        averageOrderValue = avgOrder,
+                        monthlySales = allMonthSales,
+                        monthlyTarget = target,
+                        targetProgressPercent = progress,
+                        cashPayments = cashSales,
+                        upiPayments = upiSales,
+                        recentBills = sortedTodayBills,
+                        businessInsight = if (todayBillsCount > 0) "Today: $todayBillsCount bills generated with avg ₹${String.format("%.0f", avgOrder)}" else "Ready for today's sales at Matoshree Collection."
                     )
-                val todayBillsOnly = sortedActiveBills.filter { DateUtils.isToday(it.billDate) }
-                val weekBillsOnly = sortedActiveBills.filter { DateUtils.isThisWeek(it.billDate) }
-
-                val displayedBills = when {
-                    todayBillsOnly.isNotEmpty() -> todayBillsOnly
-                    weekBillsOnly.isNotEmpty() -> weekBillsOnly
-                    else -> emptyList()
+                    DashboardMetrics(newSummary, todayCollected, estProfit, totalPending, pendingCustCount)
                 }
-
-                val newSummary = DashboardSummary(
-                    todaySales = todaySales,
-                    todayBillsCount = todayBillsCount,
-                    todayProfit = estProfit,
-                    averageOrderValue = avgOrder,
-                    monthlySales = allMonthSales,
-                    monthlyTarget = target,
-                    targetProgressPercent = progress,
-                    cashPayments = cashSales,
-                    upiPayments = upiSales,
-                    recentBills = displayedBills,
-                    businessInsight = if (todayBillsCount > 0) "Today: $todayBillsCount bills generated with avg ₹${String.format("%.0f", avgOrder)}" else "Ready for today's sales at Matoshree Collection."
-                )
-                if (_summary.value != newSummary) {
-                    _summary.value = newSummary
+            }.collectLatest { metrics ->
+                if (todayCollectedCredit.value != metrics.todayCollected) {
+                    todayCollectedCredit.value = metrics.todayCollected
+                }
+                if (todayProfitEstimate.value != metrics.estProfit) {
+                    todayProfitEstimate.value = metrics.estProfit
+                }
+                if (udhariOutstanding.value != metrics.totalPending) {
+                    udhariOutstanding.value = metrics.totalPending
+                }
+                if (udhariPendingCount.value != metrics.pendingCustCount) {
+                    udhariPendingCount.value = metrics.pendingCustCount
+                }
+                if (_summary.value != metrics.summary) {
+                    _summary.value = metrics.summary
                 }
             }
         }
@@ -508,15 +488,9 @@ fun DashboardScreen(
                 }
             }
 
-            // Recent Bills Header (Task 1: Dynamic title for Today / This Week)
+            // Recent Bills Header (Today's Bills)
             item {
-                val hasTodayBills = summary.recentBills.any { DateUtils.isToday(it.billDate) }
-                val hasWeekBills = summary.recentBills.any { DateUtils.isThisWeek(it.billDate) }
-                val billsHeaderTitle = when {
-                    hasTodayBills -> "आजची बिले (${summary.recentBills.size})"
-                    hasWeekBills -> "या आठवड्यातील बिले (${summary.recentBills.size})"
-                    else -> "अलिकडील बिले"
-                }
+                val billsHeaderTitle = "आजची बिले (${summary.recentBills.size})"
 
                 Row(
                     modifier = Modifier.fillMaxWidth(),
@@ -536,7 +510,7 @@ fun DashboardScreen(
                 }
             }
 
-            // Recent Bills List (Task 1: Empty state with direct button to view all bills)
+            // Recent Bills List: Explicit empty state if no bills today
             if (summary.recentBills.isEmpty()) {
                 item {
                     MatoshreeCard {
@@ -554,7 +528,7 @@ fun DashboardScreen(
                                 modifier = Modifier.size(36.dp)
                             )
                             Text(
-                                text = "आज किंवा या आठवड्यात कोणतेही नवीन बिल तयार केलेले नाही.",
+                                text = "आज अद्याप कोणतीही बिले तयार केलेली नाहीत.",
                                 color = MutedCharcoal,
                                 fontSize = 13.sp,
                                 textAlign = androidx.compose.ui.text.style.TextAlign.Center

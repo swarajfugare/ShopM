@@ -113,7 +113,13 @@ data class CustomerEntity(
 ) {
     fun canonicalKey(): String {
         val clean = com.matoshree.shopmanager.utils.PhoneUtils.clean10DigitMobileInput(mobile)
-        return if (clean.length == 10) "mob_$clean" else "name_${name.trim().lowercase()}"
+        return when {
+            clean.length == 10 -> "mob_$clean"
+            name.isNotBlank() -> "name_${name.trim().lowercase()}"
+            serverId != null && serverId > 0L -> "cust_srv_$serverId"
+            id > 0L -> "cust_$id"
+            else -> "cust_unknown_${hashCode()}"
+        }
     }
 }
 
