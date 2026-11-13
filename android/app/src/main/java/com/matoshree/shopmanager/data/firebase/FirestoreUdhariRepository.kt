@@ -20,11 +20,13 @@ class FirestoreUdhariRepository {
      * Observes all Udhari transactions in realtime.
      */
     fun getAllTransactions(): Flow<List<UdhariTransaction>> = callbackFlow {
+        trySend(emptyList())
         val listener = FirebaseManager.udhariTransactionsCollection()
             .limit(1000)
             .addSnapshotListener { snapshot, error ->
                 if (error != null) {
                     Log.w(TAG, "Udhari transactions snapshot error: ${error.message}")
+                    trySend(emptyList())
                     return@addSnapshotListener
                 }
                 if (snapshot != null) {
@@ -42,12 +44,14 @@ class FirestoreUdhariRepository {
      * Matches by customerId OR customerMobile to ensure rock-solid consistency across local and cloud ID models.
      */
     fun getTransactionsForCustomer(customerId: Long, customerMobile: String? = null): Flow<List<UdhariTransaction>> = callbackFlow {
+        trySend(emptyList())
         val cleanMobile = customerMobile?.trim() ?: ""
         val listener = FirebaseManager.udhariTransactionsCollection()
             .limit(500)
             .addSnapshotListener { snapshot, error ->
                 if (error != null) {
                     Log.w(TAG, "Customer Udhari snapshot error: ${error.message}")
+                    trySend(emptyList())
                     return@addSnapshotListener
                 }
                 if (snapshot != null) {
@@ -72,11 +76,13 @@ class FirestoreUdhariRepository {
      * Observes Udhari transactions for a specific bill in realtime.
      */
     fun getTransactionsForBill(billId: Long): Flow<List<UdhariTransaction>> = callbackFlow {
+        trySend(emptyList())
         val listener = FirebaseManager.udhariTransactionsCollection()
             .whereEqualTo("billId", billId)
             .addSnapshotListener { snapshot, error ->
                 if (error != null) {
                     Log.w(TAG, "Bill Udhari snapshot error: ${error.message}")
+                    trySend(emptyList())
                     return@addSnapshotListener
                 }
                 if (snapshot != null) {

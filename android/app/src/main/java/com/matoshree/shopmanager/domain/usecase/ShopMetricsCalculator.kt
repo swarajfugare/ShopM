@@ -14,17 +14,17 @@ import com.matoshree.shopmanager.utils.DateUtils
 object ShopMetricsCalculator {
 
     fun calculateTodaySales(bills: List<Bill>, todayDatePrefix: String = DateUtils.todayDate()): Double {
-        return bills.filter { !it.isVoided && it.billDate.startsWith(todayDatePrefix) }
+        return bills.filter { !it.isVoided && (it.billDate.startsWith(todayDatePrefix) || DateUtils.isToday(it.billDate)) }
             .sumOf { it.finalAmount }
     }
 
     fun calculateMonthlySales(bills: List<Bill>, monthPrefix: String = DateUtils.todayDate().take(7)): Double {
-        return bills.filter { !it.isVoided && it.billDate.startsWith(monthPrefix) }
+        return bills.filter { !it.isVoided && (it.billDate.startsWith(monthPrefix) || DateUtils.isThisMonth(it.billDate)) }
             .sumOf { it.finalAmount }
     }
 
     fun calculateTodayProfit(bills: List<Bill>, todayDatePrefix: String = DateUtils.todayDate()): Double {
-        return bills.filter { !it.isVoided && it.billDate.startsWith(todayDatePrefix) }
+        return bills.filter { !it.isVoided && (it.billDate.startsWith(todayDatePrefix) || DateUtils.isToday(it.billDate)) }
             .sumOf { bill ->
                 if (bill.actualProfit > 0) bill.actualProfit else if (bill.estimatedProfit > 0) bill.estimatedProfit else 0.0
             }

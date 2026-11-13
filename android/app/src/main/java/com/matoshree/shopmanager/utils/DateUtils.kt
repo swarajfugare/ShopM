@@ -65,6 +65,22 @@ object DateUtils {
         }
     }
 
+    fun isThisMonth(dateString: String?): Boolean {
+        if (dateString.isNullOrBlank()) return false
+        val today = todayDate().take(7)
+        if (dateString.startsWith(today)) return true
+        return try {
+            val millis = parseDateToMillis(dateString)
+            if (millis <= 0L) return false
+            val calToday = java.util.Calendar.getInstance(kolkataTimeZone)
+            val calBill = java.util.Calendar.getInstance(kolkataTimeZone).apply { timeInMillis = millis }
+            calToday.get(java.util.Calendar.YEAR) == calBill.get(java.util.Calendar.YEAR) &&
+            calToday.get(java.util.Calendar.MONTH) == calBill.get(java.util.Calendar.MONTH)
+        } catch (_: Exception) {
+            false
+        }
+    }
+
     fun formatForDisplay(isoString: String?): String {
         if (isoString.isNullOrBlank()) return ""
         return try {

@@ -63,21 +63,58 @@ class DashboardFlowTest {
     }
 
     @Test
-    fun testDashboardHeader_showsZeroWhenBothTodayAndWeekEmpty() {
+    fun testDashboardHeader_fallsBackToRecentBillsWhenBothTodayAndWeekEmpty() {
         val todayBills = emptyList<Bill>()
         val weekBills = emptyList<Bill>()
+        val allBills = listOf(
+            createTestBill(id = 20, amount = 3000.0, date = "2026-10-15 10:00:00", voided = false)
+        )
 
         val activeTodayBills = todayBills.filter { !it.isVoided }
         val activeWeekBills = weekBills.filter { !it.isVoided }
+        val allActiveBills = allBills.filter { !it.isVoided }
 
         val isShowingToday = activeTodayBills.isNotEmpty()
-        val displayBills = if (isShowingToday) activeTodayBills else activeWeekBills
-        val billsHeaderTitle = if (isShowingToday) {
-            "आजची बिले (${activeTodayBills.size})"
-        } else if (activeWeekBills.isNotEmpty()) {
-            "या आठवड्याची बिले (${activeWeekBills.size})"
-        } else {
-            "आजची बिले (०)"
+        val displayBills = when {
+            isShowingToday -> activeTodayBills
+            activeWeekBills.isNotEmpty() -> activeWeekBills
+            allActiveBills.isNotEmpty() -> allActiveBills.take(15)
+            else -> emptyList()
+        }
+        val billsHeaderTitle = when {
+            isShowingToday -> "आजची बिले (${activeTodayBills.size})"
+            activeWeekBills.isNotEmpty() -> "या आठवड्याची बिले (${activeWeekBills.size})"
+            allActiveBills.isNotEmpty() -> "अलीकडील बिले (${displayBills.size})"
+            else -> "आजची बिले (०)"
+        }
+
+        assertFalse(isShowingToday)
+        assertEquals(1, displayBills.size)
+        assertEquals("अलीकडील बिले (1)", billsHeaderTitle)
+    }
+
+    @Test
+    fun testDashboardHeader_showsZeroWhenNoBillsExist() {
+        val todayBills = emptyList<Bill>()
+        val weekBills = emptyList<Bill>()
+        val allBills = emptyList<Bill>()
+
+        val activeTodayBills = todayBills.filter { !it.isVoided }
+        val activeWeekBills = weekBills.filter { !it.isVoided }
+        val allActiveBills = allBills.filter { !it.isVoided }
+
+        val isShowingToday = activeTodayBills.isNotEmpty()
+        val displayBills = when {
+            isShowingToday -> activeTodayBills
+            activeWeekBills.isNotEmpty() -> activeWeekBills
+            allActiveBills.isNotEmpty() -> allActiveBills.take(15)
+            else -> emptyList()
+        }
+        val billsHeaderTitle = when {
+            isShowingToday -> "आजची बिले (${activeTodayBills.size})"
+            activeWeekBills.isNotEmpty() -> "या आठवड्याची बिले (${activeWeekBills.size})"
+            allActiveBills.isNotEmpty() -> "अलीकडील बिले (${displayBills.size})"
+            else -> "आजची बिले (०)"
         }
 
         assertFalse(isShowingToday)
