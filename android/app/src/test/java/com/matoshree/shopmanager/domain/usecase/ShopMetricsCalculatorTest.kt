@@ -174,6 +174,69 @@ class ShopMetricsCalculatorTest {
         assertEquals(1, ShopMetricsCalculator.calculatePendingCustomersCount(listOf(partialBill), emptyList()))
     }
 
+    @Test
+    fun testLegacyCreditBills_countedFromTransactionsWhenBillAbsent() {
+        // Customer has credit transactions from older bills not present in Room bills (e.g. 86 bills only in Room)
+        val transactions = listOf(
+            UdhariTransaction(
+                id = "tx_credit_1",
+                customerId = 5,
+                customerName = "Older Customer",
+                customerMobile = "9811112222",
+                billId = 9999L,
+                billNumber = "BILL-OLD-1",
+                type = UdhariTransactionType.PURCHASE_CREDIT,
+                amount = 10000.0,
+                paymentMethod = PaymentMethod.CASH,
+                previousOutstanding = 0.0,
+                remainingOutstanding = 10000.0,
+                transactionUuid = "uuid-old-1",
+                date = "2026-09-01",
+                createdAt = 100L
+            ),
+            UdhariTransaction(
+                id = "tx_pay_1",
+                customerId = 5,
+                customerName = "Older Customer",
+                customerMobile = "9811112222",
+                billId = 9999L,
+                billNumber = "BILL-OLD-1",
+                type = UdhariTransactionType.PAYMENT,
+                amount = 3000.0,
+                paymentMethod = PaymentMethod.UPI,
+                previousOutstanding = 10000.0,
+                remainingOutstanding = 7000.0,
+                transactionUuid = "uuid-old-2",
+                date = "2026-09-15",
+                createdAt = 200L
+            )
+        )
+
+        // Bills list is empty (older bills pruned from cache)
+        val balances = ShopMetricsCalculator.calculateCustomerLedgerBalances(emptyList(), transactions)
+        assertEquals(7000.0, balances["mob_9811112222"] ?: 0.0, 0.001)
+        assertEquals(7000.0, ShopMetricsCalculator.calculateTotalPendingUdhari(emptyList(), transactions), 0.001)
+        assertEquals(1, ShopMetricsCalculator.calculatePendingCustomersCount(emptyList(), transactions))
+    }
+
+    @Test
+    fun testCustomerOpeningBalance_countedWhenNoTransactionsOrBills() {
+        val customers = listOf(
+            Customer(
+                id = 12,
+                shopId = 1,
+                name = "New Ledger Customer",
+                mobile = "9822223333",
+                outstandingBalance = 5500.0
+            )
+        )
+
+        val balances = ShopMetricsCalculator.calculateCustomerLedgerBalances(emptyList(), emptyList(), customers)
+        assertEquals(5500.0, balances["mob_9822223333"] ?: 0.0, 0.001)
+        assertEquals(5500.0, ShopMetricsCalculator.calculateTotalPendingUdhari(emptyList(), emptyList(), customers), 0.001)
+        assertEquals(1, ShopMetricsCalculator.calculatePendingCustomersCount(emptyList(), emptyList(), customers))
+    }
+
     private fun createBill(
         id: Long,
         amount: Double,

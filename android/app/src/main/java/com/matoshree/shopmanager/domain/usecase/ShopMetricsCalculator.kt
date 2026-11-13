@@ -120,11 +120,22 @@ object ShopMetricsCalculator {
         val txBillNumbers = validTxs.filter { it.type == UdhariTransactionType.PAYMENT && it.billNumber.isNotBlank() }.map { it.billNumber }.toSet()
 
         val allCustomerKeys = mutableSetOf<String>()
+        customers.forEach { c ->
+            keyResolver(c.mobile, c.name, c.id)?.let { allCustomerKeys.add(it) }
+        }
         nonVoidBills.forEach { b ->
             keyResolver(b.customerMobile, b.customerName, b.customerId)?.let { allCustomerKeys.add(it) }
         }
         validTxs.forEach { tx ->
             keyResolver(tx.customerMobile, tx.customerName, tx.customerId)?.let { allCustomerKeys.add(it) }
+        }
+
+        val customerByKey = mutableMapOf<String, Customer>()
+        for (c in customers) {
+            val k = keyResolver(c.mobile, c.name, c.id)
+            if (k != null && (!customerByKey.containsKey(k) || c.outstandingBalance > (customerByKey[k]?.outstandingBalance ?: 0.0))) {
+                customerByKey[k] = c
+            }
         }
 
         val balances = mutableMapOf<String, Double>()
@@ -135,25 +146,38 @@ object ShopMetricsCalculator {
             val custTxs = validTxs.filter { tx ->
                 keyResolver(tx.customerMobile, tx.customerName, tx.customerId) == key
             }
+            val matchingCust = customerByKey[key]
 
-            val billCharges = custBills.sumOf { it.finalAmount }
-            val manualCredits = custTxs.filter { it.billId == 0L && it.type == UdhariTransactionType.PURCHASE_CREDIT }.sumOf { it.amount }
-            val totalCharges = billCharges + manualCredits
-
+            // 1. Transaction-based Udhari Ledger
+            val txCredits = custTxs.filter { it.type == UdhariTransactionType.PURCHASE_CREDIT }.sumOf { it.amount }
             val txPayments = custTxs.filter { it.type == UdhariTransactionType.PAYMENT }.sumOf { it.amount }
             val txReversals = custTxs.filter { it.type == UdhariTransactionType.REVERSAL }.sumOf { it.amount }
-            val netTxPayments = (txPayments - txReversals).coerceAtLeast(0.0)
+            val totalCredits = (txPayments - txReversals).coerceAtLeast(0.0)
 
-            // CRITICAL: Include upfront checkout payments on all bills (PAID and PARTIAL) when not already represented by a payment transaction!
-            val upfrontCheckoutPayments = custBills.filter { b ->
-                !txBillIds.contains(b.id) && !txBillNumbers.contains(b.billNumber)
+            // 2. Unrepresented Pending Bills (Bills that have pendingAmount > 0 and no matching transaction in custTxs)
+            val txBillIds = custTxs.mapNotNull { if (it.billId != 0L) it.billId else null }.toSet()
+            val txBillNumbers = custTxs.map { it.billNumber }.filter { it.isNotBlank() }.toSet()
+
+            val unrepresentedPending = custBills.filter { b ->
+                b.paymentStatus != PaymentStatus.PAID &&
+                b.pendingAmount > 0.01 &&
+                !txBillIds.contains(b.id) &&
+                !txBillNumbers.contains(b.billNumber)
             }.sumOf { b ->
-                if (b.paymentStatus == PaymentStatus.PAID) b.finalAmount else b.paidAmount
+                if (b.pendingAmount > 0.0) b.pendingAmount else (b.finalAmount - b.paidAmount).coerceAtLeast(0.0)
             }
 
-            val totalCredits = netTxPayments + upfrontCheckoutPayments
-            val due = (totalCharges - totalCredits).coerceAtLeast(0.0)
-            balances[key] = due
+            val totalDebits = txCredits + unrepresentedPending
+
+            // 3. Fallback to customer's recorded outstandingBalance if no transactions or bills exist
+            val recordedBalance = if (custTxs.isEmpty() && custBills.isEmpty() && matchingCust != null) {
+                matchingCust.outstandingBalance.coerceAtLeast(0.0)
+            } else {
+                0.0
+            }
+
+            val totalDue = ((totalDebits - totalCredits) + recordedBalance).coerceAtLeast(0.0)
+            balances[key] = totalDue
         }
         return balances
     }

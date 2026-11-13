@@ -108,6 +108,7 @@ data class CustomerEntity(
     val notes: String? = null,
     val totalBills: Int = 0,
     val lifetimeSpend: Double = 0.0,
+    val outstandingBalance: Double = 0.0,
     val firstPurchaseAt: String? = null,
     val lastPurchaseAt: String? = null,
     val isActive: Boolean = true,

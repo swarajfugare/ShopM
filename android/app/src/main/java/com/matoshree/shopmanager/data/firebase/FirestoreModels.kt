@@ -260,8 +260,9 @@ data class BillDto(
         val pMethod = try { PaymentMethod.valueOf(paymentMethod) } catch (e: Exception) { PaymentMethod.CASH }
         val pStatus = try { PaymentStatus.valueOf(paymentStatus) } catch (e: Exception) { PaymentStatus.PAID }
 
-        val actualPaid = if (paidAmount > 0.0 || pendingAmount > 0.0) paidAmount else if (pStatus == PaymentStatus.PAID) finalAmount else 0.0
-        val actualPending = if (paidAmount > 0.0 || pendingAmount > 0.0) pendingAmount else if (pStatus == PaymentStatus.PAID) 0.0 else finalAmount
+        val paymentSum = if (payments.isNotEmpty()) payments.filter { it.status == "PAID" || it.status.isBlank() }.sumOf { it.amount } else 0.0
+        val effectivePaid = if (paidAmount > 0.0) paidAmount else if (paymentSum > 0.0) paymentSum else if (pStatus == PaymentStatus.PAID) finalAmount else 0.0
+        val effectivePending = if (pendingAmount > 0.0) pendingAmount else if (effectivePaid > 0.0) (finalAmount - effectivePaid).coerceAtLeast(0.0) else if (pStatus == PaymentStatus.PAID) 0.0 else finalAmount
 
         return Bill(
             id = legacyId ?: (id.hashCode().toLong() and 0x7FFFFFFFFFFFFFFFL),
@@ -278,8 +279,8 @@ data class BillDto(
             discountAmount = discountAmount,
             taxAmount = taxAmount,
             finalAmount = finalAmount,
-            paidAmount = actualPaid,
-            pendingAmount = actualPending,
+            paidAmount = effectivePaid,
+            pendingAmount = effectivePending,
             dueDate = dueDate,
             costAmount = costAmount,
             estimatedProfit = estimatedProfit,

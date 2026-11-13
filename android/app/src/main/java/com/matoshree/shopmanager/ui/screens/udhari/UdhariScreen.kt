@@ -78,46 +78,21 @@ class UdhariViewModel(
         val validTxs = transactions.filter { !it.isReversed }.distinctBy { if (it.transactionUuid.isNotBlank()) it.transactionUuid else "${it.id}_${it.billId}" }
         val uniqueCustomers = customers.distinctBy { it.canonicalKey() }
 
+        val keyResolver = ShopMetricsCalculator.buildCustomerKeyResolver(uniqueCustomers, activeBills, validTxs)
+        val ledgerBalances = ShopMetricsCalculator.calculateCustomerLedgerBalances(activeBills, validTxs, uniqueCustomers)
+
         uniqueCustomers.map { customer ->
-            val cleanCustMob = com.matoshree.shopmanager.utils.PhoneUtils.clean10DigitMobileInput(customer.mobile)
-            val custName = customer.name.trim()
+            val customerKey = keyResolver(customer.mobile, customer.name, customer.id) ?: customer.canonicalKey()
+            val totalPendingFromBills = ledgerBalances[customerKey] ?: 0.0
 
             val custBills = activeBills.filter { b ->
-                val bCleanMob = com.matoshree.shopmanager.utils.PhoneUtils.clean10DigitMobileInput(b.customerMobile ?: "")
-                if (cleanCustMob.length == 10) {
-                    cleanCustMob == bCleanMob
-                } else {
-                    (custName.isNotBlank() && b.customerName != null && b.customerName.trim().equals(custName, ignoreCase = true)) ||
-                    (customer.id > 0 && b.customerId == customer.id)
-                }
+                keyResolver(b.customerMobile, b.customerName, b.customerId) == customerKey
             }
             val custTxs = validTxs.filter { tx ->
-                val txCleanMob = com.matoshree.shopmanager.utils.PhoneUtils.clean10DigitMobileInput(tx.customerMobile)
-                if (cleanCustMob.length == 10) {
-                    cleanCustMob == txCleanMob
-                } else {
-                    (custName.isNotBlank() && tx.customerName.trim().equals(custName, ignoreCase = true)) ||
-                    (customer.id > 0 && tx.customerId == customer.id)
-                }
+                keyResolver(tx.customerMobile, tx.customerName, tx.customerId) == customerKey
             }
 
-            val manualCredits = custTxs.filter { it.billId == 0L && it.type == UdhariTransactionType.PURCHASE_CREDIT }.sumOf { it.amount }
-            val custPayments = custTxs.filter { it.type == UdhariTransactionType.PAYMENT }.sumOf { it.amount }
-            val custReversals = custTxs.filter { it.type == UdhariTransactionType.REVERSAL }.sumOf { it.amount }
-            val netCustPayments = (custPayments - custReversals).coerceAtLeast(0.0)
-
-            val txBillIds = custTxs.filter { it.type == UdhariTransactionType.PAYMENT && it.billId != 0L }.map { it.billId }.toSet()
-            val txBillNumbers = custTxs.filter { it.type == UdhariTransactionType.PAYMENT && it.billNumber.isNotBlank() }.map { it.billNumber }.toSet()
-
-            val totalPurchases = custBills.sumOf { it.finalAmount } + manualCredits
-            val upfrontCheckoutPayments = custBills.filter { b ->
-                !txBillIds.contains(b.id) && !txBillNumbers.contains(b.billNumber)
-            }.sumOf { b ->
-                if (b.paymentStatus == PaymentStatus.PAID) b.finalAmount else b.paidAmount
-            }
-            val totalCredits = netCustPayments + upfrontCheckoutPayments
-
-            val totalPendingFromBills = (totalPurchases - totalCredits).coerceAtLeast(0.0)
+            val totalPurchases = custBills.sumOf { it.finalAmount } + custTxs.filter { it.type == UdhariTransactionType.PURCHASE_CREDIT && it.billId == 0L }.sumOf { it.amount }
             val totalPaid = (totalPurchases - totalPendingFromBills).coerceAtLeast(0.0)
 
             val pendingBills = custBills.filter { it.paymentStatus != PaymentStatus.PAID && it.pendingAmount > 0.01 }
@@ -133,7 +108,7 @@ class UdhariViewModel(
                 totalOutstanding = totalPendingFromBills,
                 totalPurchases = totalPurchases,
                 totalPaid = totalPaid,
-                pendingBillsCount = pendingBills.size + (if (manualCredits > 0.01) 1 else 0),
+                pendingBillsCount = pendingBills.size + (if (custTxs.any { it.type == UdhariTransactionType.PURCHASE_CREDIT && it.billId == 0L }) 1 else 0),
                 lastPaymentDate = lastPayment?.date,
                 lastPaymentAmount = lastPayment?.amount,
                 oldestDueDate = oldestDueDate,

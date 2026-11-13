@@ -212,45 +212,8 @@ class CustomerViewModel(
                     customerTransactions.value = validTxs
                 }
 
-                // 1. Authoritative Outstanding Balance Calculation (Unified with UdhariScreen)
                 val txBillIds = validTxs.filter { it.type == UdhariTransactionType.PAYMENT && it.billId != 0L }.map { it.billId }.toSet()
                 val txBillNumbers = validTxs.filter { it.type == UdhariTransactionType.PAYMENT && it.billNumber.isNotBlank() }.map { it.billNumber }.toSet()
-
-                val totalBillCharges = customerSpecificBills.sumOf { it.finalAmount }
-                val manualUdhariDebits = validTxs.filter { it.billId == 0L && it.type == UdhariTransactionType.PURCHASE_CREDIT }.sumOf { it.amount }
-                val totalCharges = totalBillCharges + manualUdhariDebits
-
-                val txPayments = validTxs.filter { it.type == UdhariTransactionType.PAYMENT }.sumOf { it.amount }
-                val txReversals = validTxs.filter { it.type == UdhariTransactionType.REVERSAL }.sumOf { it.amount }
-                val netTxPayments = (txPayments - txReversals).coerceAtLeast(0.0)
-
-                // CRITICAL: Include upfront checkout payments on all bills (PAID and PARTIAL) when not already represented by a payment transaction!
-                val upfrontCheckoutPayments = customerSpecificBills.filter { b ->
-                    !txBillIds.contains(b.id) && !txBillNumbers.contains(b.billNumber)
-                }.sumOf { b ->
-                    if (b.paymentStatus == PaymentStatus.PAID) b.finalAmount else b.paidAmount
-                }
-                val totalCredits = netTxPayments + upfrontCheckoutPayments
-
-                val totalPending = (totalCharges - totalCredits).coerceAtLeast(0.0)
-
-                if (Math.abs(customerOutstandingDue.value - totalPending) > 0.001) {
-                    customerOutstandingDue.value = totalPending
-                }
-                val newProfile = currentCust?.copy(outstandingBalance = totalPending)
-                if (newProfile != null && (selectedCustomerProfile.value?.outstandingBalance != totalPending || selectedCustomerProfile.value?.id != newProfile.id || selectedCustomerProfile.value?.name != newProfile.name)) {
-                    selectedCustomerProfile.value = newProfile
-                }
-
-                // Auto-sync customer cached Firestore balance ONCE per session to prevent infinite snapshot loops
-                if (currentCust != null && !syncedCustomerIds.contains(customerId) && Math.abs(currentCust.outstandingBalance - totalPending) > 0.5) {
-                    syncedCustomerIds.add(customerId)
-                    viewModelScope.launch(kotlinx.coroutines.Dispatchers.IO) {
-                        try {
-                            customerRepository.saveCustomer(currentCust.copy(outstandingBalance = totalPending))
-                        } catch (_: Exception) {}
-                    }
-                }
 
                 // 2. Tab 2: Created Udhari Records (ONLY created debt charges; NO payment entries)
                 val createdUdhariEntries = mutableListOf<UdhariLedgerEntry>()
@@ -443,26 +406,30 @@ class CustomerViewModel(
                         )
                     )
 
-                    // If bill was fully paid at checkout and no duplicate transaction exists in validTxs
+                    // If bill had an upfront payment (PAID or PARTIAL) and no duplicate transaction exists in validTxs
                     val hasCheckoutPayInTxs = validTxs.any {
                         it.type == UdhariTransactionType.PAYMENT &&
-                        (it.billId == b.id || (it.billNumber.isNotBlank() && it.billNumber == b.billNumber))
+                        ((it.billId != 0L && it.billId == b.id) ||
+                         (it.billNumber.isNotBlank() && it.billNumber == b.billNumber))
                     }
-                    if (!hasCheckoutPayInTxs && b.paymentStatus == PaymentStatus.PAID) {
-                        vahiEvents.add(
-                            KhatavahiEntry(
-                                id = "bill_pay_${b.id}",
-                                date = b.billDate,
-                                timeMillis = billTimeMillis + 200L,
-                                description = "बिल भरणा (${b.paymentMethod.name})",
-                                isCredit = true,
-                                amount = b.finalAmount,
-                                runningBalance = 0.0,
-                                billId = b.id,
-                                billNumber = b.billNumber,
-                                paymentMethod = b.paymentMethod
+                    if (!hasCheckoutPayInTxs) {
+                        val upfrontPay = if (b.paymentStatus == PaymentStatus.PAID) b.finalAmount else b.paidAmount
+                        if (upfrontPay > 0.01) {
+                            vahiEvents.add(
+                                KhatavahiEntry(
+                                    id = "bill_pay_${b.id}",
+                                    date = b.billDate,
+                                    timeMillis = billTimeMillis + 200L,
+                                    description = "बिल भरणा (${b.paymentMethod.name})",
+                                    isCredit = true,
+                                    amount = upfrontPay,
+                                    runningBalance = 0.0,
+                                    billId = b.id,
+                                    billNumber = b.billNumber,
+                                    paymentMethod = b.paymentMethod
+                                )
                             )
-                        )
+                        }
                     }
                 }
 
@@ -521,6 +488,25 @@ class CustomerViewModel(
 
                 if (customerKhatavahi.value != finalVahiList) {
                     customerKhatavahi.value = finalVahiList
+                }
+
+                val finalDue = vahiRunningBal
+                if (Math.abs(customerOutstandingDue.value - finalDue) > 0.001) {
+                    customerOutstandingDue.value = finalDue
+                }
+                val newProfile = currentCust?.copy(outstandingBalance = finalDue)
+                if (newProfile != null && (selectedCustomerProfile.value?.outstandingBalance != finalDue || selectedCustomerProfile.value?.id != newProfile.id || selectedCustomerProfile.value?.name != newProfile.name)) {
+                    selectedCustomerProfile.value = newProfile
+                }
+
+                // Auto-sync customer cached Firestore balance ONCE per session to prevent infinite snapshot loops
+                if (currentCust != null && !syncedCustomerIds.contains(customerId) && Math.abs(currentCust.outstandingBalance - finalDue) > 0.5) {
+                    syncedCustomerIds.add(customerId)
+                    viewModelScope.launch(kotlinx.coroutines.Dispatchers.IO) {
+                        try {
+                            customerRepository.saveCustomer(currentCust.copy(outstandingBalance = finalDue))
+                        } catch (_: Exception) {}
+                    }
                 }
             }.collect()
         }
