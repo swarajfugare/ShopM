@@ -54,7 +54,11 @@ data class BillEntity(
     val isVoided: Boolean = false,
     val voidReason: String? = null,
     val createdAt: Long = System.currentTimeMillis()
-)
+) {
+    fun canonicalKey(): String {
+        return if (!transactionUuid.isNullOrBlank()) transactionUuid else if (billNumber.isNotBlank()) billNumber else "bill_$id"
+    }
+}
 
 @Entity(
     tableName = "bill_items",
@@ -106,7 +110,12 @@ data class CustomerEntity(
     val lastPurchaseAt: String? = null,
     val isActive: Boolean = true,
     val syncStatus: SyncStatus = SyncStatus.SYNCED
-)
+) {
+    fun canonicalKey(): String {
+        val clean = com.matoshree.shopmanager.utils.PhoneUtils.clean10DigitMobileInput(mobile)
+        return if (clean.length == 10) "mob_$clean" else "name_${name.trim().lowercase()}"
+    }
+}
 
 @Entity(tableName = "categories")
 data class CategoryEntity(

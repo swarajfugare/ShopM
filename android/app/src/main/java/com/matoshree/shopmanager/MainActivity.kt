@@ -83,6 +83,12 @@ class MainActivity : FragmentActivity() {
                     }
                 }
 
+                LaunchedEffect(isGoogleLoggedIn) {
+                    if (isGoogleLoggedIn) {
+                        syncManager.triggerImmediateSync()
+                    }
+                }
+
                 if (!securityStatus.isSecure) {
                     com.matoshree.shopmanager.ui.screens.lock.SecurityViolationScreen(
                         securityStatus = securityStatus,

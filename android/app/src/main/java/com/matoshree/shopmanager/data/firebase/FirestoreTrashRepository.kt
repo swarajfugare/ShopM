@@ -227,10 +227,12 @@ class FirestoreTrashRepository {
                     val batch = FirebaseManager.firestore.batch()
                     val bills = FirebaseManager.billsCollection().whereEqualTo("customerId", item.docId).get().await()
                     bills.documents.forEach { batch.delete(it.reference) }
-                    val legacyBills = FirebaseManager.billsCollection().whereEqualTo("legacyCustomerId", item.legacyId).get().await()
-                    legacyBills.documents.forEach { batch.delete(it.reference) }
-                    val txs = FirebaseManager.udhariTransactionsCollection().whereEqualTo("customerId", item.legacyId).get().await()
-                    txs.documents.forEach { batch.delete(it.reference) }
+                    if (item.legacyId != null && item.legacyId > 0) {
+                        val legacyBills = FirebaseManager.billsCollection().whereEqualTo("legacyCustomerId", item.legacyId).get().await()
+                        legacyBills.documents.forEach { batch.delete(it.reference) }
+                        val txs = FirebaseManager.udhariTransactionsCollection().whereEqualTo("customerId", item.legacyId).get().await()
+                        txs.documents.forEach { batch.delete(it.reference) }
+                    }
                     batch.commit().await()
                 } catch (e: Exception) {
                     Log.w(TAG, "Permanent delete customer cleanup note: ${e.message}")

@@ -173,12 +173,9 @@ class BillRepository(
             // 1. Observe Room reactively - whenever ANY bill is added/changed locally, emit immediately!
             val roomJob = kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.IO).launch {
                 try {
-                    try { database.billDao().deduplicateBillRows() } catch (_: Exception) {}
                     database.billDao().getAllBills(limit).distinctUntilChanged().collect { entities ->
                         val domainBills = entities.map { it.toDomain() }
-                            .distinctBy { b ->
-                                if (b.transactionUuid.isNotBlank()) b.transactionUuid else b.billNumber
-                            }
+                            .distinctBy { it.canonicalKey() }
                         trySend(domainBills)
                     }
                 } catch (e: Exception) {
@@ -507,13 +504,9 @@ class CustomerRepository(
             // 1. Observe Room reactively - authoritative local store with stable persistent IDs
             val roomJob = kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.IO).launch {
                 try {
-                    try { database.customerDao().deduplicateCustomerRows() } catch (_: Exception) {}
                     database.customerDao().getAllCustomers().distinctUntilChanged().collect { entities ->
                         val domainCustomers = entities.map { it.toDomain() }
-                            .distinctBy { cust ->
-                                val clean = com.matoshree.shopmanager.utils.PhoneUtils.clean10DigitMobileInput(cust.mobile)
-                                if (clean.length == 10) clean else "cust_${cust.id}_${cust.name.trim().lowercase()}"
-                            }
+                            .distinctBy { it.canonicalKey() }
                         trySend(domainCustomers)
                     }
                 } catch (e: Exception) {
@@ -597,7 +590,18 @@ class CustomerRepository(
 
         if (database != null) {
             try {
-                val entity = customer.toEntity().copy(syncStatus = initialStatus)
+                val cleanMob = com.matoshree.shopmanager.utils.PhoneUtils.clean10DigitMobileInput(customer.mobile)
+                val existing = (if (customer.id > 0) database.customerDao().getCustomerById(customer.id) else null)
+                    ?: (if (customer.id > 0) database.customerDao().getCustomerByServerId(customer.id) else null)
+                    ?: (if (cleanMob.length == 10) database.customerDao().getCustomerByMobileFuzzy(customer.mobile, cleanMob) else null)
+                    ?: (if (customer.name.isNotBlank()) database.customerDao().getCustomerByName(customer.name) else null)
+
+                val targetLocalId = existing?.id ?: if (customer.id > 0 && customer.id < 1_000_000_000L) customer.id else 0L
+                val entity = customer.toEntity().copy(
+                    id = targetLocalId,
+                    serverId = existing?.serverId,
+                    syncStatus = initialStatus
+                )
                 localId = database.customerDao().insertCustomer(entity)
             } catch (e: Exception) {
                 Log.w("CustomerRepo", "Room customer insert note: ${e.message}")

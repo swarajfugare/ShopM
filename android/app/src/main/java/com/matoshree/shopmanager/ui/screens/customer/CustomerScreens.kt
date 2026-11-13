@@ -697,7 +697,8 @@ class CustomerViewModel(
         return try {
             val id = customerRepository.saveCustomer(custToSave)
             val updatedCust = custToSave.copy(id = id)
-            _customers.value = (_customers.value.filter { it.id != id } + updatedCust).sortedBy { it.name }
+            val targetKey = updatedCust.canonicalKey()
+            _customers.value = (_customers.value.filterNot { it.canonicalKey() == targetKey } + updatedCust).sortedBy { it.name }
             if (targetId > 0 && selectedCustomerProfile.value?.id == targetId) {
                 selectedCustomerProfile.value = updatedCust
                 customerBills.value = emptyList()
@@ -754,6 +755,8 @@ class CustomerViewModel(
             try {
                 customerRepository.saveCustomer(customer.copy(outstandingBalance = newBalance))
             } catch (_: Exception) { }
+            val targetKey = customer.canonicalKey()
+            _customers.value = _customers.value.map { if (it.canonicalKey() == targetKey) it.copy(outstandingBalance = newBalance) else it }
             loadCustomerProfile(customer.id)
             Result.success(transaction)
         } else {
@@ -936,10 +939,7 @@ fun CustomersListScreen(
                 else -> cust.listTags.contains(selectedTagFilter)
             }
             matchesSearch && matchesTag
-        }.distinctBy { cust ->
-            val clean = PhoneUtils.clean10DigitMobileInput(cust.mobile)
-            if (clean.length == 10) clean else "cust_${cust.id}_${cust.name.trim().lowercase()}"
-        }
+        }.distinctBy { it.canonicalKey() }
         filtered.sortedWith { c1, c2 ->
             AlphabetUtils.compareAlphabetically(c1.name, c2.name)
         }
@@ -1189,7 +1189,7 @@ fun CustomersListScreen(
                         verticalArrangement = Arrangement.spacedBy(10.dp),
                         contentPadding = PaddingValues(bottom = 80.dp)
                     ) {
-                        items(filteredCustomers, key = { it.id }) { customer ->
+                        items(filteredCustomers, key = { it.canonicalKey() }) { customer ->
                             val isSelected = selectedIds.contains(customer.id)
                             CustomerListItemCard(
                                 customer = customer,

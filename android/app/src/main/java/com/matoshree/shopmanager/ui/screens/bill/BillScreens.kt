@@ -438,7 +438,7 @@ fun BillsHistoryScreen(
                         verticalArrangement = Arrangement.spacedBy(10.dp),
                         contentPadding = PaddingValues(bottom = 24.dp)
                     ) {
-                        items(filteredBills.chunked(2), key = { pair -> "bill_pair_${pair[0].id}_${pair.getOrNull(1)?.id}" }) { pair ->
+                        items(filteredBills.chunked(2), key = { pair -> "bill_pair_${pair[0].canonicalKey()}_${pair.getOrNull(1)?.canonicalKey() ?: "end"}" }) { pair ->
                             Row(
                                 modifier = Modifier.fillMaxWidth(),
                                 horizontalArrangement = Arrangement.spacedBy(12.dp)
@@ -494,7 +494,7 @@ fun BillsHistoryScreen(
                         verticalArrangement = Arrangement.spacedBy(10.dp),
                         contentPadding = PaddingValues(bottom = 24.dp)
                     ) {
-                        items(filteredBills) { bill ->
+                        items(filteredBills, key = { it.canonicalKey() }) { bill ->
                             val isSelected = selectedBillIds.contains(bill.id)
                             BillListHistoryItemCard(
                                 bill = bill,

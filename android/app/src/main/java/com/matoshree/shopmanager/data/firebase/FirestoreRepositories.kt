@@ -263,10 +263,7 @@ class FirestoreCustomerRepository {
             debounceJob = launch {
                 kotlinx.coroutines.delay(100)
                 val combined = (rootMap.values + shopMap.values)
-                    .distinctBy { cust ->
-                        val clean = com.matoshree.shopmanager.utils.PhoneUtils.clean10DigitMobileInput(cust.mobile)
-                        if (clean.length == 10) clean else "cust_${cust.id}_${cust.name.trim().lowercase()}"
-                    }
+                    .distinctBy { it.canonicalKey() }
                     .sortedByDescending { it.id }
                 trySend(combined)
             }
@@ -1276,90 +1273,48 @@ class FirestoreBillRepository {
             debounceJob = launch {
                 kotlinx.coroutines.delay(100)
                 val combined = (rootMap.values + shopMap.values)
-                    .distinctBy { if (it.transactionUuid.isNotBlank()) it.transactionUuid else "${it.billNumber}_${it.id}" }
+                    .distinctBy { it.canonicalKey() }
                     .sortedWith(compareByDescending<Bill> { it.billDate }.thenByDescending { it.id })
                     .take(limit)
                 trySend(combined)
             }
         }
 
-        val rootListener = try {
-            FirebaseManager.billsCollection()
-                .orderBy("createdAt", Query.Direction.DESCENDING)
-                .limit(limit.toLong())
-                .addSnapshotListener { snapshot, error ->
-                    if (error != null) {
-                        Log.w(TAG, "Bills root snapshot notice: ${error.message} (code: ${error.code})")
-                        return@addSnapshotListener
-                    }
-                    if (snapshot != null) {
-                        rootMap.clear()
-                        snapshot.documents.forEach { doc ->
-                            doc.toBillDomain()?.let { bill ->
-                                rootMap[doc.id] = bill
-                            }
-                        }
-                        emitCombined()
-                    }
+        val rootListener = FirebaseManager.billsCollection()
+            .limit(limit.toLong())
+            .addSnapshotListener { snapshot, error ->
+                if (error != null) {
+                    Log.w(TAG, "Bills root snapshot notice: ${error.message} (code: ${error.code})")
+                    return@addSnapshotListener
                 }
-        } catch (e: Exception) {
-            FirebaseManager.billsCollection()
-                .limit(limit.toLong())
-                .addSnapshotListener { snapshot, error ->
-                    if (error != null) {
-                        Log.w(TAG, "Bills root fallback snapshot notice: ${error.message}")
-                        return@addSnapshotListener
-                    }
-                    if (snapshot != null) {
-                        rootMap.clear()
-                        snapshot.documents.forEach { doc ->
-                            doc.toBillDomain()?.let { bill ->
-                                rootMap[doc.id] = bill
-                            }
+                if (snapshot != null) {
+                    rootMap.clear()
+                    snapshot.documents.forEach { doc ->
+                        doc.toBillDomain()?.let { bill ->
+                            rootMap[doc.id] = bill
                         }
-                        emitCombined()
                     }
+                    emitCombined()
                 }
-        }
+            }
 
-        val shopListener = try {
-            FirebaseManager.shopBillsCollection()
-                .orderBy("createdAt", Query.Direction.DESCENDING)
-                .limit(limit.toLong())
-                .addSnapshotListener { snapshot, error ->
-                    if (error != null) {
-                        Log.w(TAG, "Bills shop snapshot notice: ${error.message} (code: ${error.code})")
-                        return@addSnapshotListener
-                    }
-                    if (snapshot != null) {
-                        shopMap.clear()
-                        snapshot.documents.forEach { doc ->
-                            doc.toBillDomain()?.let { bill ->
-                                shopMap[doc.id] = bill
-                            }
-                        }
-                        emitCombined()
-                    }
+        val shopListener = FirebaseManager.shopBillsCollection()
+            .limit(limit.toLong())
+            .addSnapshotListener { snapshot, error ->
+                if (error != null) {
+                    Log.w(TAG, "Bills shop snapshot notice: ${error.message} (code: ${error.code})")
+                    return@addSnapshotListener
                 }
-        } catch (e: Exception) {
-            FirebaseManager.shopBillsCollection()
-                .limit(limit.toLong())
-                .addSnapshotListener { snapshot, error ->
-                    if (error != null) {
-                        Log.w(TAG, "Bills shop fallback snapshot notice: ${error.message}")
-                        return@addSnapshotListener
-                    }
-                    if (snapshot != null) {
-                        shopMap.clear()
-                        snapshot.documents.forEach { doc ->
-                            doc.toBillDomain()?.let { bill ->
-                                shopMap[doc.id] = bill
-                            }
+                if (snapshot != null) {
+                    shopMap.clear()
+                    snapshot.documents.forEach { doc ->
+                        doc.toBillDomain()?.let { bill ->
+                            shopMap[doc.id] = bill
                         }
-                        emitCombined()
                     }
+                    emitCombined()
                 }
-        }
+            }
 
         awaitClose {
             rootListener.remove()
@@ -1718,14 +1673,16 @@ class FirestoreBillRepository {
         val shopBills = try { FirebaseManager.shopBillsCollection().get().await().documents } catch (e: Exception) { emptyList() }
         val allDocs = rootBills + shopBills
 
+        // STRICT MATCHING: Target only the intended bill, never match by loose hashCode or raw integers
         val matchingDocs = allDocs.filter { doc ->
             val dto = doc.toObject(BillDto::class.java) ?: return@filter false
-            (transactionUuid != null && transactionUuid.isNotBlank() && dto.transactionUuid == transactionUuid) ||
-            (billNumber != null && billNumber.isNotBlank() && dto.billNumber == billNumber) ||
-            dto.legacyId == billId ||
-            (doc.id.hashCode().toLong() and 0x7FFFFFFFFFFFFFFFL) == billId ||
-            doc.id == "bill_$billId" ||
-            doc.id == billId.toString()
+            if (!transactionUuid.isNullOrBlank()) {
+                dto.transactionUuid == transactionUuid || doc.id == "bill_$transactionUuid" || doc.id == transactionUuid
+            } else if (!billNumber.isNullOrBlank()) {
+                dto.billNumber.equals(billNumber, ignoreCase = true)
+            } else {
+                doc.id == "bill_$billId" || (billId > 0 && dto.legacyId == billId)
+            }
         }
 
         if (matchingDocs.isNotEmpty()) {

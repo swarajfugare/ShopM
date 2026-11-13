@@ -74,10 +74,7 @@ class UdhariViewModel(
     }.debounce(200).map { (customers, bills, transactions) ->
         val activeBills = bills.filter { !it.isVoided }.distinctBy { if (it.transactionUuid.isNotBlank()) it.transactionUuid else it.billNumber }
         val validTxs = transactions.filter { !it.isReversed }.distinctBy { if (it.transactionUuid.isNotBlank()) it.transactionUuid else "${it.id}_${it.billId}" }
-        val uniqueCustomers = customers.distinctBy { cust ->
-            val clean = com.matoshree.shopmanager.utils.PhoneUtils.clean10DigitMobileInput(cust.mobile)
-            if (clean.length == 10) clean else "cust_${cust.id}_${cust.name.trim().lowercase()}"
-        }
+        val uniqueCustomers = customers.distinctBy { it.canonicalKey() }
 
         uniqueCustomers.map { customer ->
             val cleanCustMob = com.matoshree.shopmanager.utils.PhoneUtils.clean10DigitMobileInput(customer.mobile)
@@ -146,10 +143,7 @@ class UdhariViewModel(
         _selectedFilter,
         _selectedSort
     ) { list, query, filter, sort ->
-        val distinctList = list.distinctBy { summary ->
-            val clean = com.matoshree.shopmanager.utils.PhoneUtils.clean10DigitMobileInput(summary.customer.mobile)
-            if (clean.length == 10) clean else "cust_${summary.customer.id}_${summary.customer.name.trim().lowercase()}"
-        }
+        val distinctList = list.distinctBy { it.customer.canonicalKey() }
         val todayIso = DateUtils.todayDate()
 
         // Filter
@@ -316,10 +310,7 @@ fun UdhariScreen(
     val selectedFilter by viewModel.selectedFilter.collectAsState()
 
     val uniqueCustomerList = remember(customerList) {
-        customerList.distinctBy { summary ->
-            val clean = com.matoshree.shopmanager.utils.PhoneUtils.clean10DigitMobileInput(summary.customer.mobile)
-            if (clean.length == 10) clean else "cust_${summary.customer.id}_${summary.customer.name.trim().lowercase()}"
-        }
+        customerList.distinctBy { it.customer.canonicalKey() }
     }
 
     var activePaymentCustomer by remember { mutableStateOf<CustomerUdhariSummary?>(null) }
@@ -537,13 +528,9 @@ fun UdhariScreen(
                 }
             } else {
                 items(
-                    count = uniqueCustomerList.size,
-                    key = { index ->
-                        val item = uniqueCustomerList[index]
-                        "udhari_${item.customer.id}_${item.customer.mobile}_$index"
-                    }
-                ) { index ->
-                    val summary = uniqueCustomerList[index]
+                    items = uniqueCustomerList,
+                    key = { item -> "udhari_${item.customer.canonicalKey()}" }
+                ) { summary ->
                     UdhariCustomerCard(
                         summary = summary,
                         onClick = { onCustomerClick(summary.customer.id) },

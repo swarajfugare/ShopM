@@ -142,7 +142,7 @@ class DashboardViewModel(
 
                 // Task 1: Most recently added bills on top. Show today's bills only; if none, show this week's bills only
                 val sortedActiveBills = activeBills
-                    .distinctBy { if (it.transactionUuid.isNotBlank()) it.transactionUuid else it.billNumber }
+                    .distinctBy { it.canonicalKey() }
                     .sortedWith(
                         compareByDescending<Bill> { it.billDate }.thenByDescending { it.id }
                     )
@@ -571,7 +571,7 @@ fun DashboardScreen(
                 }
             } else {
                 if (isTablet) {
-                    items(summary.recentBills.chunked(2), key = { pair -> "dash_pair_${pair[0].id}_${pair.getOrNull(1)?.id}" }) { pair ->
+                    items(summary.recentBills.chunked(2), key = { pair -> "dash_pair_${pair[0].canonicalKey()}_${pair.getOrNull(1)?.canonicalKey() ?: "end"}" }) { pair ->
                         Row(
                             modifier = Modifier.fillMaxWidth(),
                             horizontalArrangement = Arrangement.spacedBy(12.dp)
@@ -589,7 +589,7 @@ fun DashboardScreen(
                         }
                     }
                 } else {
-                    items(summary.recentBills, key = { it.id }) { bill ->
+                    items(summary.recentBills, key = { it.canonicalKey() }) { bill ->
                         DashboardRecentBillCard(bill = bill, onBillClick = onBillClick)
                     }
                 }

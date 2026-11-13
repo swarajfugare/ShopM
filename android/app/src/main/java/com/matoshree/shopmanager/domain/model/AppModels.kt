@@ -20,7 +20,12 @@ data class Customer(
     val isActive: Boolean = true,
     val tier: String = "REGULAR", // VIP or REGULAR
     val listTags: List<String> = emptyList()
-)
+) {
+    fun canonicalKey(): String {
+        val clean = com.matoshree.shopmanager.utils.PhoneUtils.clean10DigitMobileInput(mobile)
+        return if (clean.length == 10) "mob_$clean" else "name_${name.trim().lowercase()}"
+    }
+}
 
 @Serializable
 data class Category(

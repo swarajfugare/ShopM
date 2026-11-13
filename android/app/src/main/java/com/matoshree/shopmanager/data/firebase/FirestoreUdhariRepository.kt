@@ -21,7 +21,7 @@ class FirestoreUdhariRepository {
      */
     fun getAllTransactions(): Flow<List<UdhariTransaction>> = callbackFlow {
         val listener = FirebaseManager.udhariTransactionsCollection()
-            .orderBy("createdAt", Query.Direction.DESCENDING)
+            .limit(1000)
             .addSnapshotListener { snapshot, error ->
                 if (error != null) {
                     Log.w(TAG, "Udhari transactions snapshot error: ${error.message}")
@@ -30,7 +30,7 @@ class FirestoreUdhariRepository {
                 if (snapshot != null) {
                     val list = snapshot.documents.mapNotNull { doc ->
                         doc.toObject(UdhariTransactionDto::class.java)?.apply { id = doc.id }?.toDomain()
-                    }
+                    }.sortedByDescending { it.createdAt }
                     trySend(list)
                 }
             }
@@ -44,7 +44,7 @@ class FirestoreUdhariRepository {
     fun getTransactionsForCustomer(customerId: Long, customerMobile: String? = null): Flow<List<UdhariTransaction>> = callbackFlow {
         val cleanMobile = customerMobile?.trim() ?: ""
         val listener = FirebaseManager.udhariTransactionsCollection()
-            .orderBy("createdAt", Query.Direction.DESCENDING)
+            .limit(500)
             .addSnapshotListener { snapshot, error ->
                 if (error != null) {
                     Log.w(TAG, "Customer Udhari snapshot error: ${error.message}")
@@ -61,7 +61,7 @@ class FirestoreUdhariRepository {
                         } else {
                             null
                         }
-                    }
+                    }.sortedByDescending { it.createdAt }
                     trySend(list)
                 }
             }

@@ -96,4 +96,8 @@ data class Bill(
     val isVoided: Boolean = false,
     val voidReason: String? = null,
     val items: List<BillItem> = emptyList()
-)
+) {
+    fun canonicalKey(): String {
+        return if (transactionUuid.isNotBlank()) transactionUuid else if (billNumber.isNotBlank()) billNumber else "bill_$id"
+    }
+}
