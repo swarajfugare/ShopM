@@ -78,11 +78,11 @@ interface BillDao {
 
     @Transaction
     @Query("SELECT * FROM bills ORDER BY billDate DESC, id DESC LIMIT :limit")
-    fun getAllBills(limit: Int = 200): Flow<List<BillWithItems>>
+    fun getAllBills(limit: Int = 10000): Flow<List<BillWithItems>>
 
     @Transaction
     @Query("SELECT * FROM bills WHERE isVoided = 0 ORDER BY id DESC LIMIT :limit")
-    suspend fun getAllBillsDirect(limit: Int = 200): List<BillWithItems>
+    suspend fun getAllBillsDirect(limit: Int = 10000): List<BillWithItems>
 
     @Transaction
     @Query("SELECT * FROM bills WHERE billDate >= :startDate AND billDate <= :endDate")

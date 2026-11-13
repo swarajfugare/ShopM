@@ -32,8 +32,8 @@ android {
         applicationId = "com.matoshree.collection"
         minSdk = 26
         targetSdk = 35
-        versionCode = 46
-        versionName = "3.4.6"
+        versionCode = 47
+        versionName = "3.4.7"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         vectorDrawables {

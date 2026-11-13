@@ -167,7 +167,7 @@ class CustomerViewModel(
             }
 
             combine(
-                billRepository.getAllBills(limit = 1000),
+                billRepository.getAllBills(limit = 10000),
                 udhariRepository.getAllTransactions()
             ) { allBills, txs ->
                 val cleanTargetPhone = PhoneUtils.clean10DigitMobileInput(targetMobile)

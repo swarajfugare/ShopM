@@ -67,7 +67,7 @@ fun AppNavGraph(
     val settingsDao = remember { database.settingsDao() }
     val udhariRepository = remember { UdhariRepository(syncManager = syncManager) }
 
-    val dashboardViewModel = remember { DashboardViewModel(billRepository, udhariRepository, productRepository) }
+    val dashboardViewModel = remember { DashboardViewModel(billRepository, udhariRepository, productRepository, customerRepository) }
     val saleViewModel = remember { SaleViewModel(billRepository, customerRepository, productRepository) }
 
     // Lazy on-demand ViewModels: Prevent 8 heavy ViewModels from initializing simultaneously on unlock,

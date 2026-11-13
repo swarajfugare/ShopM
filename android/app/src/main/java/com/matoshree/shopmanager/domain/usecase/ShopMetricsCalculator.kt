@@ -1,6 +1,7 @@
 package com.matoshree.shopmanager.domain.usecase
 
 import com.matoshree.shopmanager.domain.model.Bill
+import com.matoshree.shopmanager.domain.model.Customer
 import com.matoshree.shopmanager.domain.model.PaymentStatus
 import com.matoshree.shopmanager.domain.model.UdhariTransaction
 import com.matoshree.shopmanager.domain.model.UdhariTransactionType
@@ -62,34 +63,77 @@ object ShopMetricsCalculator {
     }
 
     /**
+     * Builds a unified resolver that links customer entities, bills, and transactions
+     * so that records sharing mobile, name, or customer ID resolve accurately to the canonical key,
+     * while guaranteeing that distinct 10-digit mobile numbers are NEVER merged.
+     */
+    fun buildCustomerKeyResolver(
+        customers: List<Customer> = emptyList(),
+        bills: List<Bill> = emptyList(),
+        transactions: List<UdhariTransaction> = emptyList()
+    ): (mobile: String?, name: String?, localId: Long?) -> String? {
+        val aliasToCanonical = mutableMapOf<String, String>()
+
+        // 1. Seed from known customer entities (only map name if it is unique among customers)
+        val nameCount = customers.map { it.name.trim().lowercase() }.filter { it.isNotBlank() }.groupingBy { it }.eachCount()
+        for (c in customers) {
+            val cleanMob = com.matoshree.shopmanager.utils.PhoneUtils.clean10DigitMobileInput(c.mobile)
+            val cleanName = c.name.trim().lowercase()
+            if (cleanMob.length == 10) {
+                if (cleanName.isNotBlank() && (nameCount[cleanName] ?: 0) == 1) {
+                    aliasToCanonical["name_$cleanName"] = "mob_$cleanMob"
+                }
+                if (c.id > 0L) {
+                    aliasToCanonical["id_${c.id}"] = "mob_$cleanMob"
+                }
+            }
+        }
+
+        return { mobile, name, localId ->
+            val cleanMob = com.matoshree.shopmanager.utils.PhoneUtils.clean10DigitMobileInput(mobile ?: "")
+            if (cleanMob.length == 10) {
+                "mob_$cleanMob"
+            } else {
+                val cleanName = name?.trim()?.lowercase() ?: ""
+                (if (cleanName.isNotBlank()) aliasToCanonical["name_$cleanName"] else null)
+                    ?: (if (localId != null && localId > 0L) aliasToCanonical["id_$localId"] else null)
+                    ?: resolveCustomerKey(mobile, name, localId)
+            }
+        }
+    }
+
+    /**
      * Calculates customer ledger balances keyed by canonical customer identifier.
      * Guaranteed single source of truth for Dashboard, UdhariScreen, and CustomerProfile.
      */
     fun calculateCustomerLedgerBalances(
         activeBills: List<Bill>,
-        transactions: List<UdhariTransaction>
+        transactions: List<UdhariTransaction>,
+        customers: List<Customer> = emptyList()
     ): Map<String, Double> {
         val nonVoidBills = activeBills.filter { !it.isVoided }
         val validTxs = transactions.filter { !it.isReversed }
+
+        val keyResolver = buildCustomerKeyResolver(customers, nonVoidBills, validTxs)
 
         val txBillIds = validTxs.filter { it.type == UdhariTransactionType.PAYMENT && it.billId != 0L }.map { it.billId }.toSet()
         val txBillNumbers = validTxs.filter { it.type == UdhariTransactionType.PAYMENT && it.billNumber.isNotBlank() }.map { it.billNumber }.toSet()
 
         val allCustomerKeys = mutableSetOf<String>()
         nonVoidBills.forEach { b ->
-            resolveCustomerKey(b.customerMobile, b.customerName, b.customerId)?.let { allCustomerKeys.add(it) }
+            keyResolver(b.customerMobile, b.customerName, b.customerId)?.let { allCustomerKeys.add(it) }
         }
         validTxs.forEach { tx ->
-            resolveCustomerKey(tx.customerMobile, tx.customerName, tx.customerId)?.let { allCustomerKeys.add(it) }
+            keyResolver(tx.customerMobile, tx.customerName, tx.customerId)?.let { allCustomerKeys.add(it) }
         }
 
         val balances = mutableMapOf<String, Double>()
         for (key in allCustomerKeys) {
             val custBills = nonVoidBills.filter { b ->
-                resolveCustomerKey(b.customerMobile, b.customerName, b.customerId) == key
+                keyResolver(b.customerMobile, b.customerName, b.customerId) == key
             }
             val custTxs = validTxs.filter { tx ->
-                resolveCustomerKey(tx.customerMobile, tx.customerName, tx.customerId) == key
+                keyResolver(tx.customerMobile, tx.customerName, tx.customerId) == key
             }
 
             val billCharges = custBills.sumOf { it.finalAmount }
@@ -119,9 +163,10 @@ object ShopMetricsCalculator {
      */
     fun calculateTotalPendingUdhari(
         activeBills: List<Bill>,
-        transactions: List<UdhariTransaction>
+        transactions: List<UdhariTransaction>,
+        customers: List<Customer> = emptyList()
     ): Double {
-        val balances = calculateCustomerLedgerBalances(activeBills, transactions)
+        val balances = calculateCustomerLedgerBalances(activeBills, transactions, customers)
         return balances.values.sum()
     }
 
@@ -130,9 +175,10 @@ object ShopMetricsCalculator {
      */
     fun calculatePendingCustomersCount(
         activeBills: List<Bill>,
-        transactions: List<UdhariTransaction>
+        transactions: List<UdhariTransaction>,
+        customers: List<Customer> = emptyList()
     ): Int {
-        val balances = calculateCustomerLedgerBalances(activeBills, transactions)
+        val balances = calculateCustomerLedgerBalances(activeBills, transactions, customers)
         return balances.count { it.value > 0.01 }
     }
 }

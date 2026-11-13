@@ -111,6 +111,26 @@ fun CategoryEntity.toDomain(): Category {
 }
 
 fun BillWithItems.toDomain(): Bill {
+    val computedPaid = when (bill.paymentStatus) {
+        PaymentStatus.PAID -> bill.finalAmount
+        PaymentStatus.PENDING, PaymentStatus.UNPAID -> 0.0
+        PaymentStatus.PARTIAL -> {
+            if (bill.paidAmount > 0.0) bill.paidAmount
+            else if (bill.pendingAmount > 0.0 && bill.pendingAmount < bill.finalAmount) bill.finalAmount - bill.pendingAmount
+            else 0.0
+        }
+        else -> bill.paidAmount
+    }
+    val computedPending = when (bill.paymentStatus) {
+        PaymentStatus.PAID -> 0.0
+        PaymentStatus.PENDING, PaymentStatus.UNPAID -> bill.finalAmount
+        PaymentStatus.PARTIAL -> {
+            if (bill.pendingAmount > 0.0) bill.pendingAmount
+            else (bill.finalAmount - computedPaid).coerceAtLeast(0.0)
+        }
+        else -> bill.pendingAmount
+    }
+
     return Bill(
         id = if (bill.serverId != null && bill.serverId > 0) bill.serverId else bill.id,
         shopId = bill.shopId,
@@ -126,8 +146,8 @@ fun BillWithItems.toDomain(): Bill {
         discountAmount = bill.discountAmount,
         taxAmount = bill.taxAmount,
         finalAmount = bill.finalAmount,
-        paidAmount = if (bill.paymentStatus == PaymentStatus.PAID) bill.finalAmount else 0.0,
-        pendingAmount = if (bill.paymentStatus == PaymentStatus.PAID) 0.0 else bill.finalAmount,
+        paidAmount = computedPaid,
+        pendingAmount = computedPending,
         dueDate = null,
         costAmount = bill.costAmount,
         estimatedProfit = bill.estimatedProfit,
@@ -195,6 +215,8 @@ fun toBillEntities(
         discountAmount = bill.discountAmount,
         taxAmount = bill.taxAmount,
         finalAmount = bill.finalAmount,
+        paidAmount = bill.paidAmount,
+        pendingAmount = bill.pendingAmount,
         costAmount = bill.costAmount,
         estimatedProfit = bill.estimatedProfit,
         actualProfit = bill.actualProfit,
@@ -244,7 +266,7 @@ class BillRepository(
         }.distinctUntilChanged()
     }
 
-    fun getAllBills(limit: Int = 500): Flow<List<Bill>> {
+    fun getAllBills(limit: Int = 10000): Flow<List<Bill>> {
         if (database == null) return firestoreRepo.getAllBills(limit)
         return database.billDao().getAllBills(limit).map { entities ->
             entities.map { it.toDomain() }

@@ -26,6 +26,7 @@ import androidx.lifecycle.viewModelScope
 import com.matoshree.shopmanager.data.repository.BillRepository
 import com.matoshree.shopmanager.data.repository.UdhariRepository
 import com.matoshree.shopmanager.domain.model.Bill
+import com.matoshree.shopmanager.domain.model.Customer
 import com.matoshree.shopmanager.domain.model.DashboardSummary
 import com.matoshree.shopmanager.domain.model.UdhariTransaction
 import com.matoshree.shopmanager.ui.components.MatoshreeCard
@@ -50,7 +51,8 @@ private data class DashboardMetrics(
 class DashboardViewModel(
     private val billRepository: BillRepository,
     private val udhariRepository: UdhariRepository = UdhariRepository(),
-    private val productRepository: com.matoshree.shopmanager.data.repository.ProductRepository? = null
+    private val productRepository: com.matoshree.shopmanager.data.repository.ProductRepository? = null,
+    private val customerRepository: com.matoshree.shopmanager.data.repository.CustomerRepository? = null
 ) : ViewModel() {
 
     private val _summary = MutableStateFlow(DashboardSummary())
@@ -69,6 +71,21 @@ class DashboardViewModel(
     init {
         observeBills()
         observeProducts()
+        observeCustomers()
+    }
+
+    private fun observeCustomers() {
+        if (customerRepository != null) {
+            viewModelScope.launch(errorHandler) {
+                customerRepository.getAllCustomers()
+                    .distinctUntilChanged()
+                    .catch { e -> android.util.Log.e("DashboardViewModel", "Customers flow error: ${e.message}", e) }
+                    .collectLatest { custs ->
+                        allCustomersState.value = custs
+                        recalculateMetrics()
+                    }
+            }
+        }
     }
 
     private fun observeProducts() {
@@ -88,6 +105,7 @@ class DashboardViewModel(
 
     private val allBillsState = MutableStateFlow<List<Bill>>(emptyList())
     private val allTransactionsState = MutableStateFlow<List<UdhariTransaction>>(emptyList())
+    private val allCustomersState = MutableStateFlow<List<Customer>>(emptyList())
     val isUdhariLoaded = MutableStateFlow(false)
 
     private val currentDateFlow = flow {
@@ -100,7 +118,7 @@ class DashboardViewModel(
     private fun observeBills() {
         // 1. Observe all bills from Room immediately (instant UI load, never blocked by network or Udhari)
         viewModelScope.launch(errorHandler) {
-            billRepository.getAllBills(limit = 500)
+            billRepository.getAllBills(limit = 10000)
                 .distinctUntilChanged()
                 .retryWhen { cause, attempt ->
                     android.util.Log.w("DashboardViewModel", "Retrying bills flow after error (attempt $attempt): ${cause.message}")
@@ -180,8 +198,8 @@ class DashboardViewModel(
             val target = 500000.0
             val progress = ((allMonthSales / target) * 100).coerceAtMost(100.0)
 
-            val totalPending = ShopMetricsCalculator.calculateTotalPendingUdhari(allBills, transactions)
-            val pendingCustCount = ShopMetricsCalculator.calculatePendingCustomersCount(allBills, transactions)
+            val totalPending = ShopMetricsCalculator.calculateTotalPendingUdhari(allBills, transactions, allCustomersState.value)
+            val pendingCustCount = ShopMetricsCalculator.calculatePendingCustomersCount(allBills, transactions, allCustomersState.value)
             val todayCollected = ShopMetricsCalculator.calculateTodayCollectedCredit(transactions, today)
             val estProfit = ShopMetricsCalculator.calculateTodayProfit(activeTodayBills, today)
 

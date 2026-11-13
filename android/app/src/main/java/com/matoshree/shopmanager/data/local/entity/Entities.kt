@@ -35,6 +35,8 @@ data class BillEntity(
     val discountAmount: Double = 0.0,
     val taxAmount: Double = 0.0,
     val finalAmount: Double,
+    val paidAmount: Double = 0.0,
+    val pendingAmount: Double = 0.0,
     val costAmount: Double = 0.0,
     val estimatedProfit: Double = 0.0,
     val actualProfit: Double = 0.0,

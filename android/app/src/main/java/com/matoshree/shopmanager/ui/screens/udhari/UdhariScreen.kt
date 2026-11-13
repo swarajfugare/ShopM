@@ -64,7 +64,7 @@ class UdhariViewModel(
     private val _selectedSort = MutableStateFlow("HIGHEST_DUE") // HIGHEST_DUE, LOWEST_DUE, OLDEST_DUE, NEWEST_DUE, A_Z
 
     val customersFlow = customerRepository.getAllCustomers().distinctUntilChanged()
-    val billsFlow = billRepository.getAllBills(1000).distinctUntilChanged()
+    val billsFlow = billRepository.getAllBills(limit = 10000).distinctUntilChanged()
     val transactionsFlow = udhariRepository.getAllTransactions().distinctUntilChanged()
 
     private val baseSummariesFlow = combine(
@@ -186,16 +186,17 @@ class UdhariViewModel(
 
     // Overall Metrics
     val udhariMetrics: StateFlow<UdhariOverallMetrics> = combine(
+        customersFlow,
         billsFlow,
         transactionsFlow
-    ) { bills, transactions ->
-        Pair(bills, transactions)
-    }.debounce(200).map { (bills, transactions) ->
+    ) { customers, bills, transactions ->
+        Triple(customers, bills, transactions)
+    }.debounce(200).map { (customers, bills, transactions) ->
         val activeBills = bills.filter { !it.isVoided }
         val validTxs = transactions.filter { !it.isReversed }
 
-        val totalOutstanding = ShopMetricsCalculator.calculateTotalPendingUdhari(activeBills, validTxs)
-        val pendingCustomersCount = ShopMetricsCalculator.calculatePendingCustomersCount(activeBills, validTxs)
+        val totalOutstanding = ShopMetricsCalculator.calculateTotalPendingUdhari(activeBills, validTxs, customers)
+        val pendingCustomersCount = ShopMetricsCalculator.calculatePendingCustomersCount(activeBills, validTxs, customers)
         val pendingBills = activeBills.filter { it.pendingAmount > 0.01 }
 
         val todayIso = DateUtils.todayDate()
