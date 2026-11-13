@@ -39,6 +39,7 @@ import com.matoshree.shopmanager.utils.DateUtils
 import com.matoshree.shopmanager.utils.PrintShareHelper
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.launch
@@ -76,16 +77,22 @@ class DailyClosingViewModel(
 
     val shopSettings = MutableStateFlow(PrintShareHelper.ShopSettingsSnapshot())
 
+    private val errorHandler = kotlinx.coroutines.CoroutineExceptionHandler { _, throwable ->
+        android.util.Log.e("DailyClosingViewModel", "DailyClosingViewModel error caught safely: ${throwable.message}", throwable)
+    }
+
     init {
         loadTodaySummary()
         observeSettings()
     }
 
     private fun observeSettings() {
-        viewModelScope.launch {
-            settingsRepository.observeSettings().collectLatest {
-                shopSettings.value = it
-            }
+        viewModelScope.launch(errorHandler) {
+            settingsRepository.observeSettings()
+                .catch { e -> android.util.Log.e("DailyClosingViewModel", "observeSettings error: ${e.message}", e) }
+                .collectLatest {
+                    shopSettings.value = it
+                }
         }
     }
 
@@ -126,7 +133,7 @@ class DailyClosingViewModel(
 
     private fun loadTodaySummary() {
         val today = DateUtils.todayDate()
-        viewModelScope.launch {
+        viewModelScope.launch(errorHandler) {
             val existing = closingRepository.getClosingForDate(today)
             if (existing != null) {
                 _closingState.value = existing

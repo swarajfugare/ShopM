@@ -326,6 +326,8 @@ fun SettingsScreen(
     var bulkReminderStatusText by remember { mutableStateOf("") }
     var showWaConfigDialog by remember { mutableStateOf(false) }
     var showRulesHelpDialog by remember { mutableStateOf(false) }
+    var showCrashReportDialog by remember { mutableStateOf(false) }
+    var lastCrashContent by remember { mutableStateOf<String?>(null) }
     val clipboardManager = androidx.compose.ui.platform.LocalClipboardManager.current
     var waWebhookUrl by remember { mutableStateOf(WhatsAppWebhookManager.getWebhookUrl(context)) }
     var waApiKey by remember { mutableStateOf(WhatsAppWebhookManager.getApiKey(context)) }
@@ -1170,6 +1172,53 @@ fun SettingsScreen(
                                         color = DeepEmerald
                                     )
                                 }
+
+                                HorizontalDivider(
+                                    modifier = Modifier.padding(vertical = 10.dp),
+                                    color = OutlineVariantGrey.copy(alpha = 0.2f)
+                                )
+
+                                // Crash Diagnostics Section
+                                val existingCrash = remember(showCrashReportDialog) {
+                                    com.matoshree.shopmanager.security.CrashReporter.getLastCrash(context)
+                                }
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Column(modifier = Modifier.weight(1f)) {
+                                        Text(
+                                            "शेवटचा क्रॅश अहवाल (Crash Diagnostic)",
+                                            fontSize = 12.sp,
+                                            fontWeight = FontWeight.Bold,
+                                            color = if (existingCrash != null) BoutiqueError else DeepEmerald
+                                        )
+                                        Text(
+                                            if (existingCrash != null) "⚠️ सिस्टीममध्ये शेवटचा अनपेक्षित क्रॅश नोंदवला गेला आहे" else "✅ कोणताही क्रॅश झालेला नाही (सिस्टीम स्थिर)",
+                                            fontSize = 11.sp,
+                                            color = MutedCharcoal
+                                        )
+                                    }
+                                    Spacer(modifier = Modifier.width(6.dp))
+                                    OutlinedButton(
+                                        onClick = {
+                                            lastCrashContent = com.matoshree.shopmanager.security.CrashReporter.getLastCrash(context)
+                                            showCrashReportDialog = true
+                                        },
+                                        shape = RoundedCornerShape(8.dp),
+                                        border = BorderStroke(1.dp, if (existingCrash != null) BoutiqueError else DeepEmerald),
+                                        contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
+                                        modifier = Modifier.height(34.dp)
+                                    ) {
+                                        Text(
+                                            "तपासा",
+                                            fontSize = 11.sp,
+                                            fontWeight = FontWeight.Bold,
+                                            color = if (existingCrash != null) BoutiqueError else DeepEmerald
+                                        )
+                                    }
+                                }
                             }
                         }
                     }
@@ -1985,6 +2034,114 @@ service cloud.firestore {
             },
             dismissButton = {
                 TextButton(onClick = { showRulesHelpDialog = false }) {
+                    Text("बंद करा")
+                }
+            },
+            containerColor = WarmWhite,
+            shape = RoundedCornerShape(16.dp)
+        )
+    }
+
+    if (showCrashReportDialog) {
+        val report = lastCrashContent ?: com.matoshree.shopmanager.security.CrashReporter.getLastCrash(context)
+        AlertDialog(
+            onDismissRequest = { showCrashReportDialog = false },
+            title = {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(
+                        imageVector = if (report != null) Icons.Default.Warning else Icons.Default.CheckCircle,
+                        contentDescription = null,
+                        tint = if (report != null) BoutiqueError else BoutiqueSuccess
+                    )
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text(
+                        "शेवटचा क्रॅश अहवाल",
+                        fontWeight = FontWeight.Bold,
+                        color = DeepEmerald
+                    )
+                }
+            },
+            text = {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .verticalScroll(rememberScrollState()),
+                    verticalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    if (report != null) {
+                        Text(
+                            "खालील तांत्रिक माहिती डेव्हलपरला पाठवून समस्येचे निराकरण करता येईल:",
+                            style = MaterialTheme.typography.bodySmall.copy(color = MutedCharcoal)
+                        )
+                        Surface(
+                            color = Color(0xFFF4F4F4),
+                            shape = RoundedCornerShape(8.dp),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Text(
+                                text = report,
+                                style = MaterialTheme.typography.bodySmall.copy(
+                                    fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace,
+                                    fontSize = 10.sp,
+                                    color = Color.DarkGray
+                                ),
+                                modifier = Modifier.padding(10.dp)
+                            )
+                        }
+                    } else {
+                        Column(
+                            modifier = Modifier.fillMaxWidth().padding(vertical = 20.dp),
+                            horizontalAlignment = Alignment.CenterHorizontally
+                        ) {
+                            Icon(
+                                Icons.Default.CheckCircle,
+                                contentDescription = null,
+                                tint = BoutiqueSuccess,
+                                modifier = Modifier.size(48.dp)
+                            )
+                            Spacer(modifier = Modifier.height(8.dp))
+                            Text(
+                                "कोणताही क्रॅश अहवाल उपलब्ध नाही.",
+                                fontWeight = FontWeight.Bold,
+                                color = DeepEmerald
+                            )
+                            Text(
+                                "ॲप्लिकेशन सुरक्षित आणि स्थिर रीतीने चालू आहे.",
+                                fontSize = 12.sp,
+                                color = MutedCharcoal
+                            )
+                        }
+                    }
+                }
+            },
+            confirmButton = {
+                if (report != null) {
+                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        OutlinedButton(
+                            onClick = {
+                                com.matoshree.shopmanager.security.CrashReporter.clearCrash(context)
+                                lastCrashContent = null
+                                Toast.makeText(context, "क्रॅश अहवाल मिटवला गेला.", Toast.LENGTH_SHORT).show()
+                                showCrashReportDialog = false
+                            },
+                            shape = RoundedCornerShape(8.dp)
+                        ) {
+                            Text("मिटवा", fontSize = 12.sp)
+                        }
+                        Button(
+                            onClick = {
+                                com.matoshree.shopmanager.security.CrashReporter.shareCrashReport(context)
+                            },
+                            colors = ButtonDefaults.buttonColors(containerColor = DeepEmerald),
+                            shape = RoundedCornerShape(8.dp)
+                        ) {
+                            Text("शेअर करा 📤", fontSize = 12.sp)
+                        }
+                    }
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showCrashReportDialog = false }) {
                     Text("बंद करा")
                 }
             },

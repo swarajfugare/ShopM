@@ -32,8 +32,8 @@ android {
         applicationId = "com.matoshree.collection"
         minSdk = 26
         targetSdk = 35
-        versionCode = 43
-        versionName = "3.3.0"
+        versionCode = 44
+        versionName = "3.4.2"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         vectorDrawables {
@@ -46,6 +46,10 @@ android {
         }
 
         buildConfigField("String", "RELEASE_CERT_SHA256", "\"$releaseCertSha256\"")
+    }
+
+    testOptions {
+        unitTests.isReturnDefaultValues = true
     }
 
     signingConfigs {

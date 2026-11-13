@@ -14,6 +14,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -504,7 +505,7 @@ fun ProductLabelsScreen(
                     verticalArrangement = Arrangement.spacedBy(10.dp),
                     contentPadding = PaddingValues(bottom = 80.dp)
                 ) {
-                    items(filtered, key = { it.id }) { product ->
+                    itemsIndexed(filtered, key = { index, product -> "plabel_${product.id}_$index" }) { _, product ->
                         val isSelected = selectedIds.contains(product.id)
                         val qty = quantities[product.id] ?: 1
 

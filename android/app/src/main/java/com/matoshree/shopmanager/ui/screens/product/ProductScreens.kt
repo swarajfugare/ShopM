@@ -8,6 +8,7 @@ import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -38,6 +39,7 @@ import com.matoshree.shopmanager.utils.AlphabetUtils
 import com.matoshree.shopmanager.utils.CurrencyFormatter
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.launch
 
@@ -59,20 +61,28 @@ class ProductViewModel(private val productRepository: ProductRepository) : ViewM
     val selectedCategoryId = MutableStateFlow<Long?>(null)
     val sortOption = MutableStateFlow(ProductSortOption.NAME_ASC)
 
+    private val errorHandler = kotlinx.coroutines.CoroutineExceptionHandler { _, throwable ->
+        android.util.Log.e("ProductViewModel", "ProductViewModel error caught safely: ${throwable.message}", throwable)
+    }
+
     init {
         observeCatalog()
     }
 
     private fun observeCatalog() {
-        viewModelScope.launch {
-            productRepository.getAllProducts().collectLatest {
-                _products.value = it
-            }
+        viewModelScope.launch(errorHandler) {
+            productRepository.getAllProducts()
+                .catch { e -> android.util.Log.e("ProductViewModel", "Products flow error: ${e.message}", e) }
+                .collectLatest {
+                    _products.value = it
+                }
         }
-        viewModelScope.launch {
-            productRepository.getAllCategories().collectLatest {
-                _categories.value = it
-            }
+        viewModelScope.launch(errorHandler) {
+            productRepository.getAllCategories()
+                .catch { e -> android.util.Log.e("ProductViewModel", "Categories flow error: ${e.message}", e) }
+                .collectLatest {
+                    _categories.value = it
+                }
         }
     }
 
@@ -620,7 +630,7 @@ fun ProductsListScreen(
                         verticalArrangement = Arrangement.spacedBy(10.dp),
                         contentPadding = PaddingValues(bottom = 96.dp)
                     ) {
-                        items(filtered, key = { it.id }) { product ->
+                        itemsIndexed(filtered, key = { index, product -> "prod_${product.id}_$index" }) { _, product ->
                             val catName = categories.find { it.id == product.categoryId }?.name ?: "इतर"
                             val isSelected = selectedProductIds.contains(product.id)
                             ProductListItemCard(
@@ -1049,7 +1059,7 @@ fun ProductsListScreen(
                                 .heightIn(max = 260.dp),
                             verticalArrangement = Arrangement.spacedBy(6.dp)
                         ) {
-                            items(categories, key = { it.id }) { cat ->
+                            itemsIndexed(categories, key = { index, cat -> "cat_${cat.id}_$index" }) { _, cat ->
                                 val pCount = products.count { it.categoryId == cat.id }
                                 Surface(
                                     color = WarmIvory,

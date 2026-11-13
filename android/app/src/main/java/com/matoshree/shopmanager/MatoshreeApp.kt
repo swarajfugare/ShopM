@@ -15,6 +15,9 @@ class MatoshreeApp : Application() {
     override fun onCreate() {
         super.onCreate()
 
+        // 0. Initialize Crash Reporter to capture any uncaught crash across all threads
+        com.matoshree.shopmanager.security.CrashReporter.init(this)
+
         // 1. Initialize Room Local Database & Clean legacy mock seed data
         val database = AppDatabase.getInstance(this)
         CoroutineScope(Dispatchers.IO).launch {

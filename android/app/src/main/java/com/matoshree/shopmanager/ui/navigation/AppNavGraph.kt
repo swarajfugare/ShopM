@@ -69,15 +69,52 @@ fun AppNavGraph(
 
     val dashboardViewModel = remember { DashboardViewModel(billRepository, udhariRepository, productRepository) }
     val saleViewModel = remember { SaleViewModel(billRepository, customerRepository, productRepository) }
-    val billViewModel = remember { BillViewModel(billRepository, settingsDao, udhariRepository) }
-    val customerViewModel = remember { CustomerViewModel(customerRepository, billRepository, udhariRepository) }
-    val productViewModel = remember { ProductViewModel(productRepository) }
-    val expenseViewModel = remember { ExpenseViewModel(expenseRepository) }
-    val closingViewModel = remember { DailyClosingViewModel(billRepository, dailyClosingRepository, udhariRepository, expenseRepository) }
-    val analyticsViewModel = remember { AnalyticsViewModel(billRepository, customerRepository, productRepository, expenseRepository, dailyClosingRepository) }
-    val udhariViewModel = remember { com.matoshree.shopmanager.ui.screens.udhari.UdhariViewModel(udhariRepository, customerRepository, billRepository) }
-    val inventoryViewModel = remember { com.matoshree.shopmanager.ui.screens.inventory.InventoryViewModel(productRepository) }
-    val settingsViewModel = remember { SettingsViewModel(syncRepository, pinManager, settingsDao) }
+
+    // Lazy on-demand ViewModels: Prevent 8 heavy ViewModels from initializing simultaneously on unlock
+    var productViewModelState by remember { mutableStateOf<ProductViewModel?>(null) }
+    fun getProductViewModel(): ProductViewModel {
+        return productViewModelState ?: ProductViewModel(productRepository).also { productViewModelState = it }
+    }
+
+    var billViewModelState by remember { mutableStateOf<BillViewModel?>(null) }
+    fun getBillViewModel(): BillViewModel {
+        return billViewModelState ?: BillViewModel(billRepository, settingsDao, udhariRepository).also { billViewModelState = it }
+    }
+
+    var customerViewModelState by remember { mutableStateOf<CustomerViewModel?>(null) }
+    fun getCustomerViewModel(): CustomerViewModel {
+        return customerViewModelState ?: CustomerViewModel(customerRepository, billRepository, udhariRepository).also { customerViewModelState = it }
+    }
+
+    var udhariViewModelState by remember { mutableStateOf<com.matoshree.shopmanager.ui.screens.udhari.UdhariViewModel?>(null) }
+    fun getUdhariViewModel(): com.matoshree.shopmanager.ui.screens.udhari.UdhariViewModel {
+        return udhariViewModelState ?: com.matoshree.shopmanager.ui.screens.udhari.UdhariViewModel(udhariRepository, customerRepository, billRepository).also { udhariViewModelState = it }
+    }
+
+    var closingViewModelState by remember { mutableStateOf<DailyClosingViewModel?>(null) }
+    fun getClosingViewModel(): DailyClosingViewModel {
+        return closingViewModelState ?: DailyClosingViewModel(billRepository, dailyClosingRepository, udhariRepository, expenseRepository).also { closingViewModelState = it }
+    }
+
+    var analyticsViewModelState by remember { mutableStateOf<AnalyticsViewModel?>(null) }
+    fun getAnalyticsViewModel(): AnalyticsViewModel {
+        return analyticsViewModelState ?: AnalyticsViewModel(billRepository, customerRepository, productRepository, expenseRepository, dailyClosingRepository).also { analyticsViewModelState = it }
+    }
+
+    var inventoryViewModelState by remember { mutableStateOf<com.matoshree.shopmanager.ui.screens.inventory.InventoryViewModel?>(null) }
+    fun getInventoryViewModel(): com.matoshree.shopmanager.ui.screens.inventory.InventoryViewModel {
+        return inventoryViewModelState ?: com.matoshree.shopmanager.ui.screens.inventory.InventoryViewModel(productRepository).also { inventoryViewModelState = it }
+    }
+
+    var expenseViewModelState by remember { mutableStateOf<ExpenseViewModel?>(null) }
+    fun getExpenseViewModel(): ExpenseViewModel {
+        return expenseViewModelState ?: ExpenseViewModel(expenseRepository).also { expenseViewModelState = it }
+    }
+
+    var settingsViewModelState by remember { mutableStateOf<SettingsViewModel?>(null) }
+    fun getSettingsViewModel(): SettingsViewModel {
+        return settingsViewModelState ?: SettingsViewModel(syncRepository, pinManager, settingsDao).also { settingsViewModelState = it }
+    }
 
     val navBackStackEntry by navController.currentBackStackEntryAsState()
     val currentRoute = navBackStackEntry?.destination?.route
@@ -192,7 +229,7 @@ fun AppNavGraph(
 
             composable(Screen.Udhari.route) {
                 com.matoshree.shopmanager.ui.screens.udhari.UdhariScreen(
-                    viewModel = udhariViewModel,
+                    viewModel = getUdhariViewModel(),
                     onCustomerClick = { custId ->
                         navController.navigate(Screen.CustomerProfile.createRoute(custId))
                     },
@@ -202,7 +239,7 @@ fun AppNavGraph(
 
             composable(Screen.Products.route) {
                 ProductsListScreen(
-                    viewModel = productViewModel,
+                    viewModel = getProductViewModel(),
                     onNavigateToLabels = { navController.navigate(Screen.ProductLabels.route) },
                     onNavigateToInventory = { navController.navigate(Screen.Inventory.route) },
                     onBackClick = { navController.popBackStack() }
@@ -211,7 +248,7 @@ fun AppNavGraph(
 
             composable(Screen.Inventory.route) {
                 com.matoshree.shopmanager.ui.screens.inventory.InventoryScreen(
-                    viewModel = inventoryViewModel,
+                    viewModel = getInventoryViewModel(),
                     onBackClick = { navController.popBackStack() }
                 )
             }
@@ -225,21 +262,22 @@ fun AppNavGraph(
 
             composable(Screen.Expenses.route) {
                 ExpensesListScreen(
-                    viewModel = expenseViewModel,
+                    viewModel = getExpenseViewModel(),
                     onBackClick = { navController.popBackStack() }
                 )
             }
 
             composable(Screen.DailyClosing.route) {
                 DailyClosingScreen(
-                    viewModel = closingViewModel,
+                    viewModel = getClosingViewModel(),
                     onBackClick = { navController.popBackStack() }
                 )
             }
 
             composable(Screen.NewSale.route) {
-                val products by productViewModel.products.collectAsState()
-                val categories by productViewModel.categories.collectAsState()
+                val prodVm = getProductViewModel()
+                val products by prodVm.products.collectAsState()
+                val categories by prodVm.categories.collectAsState()
 
                 NewSaleScreen(
                     viewModel = saleViewModel,
@@ -346,14 +384,14 @@ fun AppNavGraph(
                 val billId = backStackEntry.arguments?.getLong("billId") ?: 0L
                 BillPreviewScreen(
                     billId = billId,
-                    viewModel = billViewModel,
+                    viewModel = getBillViewModel(),
                     onBackClick = { navController.popBackStack() }
                 )
             }
 
             composable(Screen.BillsHistory.route) {
                 BillsHistoryScreen(
-                    viewModel = billViewModel,
+                    viewModel = getBillViewModel(),
                     onBillClick = { billId ->
                         navController.navigate(Screen.BillPreview.createRoute(billId))
                     },
@@ -363,7 +401,7 @@ fun AppNavGraph(
 
             composable(Screen.Customers.route) {
                 CustomersListScreen(
-                    viewModel = customerViewModel,
+                    viewModel = getCustomerViewModel(),
                     onCustomerClick = { custId ->
                         navController.navigate(Screen.CustomerProfile.createRoute(custId))
                     },
@@ -378,7 +416,7 @@ fun AppNavGraph(
                 val customerId = backStackEntry.arguments?.getLong("customerId") ?: 0L
                 CustomerProfileScreen(
                     customerId = customerId,
-                    viewModel = customerViewModel,
+                    viewModel = getCustomerViewModel(),
                     onBillClick = { billId ->
                         navController.navigate(Screen.BillPreview.createRoute(billId))
                     },
@@ -388,7 +426,7 @@ fun AppNavGraph(
 
             composable(Screen.Analytics.route) {
                 AnalyticsScreen(
-                    viewModel = analyticsViewModel,
+                    viewModel = getAnalyticsViewModel(),
                     onCustomerClick = { custId ->
                         navController.navigate(Screen.CustomerProfile.createRoute(custId))
                     },
@@ -398,7 +436,7 @@ fun AppNavGraph(
 
             composable(Screen.Settings.route) {
                 SettingsScreen(
-                    viewModel = settingsViewModel,
+                    viewModel = getSettingsViewModel(),
                     syncManager = syncManager,
                     onNavigateToTrash = {
                         navController.navigate(Screen.TrashBin.route)

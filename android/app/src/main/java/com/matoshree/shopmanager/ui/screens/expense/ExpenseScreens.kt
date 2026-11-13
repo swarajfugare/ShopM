@@ -4,6 +4,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
@@ -26,6 +27,7 @@ import com.matoshree.shopmanager.utils.CurrencyFormatter
 import com.matoshree.shopmanager.utils.DateUtils
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.launch
 
@@ -33,15 +35,21 @@ class ExpenseViewModel(private val expenseRepository: ExpenseRepository) : ViewM
     private val _expenses = MutableStateFlow<List<Expense>>(emptyList())
     val expenses: StateFlow<List<Expense>> = _expenses
 
+    private val errorHandler = kotlinx.coroutines.CoroutineExceptionHandler { _, throwable ->
+        android.util.Log.e("ExpenseViewModel", "Expense error caught safely: ${throwable.message}", throwable)
+    }
+
     init {
         observeExpenses()
     }
 
     private fun observeExpenses() {
-        viewModelScope.launch {
-            expenseRepository.getAllExpenses().collectLatest {
-                _expenses.value = it
-            }
+        viewModelScope.launch(errorHandler) {
+            expenseRepository.getAllExpenses()
+                .catch { e -> android.util.Log.e("ExpenseViewModel", "Expense flow error: ${e.message}", e) }
+                .collectLatest {
+                    _expenses.value = it
+                }
         }
     }
 
@@ -124,7 +132,7 @@ fun ExpensesListScreen(
                     }
                 }
             } else {
-                items(expenses) { ex ->
+                itemsIndexed(expenses, key = { index, ex -> "exp_${ex.id}_$index" }) { _, ex ->
                     MatoshreeCard {
                         Row(
                             modifier = Modifier.fillMaxWidth(),

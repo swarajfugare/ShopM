@@ -5,6 +5,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -60,6 +61,10 @@ class DashboardViewModel(
     val todayCollectedCredit = MutableStateFlow(0.0)
     val todayProfitEstimate = MutableStateFlow(0.0)
 
+    private val errorHandler = kotlinx.coroutines.CoroutineExceptionHandler { _, throwable ->
+        android.util.Log.e("DashboardViewModel", "Dashboard error caught safely: ${throwable.message}", throwable)
+    }
+
     init {
         observeBills()
         observeProducts()
@@ -67,13 +72,15 @@ class DashboardViewModel(
 
     private fun observeProducts() {
         if (productRepository != null) {
-            viewModelScope.launch {
-                productRepository.getAllProducts().collectLatest { prods ->
-                    val newCount = prods.count { it.isActive && it.trackInventory && it.currentStock <= 5 }
-                    if (lowStockCount.value != newCount) {
-                        lowStockCount.value = newCount
+            viewModelScope.launch(errorHandler) {
+                productRepository.getAllProducts()
+                    .catch { e -> android.util.Log.e("DashboardViewModel", "Products flow error: ${e.message}", e) }
+                    .collectLatest { prods ->
+                        val newCount = prods.count { it.isActive && it.trackInventory && it.currentStock <= 5 }
+                        if (lowStockCount.value != newCount) {
+                            lowStockCount.value = newCount
+                        }
                     }
-                }
             }
         }
     }
@@ -87,7 +94,7 @@ class DashboardViewModel(
 
     @OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class, kotlinx.coroutines.FlowPreview::class)
     private fun observeBills() {
-        viewModelScope.launch {
+        viewModelScope.launch(errorHandler) {
             currentDateFlow.flatMapLatest { today ->
                 val monthPrefix = today.take(7)
                 combine(
@@ -131,11 +138,13 @@ class DashboardViewModel(
                         cashPayments = cashSales,
                         upiPayments = upiSales,
                         recentBills = sortedTodayBills,
-                        businessInsight = if (todayBillsCount > 0) "Today: $todayBillsCount bills generated with avg ₹${String.format("%.0f", avgOrder)}" else "Ready for today's sales at Matoshree Collection."
+                        businessInsight = if (todayBillsCount > 0) "Today: $todayBillsCount bills generated with avg ₹${String.format(java.util.Locale.US, "%.0f", avgOrder)}" else "Ready for today's sales at Matoshree Collection."
                     )
                     DashboardMetrics(newSummary, todayCollected, estProfit, totalPending, pendingCustCount)
                 }
-            }.collectLatest { metrics ->
+            }
+            .catch { e -> android.util.Log.e("DashboardViewModel", "observeBills flow error: ${e.message}", e) }
+            .collectLatest { metrics ->
                 if (todayCollectedCredit.value != metrics.todayCollected) {
                     todayCollectedCredit.value = metrics.todayCollected
                 }
@@ -545,7 +554,8 @@ fun DashboardScreen(
                 }
             } else {
                 if (isTablet) {
-                    items(summary.recentBills.chunked(2), key = { pair -> "dash_pair_${pair[0].canonicalKey()}_${pair.getOrNull(1)?.canonicalKey() ?: "end"}" }) { pair ->
+                    val pairs = summary.recentBills.chunked(2)
+                    itemsIndexed(pairs, key = { index, pair -> "dash_pair_${pair[0].id}_${pair[0].transactionUuid}_$index" }) { _, pair ->
                         Row(
                             modifier = Modifier.fillMaxWidth(),
                             horizontalArrangement = Arrangement.spacedBy(12.dp)
@@ -563,7 +573,7 @@ fun DashboardScreen(
                         }
                     }
                 } else {
-                    items(summary.recentBills, key = { it.canonicalKey() }) { bill ->
+                    itemsIndexed(summary.recentBills, key = { index, bill -> "dash_b_${bill.id}_${bill.transactionUuid}_${bill.billNumber}_$index" }) { _, bill ->
                         DashboardRecentBillCard(bill = bill, onBillClick = onBillClick)
                     }
                 }

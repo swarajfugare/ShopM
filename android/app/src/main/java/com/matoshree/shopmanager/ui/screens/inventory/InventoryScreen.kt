@@ -7,6 +7,7 @@ import androidx.compose.foundation.*
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -485,7 +486,7 @@ fun InventoryScreen(
                             }
                         }
                     } else {
-                        items(filteredProducts, key = { it.id }) { product ->
+                        itemsIndexed(filteredProducts, key = { index, product -> "inv_prod_${product.id}_$index" }) { _, product ->
                             val catName = categories.find { it.id == product.categoryId }?.name ?: "इतर"
                             ProductInventoryCard(
                                 product = product,
@@ -520,7 +521,7 @@ fun InventoryScreen(
                         verticalArrangement = Arrangement.spacedBy(8.dp),
                         contentPadding = PaddingValues(top = 10.dp, bottom = 40.dp)
                     ) {
-                        items(movements, key = { it.id }) { movement ->
+                        itemsIndexed(movements, key = { index, movement -> "inv_mov_${movement.id}_$index" }) { _, movement ->
                             StockMovementRow(movement)
                         }
                     }

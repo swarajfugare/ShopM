@@ -359,7 +359,13 @@ class RealtimeSyncManager private constructor(
 
                     snapshotQueue.trySend {
                         val list = snapshot.documents.mapNotNull { doc ->
-                            doc.toObject(UdhariTransactionDto::class.java)?.apply { id = doc.id }?.toDomain()
+                            val status = doc.getString("status") ?: ""
+                            val isDeleted = doc.getBoolean("isDeleted") ?: false
+                            if (status.equals("TRASH", ignoreCase = true) || isDeleted) {
+                                null
+                            } else {
+                                doc.toObject(UdhariTransactionDto::class.java)?.apply { id = doc.id }?.toDomain()
+                            }
                         }.filter { !it.isReversed }
                          .sortedByDescending { it.createdAt }
 

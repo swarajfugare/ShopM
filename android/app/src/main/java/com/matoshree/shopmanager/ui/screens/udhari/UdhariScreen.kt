@@ -11,6 +11,7 @@ import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -541,10 +542,10 @@ fun UdhariScreen(
                     }
                 }
             } else {
-                items(
+                itemsIndexed(
                     items = uniqueCustomerList,
-                    key = { item -> "udhari_${item.customer.canonicalKey()}" }
-                ) { summary ->
+                    key = { index, item -> "udhari_${item.customer.id}_${item.customer.canonicalKey()}_$index" }
+                ) { _, summary ->
                     UdhariCustomerCard(
                         summary = summary,
                         onClick = { onCustomerClick(summary.customer.id) },

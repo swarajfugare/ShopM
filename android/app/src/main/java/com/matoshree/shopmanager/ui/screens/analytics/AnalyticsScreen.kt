@@ -43,6 +43,7 @@ import com.matoshree.shopmanager.utils.DateUtils
 import com.matoshree.shopmanager.utils.PrintShareHelper
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.launch
@@ -101,6 +102,10 @@ class AnalyticsViewModel(
 
     val productSortBy = MutableStateFlow("REVENUE") // REVENUE, QUANTITY, PROFIT
 
+    private val errorHandler = kotlinx.coroutines.CoroutineExceptionHandler { _, throwable ->
+        android.util.Log.e("AnalyticsViewModel", "Analytics error caught safely: ${throwable.message}", throwable)
+    }
+
     init {
         observeAllData()
     }
@@ -112,41 +117,56 @@ class AnalyticsViewModel(
     }
 
     private fun observeAllData() {
-        viewModelScope.launch {
-            billRepository.getAllBills(limit = 500).distinctUntilChanged().collectLatest {
-                if (bills.value != it) {
-                    bills.value = it
-                    lastUpdatedTime.value = getCurrentTimeDisplay()
+        viewModelScope.launch(errorHandler) {
+            billRepository.getAllBills(limit = 500)
+                .distinctUntilChanged()
+                .catch { e -> android.util.Log.e("AnalyticsViewModel", "Bills flow error: ${e.message}", e) }
+                .collectLatest {
+                    if (bills.value != it) {
+                        bills.value = it
+                        lastUpdatedTime.value = getCurrentTimeDisplay()
+                    }
                 }
-            }
         }
-        viewModelScope.launch {
-            customerRepository.getAllCustomers().distinctUntilChanged().collectLatest {
-                if (customers.value != it) {
-                    customers.value = it
+        viewModelScope.launch(errorHandler) {
+            customerRepository.getAllCustomers()
+                .distinctUntilChanged()
+                .catch { e -> android.util.Log.e("AnalyticsViewModel", "Customer flow error: ${e.message}", e) }
+                .collectLatest {
+                    if (customers.value != it) {
+                        customers.value = it
+                    }
                 }
-            }
         }
-        viewModelScope.launch {
-            productRepository.getAllProducts().distinctUntilChanged().collectLatest {
-                if (products.value != it) {
-                    products.value = it
+        viewModelScope.launch(errorHandler) {
+            productRepository.getAllProducts()
+                .distinctUntilChanged()
+                .catch { e -> android.util.Log.e("AnalyticsViewModel", "Product flow error: ${e.message}", e) }
+                .collectLatest {
+                    if (products.value != it) {
+                        products.value = it
+                    }
                 }
-            }
         }
-        viewModelScope.launch {
-            expenseRepository.getAllExpenses().distinctUntilChanged().collectLatest {
-                if (expenses.value != it) {
-                    expenses.value = it
+        viewModelScope.launch(errorHandler) {
+            expenseRepository.getAllExpenses()
+                .distinctUntilChanged()
+                .catch { e -> android.util.Log.e("AnalyticsViewModel", "Expense flow error: ${e.message}", e) }
+                .collectLatest {
+                    if (expenses.value != it) {
+                        expenses.value = it
+                    }
                 }
-            }
         }
-        viewModelScope.launch {
-            dailyClosingRepository.getAllClosings().distinctUntilChanged().collectLatest {
-                if (dailyClosings.value != it) {
-                    dailyClosings.value = it
+        viewModelScope.launch(errorHandler) {
+            dailyClosingRepository.getAllClosings()
+                .distinctUntilChanged()
+                .catch { e -> android.util.Log.e("AnalyticsViewModel", "Closing flow error: ${e.message}", e) }
+                .collectLatest {
+                    if (dailyClosings.value != it) {
+                        dailyClosings.value = it
+                    }
                 }
-            }
         }
     }
 

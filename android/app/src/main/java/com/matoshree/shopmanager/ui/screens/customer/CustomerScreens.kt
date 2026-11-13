@@ -13,6 +13,7 @@ import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.GridCells
@@ -111,24 +112,32 @@ class CustomerViewModel(
     val shopSettings = MutableStateFlow(PrintShareHelper.ShopSettingsSnapshot())
     private val syncedCustomerIds = mutableSetOf<Long>()
 
+    private val errorHandler = kotlinx.coroutines.CoroutineExceptionHandler { _, throwable ->
+        android.util.Log.e("CustomerViewModel", "CustomerViewModel error caught safely: ${throwable.message}", throwable)
+    }
+
     init {
         observeCustomers()
         observeSettings()
     }
 
     private fun observeCustomers() {
-        viewModelScope.launch {
-            customerRepository.getAllCustomers().collectLatest {
-                _customers.value = it
-            }
+        viewModelScope.launch(errorHandler) {
+            customerRepository.getAllCustomers()
+                .catch { e -> android.util.Log.e("CustomerViewModel", "observeCustomers flow error: ${e.message}", e) }
+                .collectLatest {
+                    _customers.value = it
+                }
         }
     }
 
     private fun observeSettings() {
-        viewModelScope.launch {
-            settingsRepository.observeSettings().collectLatest {
-                shopSettings.value = it
-            }
+        viewModelScope.launch(errorHandler) {
+            settingsRepository.observeSettings()
+                .catch { e -> android.util.Log.e("CustomerViewModel", "observeSettings flow error: ${e.message}", e) }
+                .collectLatest {
+                    shopSettings.value = it
+                }
         }
     }
 
@@ -1201,7 +1210,7 @@ fun CustomersListScreen(
                         verticalArrangement = Arrangement.spacedBy(10.dp),
                         contentPadding = PaddingValues(bottom = 80.dp)
                     ) {
-                        items(filteredCustomers, key = { it.canonicalKey() }) { customer ->
+                        itemsIndexed(filteredCustomers, key = { index, customer -> "cust_${customer.id}_${customer.canonicalKey()}_$index" }) { _, customer ->
                             val isSelected = selectedIds.contains(customer.id)
                             CustomerListItemCard(
                                 customer = customer,
@@ -1680,7 +1689,7 @@ fun CustomerProfileScreen(
                             }
                         } else {
                             if (isTablet) {
-                                items(bills.chunked(2), key = { pair -> "bill_pair_${pair[0].id}_${pair.getOrNull(1)?.id}" }) { pair ->
+                                itemsIndexed(bills.chunked(2), key = { index, pair -> "bill_pair_${pair[0].id}_$index" }) { _, pair ->
                                     Row(
                                         modifier = Modifier.fillMaxWidth(),
                                         horizontalArrangement = Arrangement.spacedBy(12.dp)
@@ -1698,7 +1707,7 @@ fun CustomerProfileScreen(
                                     }
                                 }
                             } else {
-                                items(bills, key = { it.id }) { bill ->
+                                itemsIndexed(bills, key = { index, bill -> "bill_${bill.id}_${bill.transactionUuid}_$index" }) { _, bill ->
                                     CustomerBillCardItem(bill = bill, onBillClick = onBillClick)
                                 }
                             }
@@ -1752,7 +1761,7 @@ fun CustomerProfileScreen(
                             }
                         } else {
                             if (isTablet) {
-                                items(ledger.chunked(2), key = { pair -> "ledger_pair_${pair[0].id}_${pair.getOrNull(1)?.id}" }) { pair ->
+                                itemsIndexed(ledger.chunked(2), key = { index, pair -> "ledger_pair_${pair[0].id}_$index" }) { _, pair ->
                                     Row(
                                         modifier = Modifier.fillMaxWidth(),
                                         horizontalArrangement = Arrangement.spacedBy(12.dp)
@@ -1770,7 +1779,7 @@ fun CustomerProfileScreen(
                                     }
                                 }
                             } else {
-                                items(ledger, key = { it.id }) { entry ->
+                                itemsIndexed(ledger, key = { index, entry -> "ledger_${entry.id}_$index" }) { _, entry ->
                                     CustomerLedgerCardItem(entry = entry, onActionClick = { if (entry.transaction != null) selectedUdhariForAction = entry.transaction })
                                 }
                             }
@@ -1813,7 +1822,7 @@ fun CustomerProfileScreen(
                             }
                         } else {
                             if (isTablet) {
-                                items(allPayments.chunked(2), key = { pair -> "pay_pair_${pair[0].id}_${pair.getOrNull(1)?.id}" }) { pair ->
+                                itemsIndexed(allPayments.chunked(2), key = { index, pair -> "pay_pair_${pair[0].id}_$index" }) { _, pair ->
                                     Row(
                                         modifier = Modifier.fillMaxWidth(),
                                         horizontalArrangement = Arrangement.spacedBy(12.dp)
@@ -1841,7 +1850,7 @@ fun CustomerProfileScreen(
                                     }
                                 }
                             } else {
-                                items(allPayments, key = { it.id }) { record ->
+                                itemsIndexed(allPayments, key = { index, record -> "pay_${record.id}_$index" }) { _, record ->
                                     CustomerPaymentCardItem(
                                         record = record,
                                         onBillClick = onBillClick,

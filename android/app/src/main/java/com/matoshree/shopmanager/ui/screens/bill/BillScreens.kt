@@ -13,6 +13,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -46,6 +47,7 @@ import com.matoshree.shopmanager.utils.DateUtils
 import com.matoshree.shopmanager.utils.PrintShareHelper
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.launch
 
@@ -63,24 +65,32 @@ class BillViewModel(
     val shopSettings = MutableStateFlow(PrintShareHelper.ShopSettingsSnapshot())
     private val firestoreSettingsRepo = com.matoshree.shopmanager.data.firebase.FirestoreSettingsRepository()
 
+    private val errorHandler = kotlinx.coroutines.CoroutineExceptionHandler { _, throwable ->
+        android.util.Log.e("BillViewModel", "BillViewModel error caught safely: ${throwable.message}", throwable)
+    }
+
     init {
         observeBills()
         loadShopSettings()
     }
 
     private fun observeBills() {
-        viewModelScope.launch {
-            billRepository.getRecentBills().collectLatest {
-                _bills.value = it
-            }
+        viewModelScope.launch(errorHandler) {
+            billRepository.getRecentBills()
+                .catch { e -> android.util.Log.e("BillViewModel", "observeBills flow error: ${e.message}", e) }
+                .collectLatest {
+                    _bills.value = it
+                }
         }
     }
 
     private fun loadShopSettings() {
-        viewModelScope.launch {
-            firestoreSettingsRepo.observeSettings().collectLatest { snap ->
-                shopSettings.value = snap
-            }
+        viewModelScope.launch(errorHandler) {
+            firestoreSettingsRepo.observeSettings()
+                .catch { e -> android.util.Log.e("BillViewModel", "observeSettings error: ${e.message}", e) }
+                .collectLatest { snap ->
+                    shopSettings.value = snap
+                }
         }
     }
 
@@ -438,7 +448,7 @@ fun BillsHistoryScreen(
                         verticalArrangement = Arrangement.spacedBy(10.dp),
                         contentPadding = PaddingValues(bottom = 24.dp)
                     ) {
-                        items(filteredBills.chunked(2), key = { pair -> "bill_pair_${pair[0].canonicalKey()}_${pair.getOrNull(1)?.canonicalKey() ?: "end"}" }) { pair ->
+                        itemsIndexed(filteredBills.chunked(2), key = { index, pair -> "bill_pair_${pair[0].id}_${pair[0].transactionUuid}_$index" }) { _, pair ->
                             Row(
                                 modifier = Modifier.fillMaxWidth(),
                                 horizontalArrangement = Arrangement.spacedBy(12.dp)
@@ -494,7 +504,7 @@ fun BillsHistoryScreen(
                         verticalArrangement = Arrangement.spacedBy(10.dp),
                         contentPadding = PaddingValues(bottom = 24.dp)
                     ) {
-                        items(filteredBills, key = { it.canonicalKey() }) { bill ->
+                        itemsIndexed(filteredBills, key = { index, bill -> "bill_${bill.id}_${bill.transactionUuid}_${bill.billNumber}_$index" }) { _, bill ->
                             val isSelected = selectedBillIds.contains(bill.id)
                             BillListHistoryItemCard(
                                 bill = bill,
