@@ -97,7 +97,7 @@ class DashboardViewModel(
                 ) { todayBills, allBills, transactions ->
                     Triple(todayBills, allBills, transactions)
                 }.debounce(150).map { (todayBills, allBills, transactions) ->
-                    val todaySales = ShopMetricsCalculator.calculateTodaySales(todayBills)
+                    val todaySales = ShopMetricsCalculator.calculateTodaySales(todayBills, today)
                     val todayBillsCount = todayBills.count { !it.isVoided }
                     val avgOrder = if (todayBillsCount > 0) todaySales / todayBillsCount else 0.0
 
@@ -111,7 +111,7 @@ class DashboardViewModel(
                     val totalPending = ShopMetricsCalculator.calculateTotalPendingUdhari(allBills, transactions)
                     val pendingCustCount = ShopMetricsCalculator.calculatePendingCustomersCount(allBills, transactions)
                     val todayCollected = ShopMetricsCalculator.calculateTodayCollectedCredit(transactions, today)
-                    val estProfit = ShopMetricsCalculator.calculateTodayProfit(todayBills)
+                    val estProfit = ShopMetricsCalculator.calculateTodayProfit(todayBills, today)
 
                     val sortedTodayBills = todayBills
                         .filter { !it.isVoided }

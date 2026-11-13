@@ -171,10 +171,16 @@ class CustomerViewModel(
                 val customerSpecificBills = allBills.filter { b ->
                     if (b.isVoided) return@filter false
                     val bCleanMob = PhoneUtils.clean10DigitMobileInput(b.customerMobile ?: "")
-                    val idMatches = (b.customerId != null && b.customerId > 0 && (b.customerId == customerId || b.customerId == currentCust?.id))
-                    val mobMatches = (custCleanMobile.length == 10 && bCleanMob.length == 10 && bCleanMob == custCleanMobile)
-                    val nameMatches = (custName.isNotBlank() && b.customerName != null && b.customerName.trim().equals(custName, ignoreCase = true))
-                    idMatches || mobMatches || nameMatches
+                    if (custCleanMobile.length == 10 && bCleanMob.length == 10) {
+                        custCleanMobile == bCleanMob
+                    } else if (custCleanMobile.length == 10 && bCleanMob.isBlank()) {
+                        custName.isNotBlank() && b.customerName != null && b.customerName.trim().equals(custName, ignoreCase = true)
+                    } else if (custCleanMobile.isBlank() && bCleanMob.length == 10) {
+                        false
+                    } else {
+                        (custName.isNotBlank() && b.customerName != null && b.customerName.trim().equals(custName, ignoreCase = true)) ||
+                        (b.customerId != null && b.customerId > 0 && (b.customerId == customerId || b.customerId == currentCust?.id))
+                    }
                 }.distinctBy { if (it.transactionUuid.isNotBlank()) it.transactionUuid else it.billNumber }
                 
                 val voidedBillIds = allBills.filter { it.isVoided }.map { it.id }.toSet()
@@ -186,10 +192,16 @@ class CustomerViewModel(
                     if (tx.billNumber.isNotBlank() && voidedBillNumbers.contains(tx.billNumber)) return@filter false
 
                     val txCleanMob = PhoneUtils.clean10DigitMobileInput(tx.customerMobile)
-                    val idMatches = (tx.customerId == customerId || tx.customerId == currentCust?.id)
-                    val mobMatches = (custCleanMobile.length == 10 && txCleanMob.length == 10 && txCleanMob == custCleanMobile)
-                    val nameMatches = (custName.isNotBlank() && tx.customerName.trim().equals(custName, ignoreCase = true))
-                    idMatches || mobMatches || nameMatches
+                    if (custCleanMobile.length == 10 && txCleanMob.length == 10) {
+                        custCleanMobile == txCleanMob
+                    } else if (custCleanMobile.length == 10 && txCleanMob.isBlank()) {
+                        custName.isNotBlank() && tx.customerName.trim().equals(custName, ignoreCase = true)
+                    } else if (custCleanMobile.isBlank() && txCleanMob.length == 10) {
+                        false
+                    } else {
+                        (custName.isNotBlank() && tx.customerName.trim().equals(custName, ignoreCase = true)) ||
+                        (tx.customerId == customerId || tx.customerId == currentCust?.id)
+                    }
                 }.distinctBy { if (it.transactionUuid.isNotBlank()) it.transactionUuid else "${it.id}_${it.billId}" }
 
                 if (customerBills.value != customerSpecificBills) {

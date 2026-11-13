@@ -82,15 +82,29 @@ class UdhariViewModel(
 
             val custBills = activeBills.filter { b ->
                 val bCleanMob = com.matoshree.shopmanager.utils.PhoneUtils.clean10DigitMobileInput(b.customerMobile ?: "")
-                b.customerId == customer.id ||
-                (cleanCustMob.length == 10 && bCleanMob == cleanCustMob) ||
-                (custName.isNotBlank() && b.customerName != null && b.customerName.trim().equals(custName, ignoreCase = true))
+                if (cleanCustMob.length == 10 && bCleanMob.length == 10) {
+                    cleanCustMob == bCleanMob
+                } else if (cleanCustMob.length == 10 && bCleanMob.isBlank()) {
+                    custName.isNotBlank() && b.customerName != null && b.customerName.trim().equals(custName, ignoreCase = true)
+                } else if (cleanCustMob.isBlank() && bCleanMob.length == 10) {
+                    false
+                } else {
+                    (custName.isNotBlank() && b.customerName != null && b.customerName.trim().equals(custName, ignoreCase = true)) ||
+                    (customer.id > 0 && b.customerId == customer.id)
+                }
             }
             val custTxs = validTxs.filter { tx ->
                 val txCleanMob = com.matoshree.shopmanager.utils.PhoneUtils.clean10DigitMobileInput(tx.customerMobile)
-                tx.customerId == customer.id ||
-                (cleanCustMob.length == 10 && txCleanMob == cleanCustMob) ||
-                (custName.isNotBlank() && tx.customerName.trim().equals(custName, ignoreCase = true))
+                if (cleanCustMob.length == 10 && txCleanMob.length == 10) {
+                    cleanCustMob == txCleanMob
+                } else if (cleanCustMob.length == 10 && txCleanMob.isBlank()) {
+                    custName.isNotBlank() && tx.customerName.trim().equals(custName, ignoreCase = true)
+                } else if (cleanCustMob.isBlank() && txCleanMob.length == 10) {
+                    false
+                } else {
+                    (custName.isNotBlank() && tx.customerName.trim().equals(custName, ignoreCase = true)) ||
+                    (customer.id > 0 && tx.customerId == customer.id)
+                }
             }
 
             val manualCredits = custTxs.filter { it.billId == 0L && it.type == UdhariTransactionType.PURCHASE_CREDIT }.sumOf { it.amount }

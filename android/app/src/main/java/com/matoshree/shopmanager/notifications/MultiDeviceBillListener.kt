@@ -19,8 +19,8 @@ object MultiDeviceBillListener {
     private val localDeviceId = Build.MODEL ?: "AndroidDevice"
 
     fun startListening(context: Context) {
-        startListeningBills(context)
-        startListeningUdhari(context)
+        // Multi-device notifications are now unified inside RealtimeSyncManager once authenticated,
+        // eliminating duplicate unauthenticated listeners at app start.
     }
 
     private fun startListeningBills(context: Context) {

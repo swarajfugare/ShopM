@@ -88,8 +88,14 @@ interface BillDao {
     @Query("SELECT * FROM bills WHERE billDate >= :startDate AND billDate <= :endDate")
     suspend fun getBillsInDateRange(startDate: String, endDate: String): List<BillWithItems>
 
-    @Query("UPDATE bills SET isVoided = 1, paymentStatus = 'VOID', voidReason = :reason WHERE id = :id OR (serverId IS NOT NULL AND serverId = :id) OR (transactionUuid IS NOT NULL AND transactionUuid != '' AND transactionUuid = :uuid) OR (billNumber IS NOT NULL AND billNumber != '' AND billNumber = :billNumber)")
+    @Query("UPDATE bills SET isVoided = 1, paymentStatus = 'VOID', voidReason = :reason WHERE (:id > 0 AND (id = :id OR serverId = :id)) OR (transactionUuid IS NOT NULL AND transactionUuid != '' AND transactionUuid = :uuid) OR (billNumber IS NOT NULL AND billNumber != '' AND billNumber = :billNumber)")
     suspend fun voidBillComprehensive(id: Long, uuid: String?, billNumber: String?, reason: String)
+
+    @Query("UPDATE bills SET isVoided = 1, paymentStatus = 'VOID', voidReason = :reason WHERE transactionUuid = :uuid")
+    suspend fun voidBillByUuid(uuid: String, reason: String)
+
+    @Query("DELETE FROM bills WHERE transactionUuid = :uuid")
+    suspend fun deleteBillByUuid(uuid: String)
 
     @Query("DELETE FROM bills WHERE id = :id OR (serverId IS NOT NULL AND serverId = :id) OR (transactionUuid IS NOT NULL AND transactionUuid != '' AND transactionUuid = :uuid) OR (billNumber IS NOT NULL AND billNumber != '' AND billNumber = :billNumber)")
     suspend fun deleteBillComprehensive(id: Long, uuid: String?, billNumber: String?)
@@ -162,8 +168,10 @@ interface BillDao {
 
                 // Only replace items if items actually differ to prevent unnecessary DB churn
                 if (items.isNotEmpty()) {
+                    val sortedInc = items.sortedBy { it.productId?.toString() ?: it.productNameSnapshot }
+                    val sortedCur = existing.items.sortedBy { it.productId?.toString() ?: it.productNameSnapshot }
                     val itemsDiffer = existing.items.size != items.size ||
-                        items.zip(existing.items).any { (inc, cur) ->
+                        sortedInc.zip(sortedCur).any { (inc, cur) ->
                             inc.quantity != cur.quantity ||
                             Math.abs(inc.sellingPrice - cur.sellingPrice) > 0.01 ||
                             inc.productNameSnapshot != cur.productNameSnapshot
@@ -250,6 +258,12 @@ interface CustomerDao {
     @Query("UPDATE customers SET isActive = 0 WHERE id = :id")
     suspend fun archiveCustomer(id: Long)
 
+    @Query("UPDATE customers SET isActive = 0 WHERE (:serverId IS NOT NULL AND serverId > 0 AND serverId = :serverId) OR (:cleanMobile != '' AND (mobile = :cleanMobile OR mobile LIKE '%' || :cleanMobile)) OR (:name != '' AND LOWER(TRIM(name)) = LOWER(TRIM(:name)))")
+    suspend fun archiveCustomerComprehensive(serverId: Long?, cleanMobile: String, name: String)
+
+    @Query("DELETE FROM customers WHERE (:serverId IS NOT NULL AND serverId > 0 AND serverId = :serverId) OR (:cleanMobile != '' AND (mobile = :cleanMobile OR mobile LIKE '%' || :cleanMobile)) OR (:name != '' AND LOWER(TRIM(name)) = LOWER(TRIM(:name)))")
+    suspend fun hardDeleteCustomerComprehensive(serverId: Long?, cleanMobile: String, name: String)
+
     @Query("DELETE FROM customers WHERE id = :id")
     suspend fun hardDeleteCustomer(id: Long)
 
@@ -286,9 +300,10 @@ interface CustomerDao {
         val existing = existingByServer ?: existingByMobile ?: existingByName
 
         if (existing != null) {
+            val existingCleanMob = com.matoshree.shopmanager.utils.PhoneUtils.clean10DigitMobileInput(existing.mobile)
             // Only update Room if fields actually changed (avoids invalidation loops and list jitter)
             if (existing.name != customer.name ||
-                existing.mobile != customer.mobile ||
+                existingCleanMob != cleanMob ||
                 existing.address != customer.address ||
                 existing.totalBills != customer.totalBills ||
                 Math.abs(existing.lifetimeSpend - customer.lifetimeSpend) > 0.01 ||

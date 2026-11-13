@@ -434,31 +434,43 @@ class FirestoreCustomerRepository {
             "cust_${System.currentTimeMillis()}_${UUID.randomUUID().toString().take(5)}"
         }
 
-        val snapshot = try {
-            if (FirebaseManager.isNetworkAvailable()) {
-                kotlinx.coroutines.withTimeoutOrNull(2500) {
-                    FirebaseManager.customersCollection().get().await()
-                } ?: FirebaseManager.customersCollection().get(com.google.firebase.firestore.Source.CACHE).await()
-            } else {
-                FirebaseManager.customersCollection().get(com.google.firebase.firestore.Source.CACHE).await()
-            }
-        } catch (e: Exception) {
-            null
-        }
+        var existingLegacyId: Long? = null
+        if (cleanMobile.length == 10) {
+            // Direct document lookup - deterministic ID, instant, zero full-collection download!
+            val directDoc = try {
+                if (FirebaseManager.isNetworkAvailable()) {
+                    kotlinx.coroutines.withTimeoutOrNull(2000) {
+                        FirebaseManager.customersCollection().document(docId).get().await()
+                    } ?: FirebaseManager.customersCollection().document(docId).get(com.google.firebase.firestore.Source.CACHE).await()
+                } else {
+                    FirebaseManager.customersCollection().document(docId).get(com.google.firebase.firestore.Source.CACHE).await()
+                }
+            } catch (_: Exception) { null }
 
-        val existingDoc = snapshot?.documents?.find {
-            val dto = it.toObject(CustomerDto::class.java)
-            (cleanMobile.length == 10 && dto?.mobile?.isNotBlank() == true && com.matoshree.shopmanager.utils.PhoneUtils.clean10DigitMobileInput(dto.mobile) == cleanMobile) ||
-            (customer.id > 0 && (dto?.legacyId == customer.id || (it.id.hashCode().toLong() and 0x7FFFFFFFFFFFFFFFL) == customer.id)) ||
-            (customer.name.isNotBlank() && dto?.name?.isNotBlank() == true && dto.name.trim().equals(customer.name.trim(), ignoreCase = true))
-        }
-        if (existingDoc != null) {
-            docId = existingDoc.id
+            if (directDoc != null && directDoc.exists()) {
+                existingLegacyId = directDoc.getLong("legacyId")
+            }
+        } else if (customer.name.isNotBlank()) {
+            // Customers without mobile: targeted query only merging if both lack mobile numbers
+            val matchedDoc = try {
+                FirebaseManager.customersCollection()
+                    .whereEqualTo("name", customer.name.trim())
+                    .limit(1)
+                    .get().await().documents.firstOrNull()
+            } catch (_: Exception) { null }
+
+            if (matchedDoc != null) {
+                val matchedMob = com.matoshree.shopmanager.utils.PhoneUtils.clean10DigitMobileInput(matchedDoc.getString("mobile") ?: "")
+                if (matchedMob.isBlank()) {
+                    docId = matchedDoc.id
+                    existingLegacyId = matchedDoc.getLong("legacyId")
+                }
+            }
         }
 
         val dto = CustomerDto(
             id = docId,
-            legacyId = customer.id.takeIf { it > 0 } ?: existingDoc?.toObject(CustomerDto::class.java)?.legacyId ?: (docId.hashCode().toLong() and 0x7FFFFFFFFFFFFFFFL),
+            legacyId = customer.id.takeIf { it > 0 } ?: existingLegacyId ?: (docId.hashCode().toLong() and 0x7FFFFFFFFFFFFFFFL),
             name = customer.name.trim(),
             mobile = cleanMobile.ifBlank { customer.mobile.trim() },
             email = customer.email?.trim()?.ifBlank { null },

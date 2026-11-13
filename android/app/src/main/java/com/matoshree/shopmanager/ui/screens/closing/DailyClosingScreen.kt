@@ -132,12 +132,12 @@ class DailyClosingViewModel(
                 _closingState.value = existing
             } else {
                 combine(
-                    billRepository.getAllBills(limit = 1000),
+                    billRepository.getTodayBills(today),
                     udhariRepository.getAllTransactions(),
                     expenseRepository.getAllExpenses()
                 ) { bills, transactions, expenses ->
-                    val todayBills = bills.filter { it.billDate.startsWith(today) && !it.isVoided }
-                    val totalSales = todayBills.sumOf { it.finalAmount }
+                    val todayBills = bills.filter { !it.isVoided }
+                    val totalSales = com.matoshree.shopmanager.domain.usecase.ShopMetricsCalculator.calculateTodaySales(todayBills, today)
                     val totalBillsCount = todayBills.size
 
                     // Bill cash and UPI based on paid amounts

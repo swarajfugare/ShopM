@@ -39,7 +39,7 @@ class MatoshreeApp : Application() {
         // 3. Initialize Version 2 Smart Notifications Engine
         com.matoshree.shopmanager.notifications.ShopNotificationManager.initNotificationChannels(this)
         com.matoshree.shopmanager.notifications.NotificationScheduler.scheduleAllDailyReminders(this)
-        com.matoshree.shopmanager.notifications.MultiDeviceBillListener.startListening(this)
+        // Note: Realtime multi-device notifications are natively dispatched via RealtimeSyncManager once authenticated
     }
 
     private suspend fun cleanMockDataIfPresent(database: AppDatabase) {

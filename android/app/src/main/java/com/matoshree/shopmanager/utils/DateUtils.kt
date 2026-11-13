@@ -109,4 +109,23 @@ object DateUtils {
             SimpleDateFormat("dd-MM-yyyy", Locale.ENGLISH).format(Date())
         }
     }
+
+    fun parseDateToMillis(dateStr: String?): Long {
+        if (dateStr.isNullOrBlank()) return 0L
+        val patterns = listOf(
+            "yyyy-MM-dd HH:mm:ss",
+            "yyyy-MM-dd'T'HH:mm:ss",
+            "yyyy-MM-dd"
+        )
+        for (pattern in patterns) {
+            try {
+                val sdf = SimpleDateFormat(pattern, Locale.getDefault()).apply {
+                    timeZone = kolkataTimeZone
+                }
+                val d = sdf.parse(dateStr)
+                if (d != null) return d.time
+            } catch (_: Exception) {}
+        }
+        return 0L
+    }
 }

@@ -164,7 +164,12 @@ fun BillWithItems.toDomain(): Bill {
     )
 }
 
-fun toBillEntities(bill: Bill, syncStatus: SyncStatus = SyncStatus.SYNCED): Pair<BillEntity, List<BillItemEntity>> {
+fun toBillEntities(
+    bill: Bill,
+    syncStatus: SyncStatus = SyncStatus.SYNCED,
+    createdAt: Long? = null
+): Pair<BillEntity, List<BillItemEntity>> {
+    val effectiveCreatedAt = createdAt ?: com.matoshree.shopmanager.utils.DateUtils.parseDateToMillis(bill.billDate).takeIf { it > 0 } ?: System.currentTimeMillis()
     val billEntity = BillEntity(
         id = 0L,
         serverId = bill.id,
@@ -197,7 +202,7 @@ fun toBillEntities(bill: Bill, syncStatus: SyncStatus = SyncStatus.SYNCED): Pair
         syncStatus = syncStatus,
         isVoided = bill.isVoided,
         voidReason = bill.voidReason,
-        createdAt = System.currentTimeMillis()
+        createdAt = effectiveCreatedAt
     )
     val itemEntities = bill.items.map { item ->
         BillItemEntity(
