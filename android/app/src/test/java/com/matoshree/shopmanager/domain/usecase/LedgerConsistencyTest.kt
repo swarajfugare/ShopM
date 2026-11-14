@@ -114,10 +114,11 @@ class LedgerConsistencyTest {
         assertEquals("Exactly one bill breakdown", 1, res.billBreakdowns.size)
     }
 
-    // A3.2: Same bill received twice (two uuids / local + cloud) -> one entry
+    // A3.2: Same bill received twice (two uuids / local + cloud sharing GID) -> one entry
     @Test
     fun test_A3_2_sameBillReceivedTwice_differentUuids_oneEntry() {
         val cust = Customer(id = 20L, name = "Swaraj", mobile = "9833001122")
+        val billGid = IdGenerator.generate(IdType.BILL)
         val localBill = createBill(
             id = 201L,
             customerId = 20L,
@@ -128,7 +129,7 @@ class LedgerConsistencyTest {
             pendingAmount = 1000.0,
             billNumber = "BILL-201",
             transactionUuid = "uuid-local-201"
-        )
+        ).copy(gid = billGid)
         val cloudBill = createBill(
             id = 202L,
             customerId = 20L,
@@ -139,7 +140,7 @@ class LedgerConsistencyTest {
             pendingAmount = 1000.0,
             billNumber = "BILL-201",
             transactionUuid = "uuid-cloud-201"
-        )
+        ).copy(gid = billGid)
 
         val res = UdhariLedger.computeCustomerLedger(
             customerKey = "mob_9833001122",
@@ -168,7 +169,8 @@ class LedgerConsistencyTest {
             pendingAmount = 1500.0,
             billNumber = "BILL-301"
         )
-        // Two payment transactions for the same bill and amount on the same day/time
+        // Two payment transactions for the same bill sharing idempotency key / GID
+        val payGid = IdGenerator.generate(IdType.PAYMENT)
         val pay1 = createTx(
             id = "payDoc1",
             customerId = 30L,
@@ -180,7 +182,7 @@ class LedgerConsistencyTest {
             billNumber = "BILL-301",
             transactionUuid = "uuid-pay-doc1",
             createdAt = 5000L
-        )
+        ).copy(gid = payGid)
         val pay2 = createTx(
             id = "payDoc2",
             customerId = 30L,
@@ -190,9 +192,9 @@ class LedgerConsistencyTest {
             type = UdhariTransactionType.PAYMENT,
             billId = 301L,
             billNumber = "BILL-301",
-            transactionUuid = "uuid-pay-doc2",
-            createdAt = 5050L // 50ms apart retry/sync duplicate
-        )
+            transactionUuid = "uuid-pay-doc1", // Idempotency key reused on retry / sync
+            createdAt = 5050L
+        ).copy(gid = payGid)
 
         val res = UdhariLedger.computeCustomerLedger(
             customerKey = "mob_9844001122",
