@@ -360,6 +360,7 @@ data class UdhariTransactionDto(
     var billGid: String? = null,
     var billNumber: String = "",
     var type: String = "PAYMENT", // PURCHASE_CREDIT, PAYMENT, REVERSAL
+    var kind: String = "", // BILL_CREDIT, MANUAL, CHECKOUT_PAYMENT, SETTLEMENT, GENERAL_PAYMENT
     var amount: Double = 0.0,
     var paymentMethod: String = "CASH",
     var previousOutstanding: Double = 0.0,
@@ -396,6 +397,7 @@ data class UdhariTransactionDto(
             billGid = billGid,
             billNumber = billNumber,
             type = tType,
+            kind = kind,
             amount = amount,
             paymentMethod = pMethod,
             previousOutstanding = previousOutstanding,

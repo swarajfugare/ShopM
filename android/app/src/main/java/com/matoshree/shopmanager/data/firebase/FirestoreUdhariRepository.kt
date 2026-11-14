@@ -590,7 +590,7 @@ class FirestoreUdhariRepository {
             val creditGid = IdGenerator.generate(IdType.UDHARI)
             val txDocId = creditGid
             val effectiveDate = date?.ifBlank { DateUtils.todayDate() } ?: DateUtils.todayDate()
-            val cleanNote = note?.ifBlank { "जुनी बाकी / Manual Opening Balance" } ?: "जुनी बाकी / Manual Opening Balance"
+            val cleanNote = note?.ifBlank { "जुनी उधारी" } ?: "जुनी उधारी"
 
             val custSnap = try {
                 kotlinx.coroutines.withTimeoutOrNull(600) {
@@ -624,6 +624,7 @@ class FirestoreUdhariRepository {
                 billId = 0L,
                 billNumber = "MANUAL-${System.currentTimeMillis().toString().takeLast(4)}",
                 type = UdhariTransactionType.PURCHASE_CREDIT.name,
+                kind = "MANUAL",
                 amount = amount,
                 paymentMethod = PaymentMethod.OTHER.name,
                 previousOutstanding = prevDue,
@@ -633,6 +634,7 @@ class FirestoreUdhariRepository {
                 dueDate = dueDate,
                 note = cleanNote,
                 isReversed = false,
+                status = "ACTIVE",
                 createdAt = System.currentTimeMillis()
             )
 
@@ -670,30 +672,57 @@ class FirestoreUdhariRepository {
     }
 
     /**
-     * Atomically deletes or cancels a manual Udhari debit transaction and restores customer balance.
+     * Resolves a transaction document by direct ID, prefix-stripped ID, gid, uuid or billNumber.
+     */
+    private suspend fun findTransactionDocument(txId: String): com.google.firebase.firestore.DocumentSnapshot? {
+        val col = FirebaseManager.udhariTransactionsCollection()
+        // 1. Direct document ID match
+        try {
+            val d = col.document(txId).get().await()
+            if (d.exists()) return d
+        } catch (_: Exception) {}
+
+        // 2. Stripped prefix match (manual_, credit_, bill_) WITHOUT cutting at underscore
+        val clean = txId.removePrefix("manual_").removePrefix("credit_").removePrefix("bill_")
+        if (clean != txId && clean.isNotBlank()) {
+            try {
+                val d = col.document(clean).get().await()
+                if (d.exists()) return d
+            } catch (_: Exception) {}
+        }
+
+        // 3. By gid
+        try {
+            val q = col.whereEqualTo("gid", txId).limit(1).get().await()
+            if (!q.isEmpty) return q.documents.first()
+        } catch (_: Exception) {}
+
+        // 4. By transactionUuid
+        try {
+            val q = col.whereEqualTo("transactionUuid", txId).limit(1).get().await()
+            if (!q.isEmpty) return q.documents.first()
+        } catch (_: Exception) {}
+
+        // 5. By billNumber (if clean is a valid bill number)
+        if (clean.isNotBlank()) {
+            try {
+                val q = col.whereEqualTo("billNumber", clean).limit(1).get().await()
+                if (!q.isEmpty) return q.documents.first()
+            } catch (_: Exception) {}
+        }
+        return null
+    }
+
+    /**
+     * Atomically deletes or cancels an Udhari transaction (manual or orphan) and restores customer balance.
      */
     suspend fun deleteOrReverseManualUdhari(transactionId: String, reason: String = "Deleted by user"): Result<Unit> {
         return try {
             FirebaseManager.ensureAuthenticated()
             val isOnline = FirebaseManager.isNetworkAvailable()
-            val cleanId = transactionId.removePrefix("manual_").removePrefix("credit_").removePrefix("bill_").substringBefore("_")
+            val txSnap = findTransactionDocument(transactionId)
+                ?: return Result.failure(IllegalStateException("Transaction not found: $transactionId"))
 
-            val txSnap = try {
-                var doc = FirebaseManager.udhariTransactionsCollection().document(cleanId).get().await()
-                if (!doc.exists()) {
-                    val byGid = FirebaseManager.udhariTransactionsCollection().whereEqualTo("gid", transactionId).get().await()
-                    doc = byGid.documents.firstOrNull() ?: doc
-                }
-                if (!doc.exists()) {
-                    val byNum = FirebaseManager.udhariTransactionsCollection().whereEqualTo("billNumber", cleanId).get().await()
-                    doc = byNum.documents.firstOrNull() ?: doc
-                }
-                doc.takeIf { it.exists() }
-            } catch (e: Exception) { null }
-
-            if (txSnap == null || !txSnap.exists()) {
-                return Result.failure(IllegalStateException("Transaction not found"))
-            }
             val originalTx = txSnap.toObject(UdhariTransactionDto::class.java)
                 ?: return Result.failure(IllegalStateException("Failed to parse transaction"))
 
@@ -730,6 +759,8 @@ class FirestoreUdhariRepository {
                 mapOf(
                     "status" to "TRASH",
                     "deletedAt" to now,
+                    "isDeleted" to true,
+                    "reversalReason" to reason,
                     "updatedAt" to now
                 )
             )
@@ -751,10 +782,99 @@ class FirestoreUdhariRepository {
 
             val commitTask = batch.commit()
             FirebaseManager.awaitWriteTask(commitTask)
-            Log.d(TAG, "Manual udhari deleted successfully: $transactionId")
+            Log.d(TAG, "Udhari transaction deleted successfully: $transactionId")
             Result.success(Unit)
         } catch (e: Exception) {
-            Log.e(TAG, "Error deleting manual udhari: ${e.message}", e)
+            Log.e(TAG, "Error deleting udhari: ${e.message}", e)
+            Result.failure(e)
+        }
+    }
+
+    /**
+     * Ignores an orphan transaction so it is excluded from active ledger calculations.
+     */
+    suspend fun ignoreTransaction(transactionId: String): Result<Unit> {
+        return try {
+            FirebaseManager.ensureAuthenticated()
+            val txSnap = findTransactionDocument(transactionId)
+                ?: return Result.failure(IllegalStateException("Transaction not found: $transactionId"))
+
+            val commitTask = txSnap.reference.update(
+                mapOf(
+                    "status" to "IGNORED",
+                    "updatedAt" to System.currentTimeMillis()
+                )
+            )
+            FirebaseManager.awaitWriteTask(commitTask)
+            Log.d(TAG, "Transaction ignored successfully: $transactionId")
+            Result.success(Unit)
+        } catch (e: Exception) {
+            Log.e(TAG, "Error ignoring transaction: ${e.message}", e)
+            Result.failure(e)
+        }
+    }
+
+    /**
+     * Converts an orphan payment to a general (FIFO) payment applied against all customer dues.
+     */
+    suspend fun convertOrphanPaymentToGeneral(transactionId: String): Result<Unit> {
+        return try {
+            FirebaseManager.ensureAuthenticated()
+            val txSnap = findTransactionDocument(transactionId)
+                ?: return Result.failure(IllegalStateException("Transaction not found: $transactionId"))
+
+            val commitTask = txSnap.reference.update(
+                mapOf(
+                    "kind" to "GENERAL_PAYMENT",
+                    "billNumber" to "GENERAL",
+                    "billId" to 0L,
+                    "billGid" to null,
+                    "needsReview" to false,
+                    "updatedAt" to System.currentTimeMillis()
+                )
+            )
+            FirebaseManager.awaitWriteTask(commitTask)
+            Log.d(TAG, "Orphan payment converted to general payment: $transactionId")
+            Result.success(Unit)
+        } catch (e: Exception) {
+            Log.e(TAG, "Error converting orphan payment: ${e.message}", e)
+            Result.failure(e)
+        }
+    }
+
+    /**
+     * Bulk soft-deletes a list of orphan transaction IDs.
+     */
+    suspend fun bulkSoftDeleteOrphans(txIds: List<String>): Result<Int> {
+        return try {
+            FirebaseManager.ensureAuthenticated()
+            val batch = FirebaseManager.firestore.batch()
+            val now = System.currentTimeMillis()
+            var count = 0
+            for (id in txIds) {
+                val snap = findTransactionDocument(id)
+                if (snap != null && snap.exists()) {
+                    batch.update(
+                        snap.reference,
+                        mapOf(
+                            "status" to "TRASH",
+                            "deletedAt" to now,
+                            "isDeleted" to true,
+                            "reversalReason" to "Bulk orphan delete",
+                            "updatedAt" to now
+                        )
+                    )
+                    count++
+                }
+            }
+            if (count > 0) {
+                val commitTask = batch.commit()
+                FirebaseManager.awaitWriteTask(commitTask)
+            }
+            Log.d(TAG, "Bulk soft deleted $count orphan transactions")
+            Result.success(count)
+        } catch (e: Exception) {
+            Log.e(TAG, "Error bulk deleting orphans: ${e.message}", e)
             Result.failure(e)
         }
     }

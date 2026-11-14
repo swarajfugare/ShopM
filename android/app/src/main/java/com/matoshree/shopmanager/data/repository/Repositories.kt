@@ -619,7 +619,7 @@ class BillRepository(
             try {
                 if (FirebaseManager.isNetworkAvailable()) {
                     FirebaseManager.ensureAuthenticated()
-                    val snap = FirebaseManager.udhariTransactionsCollection().limit(3000).get().await()
+                    val snap = FirebaseManager.udhariTransactionsCollection().get().await()
                     snap.documents.mapNotNull { doc ->
                         doc.toObject(UdhariTransactionDto::class.java)?.apply { id = doc.id }?.toDomain()
                     }
@@ -627,6 +627,12 @@ class BillRepository(
             } catch (e: Exception) {
                 emptyList()
             }
+        }
+
+        // Refuse to overwrite stored bill values if data set is incomplete
+        if (allTxs.isEmpty() && allBills.any { it.pendingAmount > 0.01 }) {
+            Log.w("BillRepository", "Refusing to recompute stored bills: transaction set is empty but pending bills exist")
+            return 0
         }
 
         val shopLedger = com.matoshree.shopmanager.domain.usecase.UdhariLedger.computeShopLedger(allBills, allTxs, allCusts)
@@ -670,6 +676,9 @@ class UdhariRepository(
         dueDate: String? = null
     ): Result<UdhariTransaction> = firestoreRepo.recordManualDebit(customer, amount, note, date, dueDate)
     suspend fun deleteOrReverseManualUdhari(transactionId: String, reason: String = "Deleted by user"): Result<Unit> = firestoreRepo.deleteOrReverseManualUdhari(transactionId, reason)
+    suspend fun ignoreTransaction(transactionId: String): Result<Unit> = firestoreRepo.ignoreTransaction(transactionId)
+    suspend fun convertOrphanPaymentToGeneral(transactionId: String): Result<Unit> = firestoreRepo.convertOrphanPaymentToGeneral(transactionId)
+    suspend fun bulkSoftDeleteOrphans(txIds: List<String>): Result<Int> = firestoreRepo.bulkSoftDeleteOrphans(txIds)
     suspend fun updateUdhariDueDate(transactionId: String, newDueDate: String?): Result<Unit> = firestoreRepo.updateUdhariDueDate(transactionId, newDueDate)
 }
 

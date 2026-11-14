@@ -687,7 +687,28 @@ class CustomerViewModel(
         customerLedger.value = customerLedger.value.filter { it.id != transactionId && it.transaction?.id != transactionId }
         customerTransactions.value = customerTransactions.value.filter { it.id != transactionId }
         customerKhatavahi.value = customerKhatavahi.value.filter { it.id != transactionId }
+        customerOrphanTransactions.value = customerOrphanTransactions.value.filter { it.id != transactionId }
         val res = udhariRepository.deleteOrReverseManualUdhari(transactionId, reason)
+        selectedCustomerProfile.value?.id?.let { loadCustomerProfile(it) }
+        return res
+    }
+
+    suspend fun ignoreOrphanTransaction(transactionId: String): Result<Unit> {
+        customerOrphanTransactions.value = customerOrphanTransactions.value.filter { it.id != transactionId }
+        val res = udhariRepository.ignoreTransaction(transactionId)
+        selectedCustomerProfile.value?.id?.let { loadCustomerProfile(it) }
+        return res
+    }
+
+    suspend fun convertOrphanToGeneralPayment(transactionId: String): Result<Unit> {
+        val res = udhariRepository.convertOrphanPaymentToGeneral(transactionId)
+        selectedCustomerProfile.value?.id?.let { loadCustomerProfile(it) }
+        return res
+    }
+
+    suspend fun bulkSoftDeleteOrphans(txIds: List<String>): Result<Int> {
+        customerOrphanTransactions.value = customerOrphanTransactions.value.filter { it.id !in txIds }
+        val res = udhariRepository.bulkSoftDeleteOrphans(txIds)
         selectedCustomerProfile.value?.id?.let { loadCustomerProfile(it) }
         return res
     }
@@ -1389,6 +1410,10 @@ fun CustomerProfileScreen(
     var selectedLedgerEntryForAction by remember { mutableStateOf<UdhariLedgerEntry?>(null) }
     var prefilledPaymentAmount by remember { mutableStateOf<Double?>(null) }
     var showCancelledPaymentsOnly by remember { mutableStateOf(false) }
+    var deletingOrphanTx by remember { mutableStateOf<UdhariTransaction?>(null) }
+    var ignoringOrphanTx by remember { mutableStateOf<UdhariTransaction?>(null) }
+    var convertingOrphanTx by remember { mutableStateOf<UdhariTransaction?>(null) }
+    var showBulkDeleteOrphansDialog by remember { mutableStateOf(false) }
 
     val thermalPrinterManager = remember { com.matoshree.shopmanager.printer.ThermalPrinterManager(context) }
     var isPrintingStatement by remember { mutableStateOf(false) }
@@ -1786,10 +1811,22 @@ fun CustomerProfileScreen(
                                         modifier = Modifier.padding(12.dp),
                                         verticalArrangement = Arrangement.spacedBy(6.dp)
                                     ) {
-                                        Row(verticalAlignment = Alignment.CenterVertically) {
-                                            Icon(Icons.Default.Warning, contentDescription = null, tint = BoutiqueError, modifier = Modifier.size(16.dp))
-                                            Spacer(modifier = Modifier.width(6.dp))
-                                            Text("संदर्भ बिल उपलब्ध नसलेल्या नोंदी (${orphanTransactions.size})", fontWeight = FontWeight.Bold, fontSize = 13.sp, color = BoutiqueError)
+                                        Row(
+                                            modifier = Modifier.fillMaxWidth(),
+                                            horizontalArrangement = Arrangement.SpaceBetween,
+                                            verticalAlignment = Alignment.CenterVertically
+                                        ) {
+                                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                                Icon(Icons.Default.Warning, contentDescription = null, tint = BoutiqueError, modifier = Modifier.size(16.dp))
+                                                Spacer(modifier = Modifier.width(6.dp))
+                                                Text("बिलाशिवाय नोंदी (${orphanTransactions.size})", fontWeight = FontWeight.Bold, fontSize = 13.sp, color = BoutiqueError)
+                                            }
+                                            TextButton(
+                                                onClick = { showBulkDeleteOrphansDialog = true },
+                                                contentPadding = PaddingValues(horizontal = 6.dp, vertical = 2.dp)
+                                            ) {
+                                                Text("सर्व हटवा", color = BoutiqueError, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                                            }
                                         }
                                         Text(
                                             "या नोंदी ज्या बिलांशी जोडलेल्या होत्या ते बिल फोनमध्ये उपलब्ध नाही (उदा. हटवलेले बिल). या नोंदी चालू उधारीतून सुरक्षितपणे वगळल्या आहेत.",
@@ -1810,24 +1847,30 @@ fun CustomerProfileScreen(
                                                     )
                                                     Text(ot.date, style = MaterialTheme.typography.bodySmall.copy(color = MutedCharcoal, fontSize = 11.sp))
                                                 }
-                                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(2.dp)) {
                                                     Text(
                                                         CurrencyFormatter.format(ot.amount),
                                                         fontWeight = FontWeight.Bold,
                                                         fontSize = 13.sp,
                                                         color = if (ot.type == UdhariTransactionType.PURCHASE_CREDIT) BoutiqueError else BoutiqueSuccess
                                                     )
-                                                    Spacer(modifier = Modifier.width(8.dp))
+                                                    if (ot.type == UdhariTransactionType.PAYMENT) {
+                                                        TextButton(
+                                                            onClick = { convertingOrphanTx = ot },
+                                                            contentPadding = PaddingValues(horizontal = 4.dp, vertical = 2.dp)
+                                                        ) {
+                                                            Text("सामान्य भरणा", color = DeepEmerald, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                                                        }
+                                                    }
                                                     TextButton(
-                                                        onClick = {
-                                                            coroutineScope.launch {
-                                                                val res = viewModel.deleteOrReverseManualUdhari(ot.id)
-                                                                if (res.isSuccess) {
-                                                                    Toast.makeText(context, "नोंद हटवली", Toast.LENGTH_SHORT).show()
-                                                                }
-                                                            }
-                                                        },
-                                                        contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp)
+                                                        onClick = { ignoringOrphanTx = ot },
+                                                        contentPadding = PaddingValues(horizontal = 4.dp, vertical = 2.dp)
+                                                    ) {
+                                                        Text("दुर्लक्ष", color = MutedCharcoal, fontSize = 11.sp)
+                                                    }
+                                                    TextButton(
+                                                        onClick = { deletingOrphanTx = ot },
+                                                        contentPadding = PaddingValues(horizontal = 4.dp, vertical = 2.dp)
                                                     ) {
                                                         Text("हटवा", color = BoutiqueError, fontSize = 11.sp, fontWeight = FontWeight.Bold)
                                                     }
@@ -2793,18 +2836,182 @@ fun CustomerProfileScreen(
                         } else {
                             Icon(Icons.Default.Send, contentDescription = null, modifier = Modifier.size(16.dp))
                             Spacer(modifier = Modifier.width(6.dp))
-                            Text("व्हॉट्सॲप Webhook ऑटोमेशन पाठवा", fontSize = 13.sp)
+                            Text("व्हॉट्सॲप पाठवा", fontSize = 13.sp)
                         }
                     }
                 }
             },
             dismissButton = {
                 TextButton(onClick = { showUdhariReminderDialog = false }, enabled = !isSendingWebhookReminder) {
-                    Text("रद्द करा", color = MutedCharcoal)
+                    Text("रद्द", color = MutedCharcoal)
                 }
             },
             containerColor = WarmWhite,
             shape = RoundedCornerShape(16.dp)
+        )
+    }
+
+    // ORPHAN RECORD ACTION DIALOGS (B1)
+    if (deletingOrphanTx != null) {
+        val tx = deletingOrphanTx!!
+        AlertDialog(
+            onDismissRequest = { deletingOrphanTx = null },
+            title = { Text("नोंद हटवायची का?", fontWeight = FontWeight.Bold, color = BoutiqueError) },
+            text = {
+                Text(
+                    "ही नोंद (${if (tx.type == UdhariTransactionType.PURCHASE_CREDIT) "उधारी" else "भरणा"} ${CurrencyFormatter.format(tx.amount)}) कचऱ्यात हलवायची का?\nही नंतर कचरा पेटीतून परत मिळवता येईल.",
+                    fontSize = 13.sp
+                )
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        val targetId = tx.id
+                        deletingOrphanTx = null
+                        coroutineScope.launch {
+                            val res = viewModel.deleteOrReverseManualUdhari(targetId)
+                            if (res.isSuccess) {
+                                Toast.makeText(context, "नोंद कचऱ्यात हलवली", Toast.LENGTH_SHORT).show()
+                            } else {
+                                Toast.makeText(context, "त्रुटी: ${res.exceptionOrNull()?.message ?: "नोंद हटवता आली नाही"}", Toast.LENGTH_LONG).show()
+                            }
+                        }
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = BoutiqueError)
+                ) {
+                    Text("हटवा")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { deletingOrphanTx = null }) {
+                    Text("रद्द")
+                }
+            },
+            containerColor = WarmWhite
+        )
+    }
+
+    if (ignoringOrphanTx != null) {
+        val tx = ignoringOrphanTx!!
+        AlertDialog(
+            onDismissRequest = { ignoringOrphanTx = null },
+            title = { Text("नोंद दुर्लक्षित करायची का?", fontWeight = FontWeight.Bold, color = DeepEmerald) },
+            text = {
+                Text(
+                    "ही नोंद (${CurrencyFormatter.format(tx.amount)}) दुर्लक्षित केली जाईल आणि चालू उधारी हिशोबातून वगळली जाईल.",
+                    fontSize = 13.sp
+                )
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        val targetId = tx.id
+                        ignoringOrphanTx = null
+                        coroutineScope.launch {
+                            val res = viewModel.ignoreOrphanTransaction(targetId)
+                            if (res.isSuccess) {
+                                Toast.makeText(context, "नोंद दुर्लक्षित केली", Toast.LENGTH_SHORT).show()
+                            } else {
+                                Toast.makeText(context, "त्रुटी: ${res.exceptionOrNull()?.message ?: "प्रक्रिया अयशस्वी"}", Toast.LENGTH_LONG).show()
+                            }
+                        }
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = DeepEmerald)
+                ) {
+                    Text("दुर्लक्ष")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { ignoringOrphanTx = null }) {
+                    Text("रद्द")
+                }
+            },
+            containerColor = WarmWhite
+        )
+    }
+
+    if (convertingOrphanTx != null) {
+        val tx = convertingOrphanTx!!
+        AlertDialog(
+            onDismissRequest = { convertingOrphanTx = null },
+            title = { Text("सामान्य भरणा करायचा का?", fontWeight = FontWeight.Bold, color = DeepEmerald) },
+            text = {
+                Text(
+                    "हा भरणा (${CurrencyFormatter.format(tx.amount)}) सामान्य पेमेंट (FIFO) म्हणून जमा केला जाईल आणि कस्टमरच्या चालू उधारीतून वजा होईल.",
+                    fontSize = 13.sp
+                )
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        val targetId = tx.id
+                        convertingOrphanTx = null
+                        coroutineScope.launch {
+                            val res = viewModel.convertOrphanToGeneralPayment(targetId)
+                            if (res.isSuccess) {
+                                Toast.makeText(context, "सामान्य भरणा म्हणून जमा केला", Toast.LENGTH_SHORT).show()
+                            } else {
+                                Toast.makeText(context, "त्रुटी: ${res.exceptionOrNull()?.message ?: "प्रक्रिया अयशस्वी"}", Toast.LENGTH_LONG).show()
+                            }
+                        }
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = DeepEmerald)
+                ) {
+                    Text("सामान्य भरणा")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { convertingOrphanTx = null }) {
+                    Text("रद्द")
+                }
+            },
+            containerColor = WarmWhite
+        )
+    }
+
+    if (showBulkDeleteOrphansDialog && orphanTransactions.isNotEmpty()) {
+        val totalAmount = orphanTransactions.sumOf { it.amount }
+        AlertDialog(
+            onDismissRequest = { showBulkDeleteOrphansDialog = false },
+            title = { Text("सर्व बिलाशिवाय नोंदी हटवायच्या का?", fontWeight = FontWeight.Bold, color = BoutiqueError) },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text(
+                        "या कस्टमरच्या सर्व ${orphanTransactions.size} बिलाशिवाय नोंदी (एकूण ${CurrencyFormatter.format(totalAmount)}) कचऱ्यात हलवायच्या आहेत का?",
+                        fontSize = 13.sp
+                    )
+                    Text(
+                        "या नोंदी नंतर कचरा पेटीतून परत आणता येतील.",
+                        fontSize = 11.sp,
+                        color = MutedCharcoal
+                    )
+                }
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        val ids = orphanTransactions.map { it.id }
+                        showBulkDeleteOrphansDialog = false
+                        coroutineScope.launch {
+                            val res = viewModel.bulkSoftDeleteOrphans(ids)
+                            if (res.isSuccess) {
+                                Toast.makeText(context, "${res.getOrDefault(0)} नोंदी कचऱ्यात हलवल्या", Toast.LENGTH_SHORT).show()
+                            } else {
+                                Toast.makeText(context, "त्रुटी: ${res.exceptionOrNull()?.message ?: "नोंदी हटवता आल्या नाहीत"}", Toast.LENGTH_LONG).show()
+                            }
+                        }
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = BoutiqueError)
+                ) {
+                    Text("सर्व हटवा")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showBulkDeleteOrphansDialog = false }) {
+                    Text("रद्द")
+                }
+            },
+            containerColor = WarmWhite
         )
     }
 }

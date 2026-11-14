@@ -219,7 +219,7 @@ object UdhariLedger {
             .map { it.billNumber }.toSet()
 
         val validTxs = allTransactions.filter {
-            !it.isReversed && it.status != "TRASH" &&
+            !it.isReversed && it.status != "TRASH" && it.status != "IGNORED" &&
             !voidedBillIds.contains(it.billId) &&
             !(it.billNumber.isNotBlank() && voidedBillNumbers.contains(it.billNumber))
         }
@@ -417,17 +417,25 @@ object UdhariLedger {
         val legacyCreditTxs = mutableListOf<UdhariTransaction>()
 
         for (tx in unlinkedCreditTxs) {
+            val effKind = tx.getEffectiveKind()
+            if (effKind == "MANUAL") {
+                manualDebits.add(tx)
+                continue
+            }
+
             val cleanNum = tx.billNumber.trim().uppercase()
             val hasBillRef = !tx.billGid.isNullOrBlank() || tx.billId != 0L || cleanNum.isNotBlank()
             if (hasBillRef) {
-                val isDeletedAppBill = cleanNum.startsWith("MC-") ||
-                                       allBills.any { b -> (b.isVoided || b.paymentStatus == PaymentStatus.VOID) &&
-                                           ((!tx.billGid.isNullOrBlank() && b.gid == tx.billGid) ||
-                                            (cleanNum.isNotBlank() && b.billNumber.trim().equals(cleanNum, ignoreCase = true)) ||
-                                            (tx.billId != 0L && b.id == tx.billId)) } ||
-                                       (cust != null && cust.totalBills == 0 && custBills.isEmpty())
+                val matchingBill = allBills.find { b ->
+                    (!tx.billGid.isNullOrBlank() && b.gid == tx.billGid) ||
+                    (cleanNum.isNotBlank() && b.billNumber.trim().equals(cleanNum, ignoreCase = true)) ||
+                    (tx.billId != 0L && b.id == tx.billId)
+                }
 
-                if (isDeletedAppBill) {
+                val isVoidedInBills = matchingBill != null && (matchingBill.isVoided || matchingBill.paymentStatus == PaymentStatus.VOID)
+                val isDeletedAppBill = cleanNum.startsWith("MC-") && matchingBill == null
+
+                if (isVoidedInBills || isDeletedAppBill) {
                     orphanCreditTxs.add(tx)
                 } else {
                     legacyCreditTxs.add(tx)
@@ -492,7 +500,7 @@ object UdhariLedger {
                     id = "manual_${m.id}",
                     date = m.date,
                     timeMillis = m.createdAt,
-                    description = m.note?.ifBlank { "मॅन्युअल उधारी नोंद" } ?: "मॅन्युअल उधारी नोंद",
+                    description = m.note?.ifBlank { "जुनी उधारी" } ?: "जुनी उधारी",
                     isCredit = false,
                     amount = m.amount,
                     runningBalance = 0.0,
@@ -535,8 +543,10 @@ object UdhariLedger {
         val validPaymentTxs = mutableListOf<UdhariTransaction>()
 
         for (p in allPaymentTxs) {
+            val effKind = p.getEffectiveKind()
             val cleanNum = p.billNumber.trim().uppercase()
-            val isGeneral = cleanNum.isBlank() ||
+            val isGeneral = effKind == "GENERAL_PAYMENT" ||
+                            cleanNum.isBlank() ||
                             cleanNum == "DIRECT-PAY" ||
                             cleanNum.startsWith("MULTI-BILL") ||
                             cleanNum == "GENERAL" ||
@@ -549,11 +559,24 @@ object UdhariLedger {
                                    (p.billId != 0L && knownStateBillIds.contains(p.billId)) ||
                                    (cleanNum.isNotBlank() && knownStateBillNumbers.contains(cleanNum))
 
-            if (hasBillRef && !matchesKnownBill) {
-                // Orphan payment: names a specific bill, but that bill does NOT exist in this customer's profile!
-                orphanTxs.add(p)
-            } else {
+            if (isGeneral || !hasBillRef) {
                 validPaymentTxs.add(p)
+            } else if (matchesKnownBill) {
+                validPaymentTxs.add(p)
+            } else {
+                val matchingBill = allBills.find { b ->
+                    (!p.billGid.isNullOrBlank() && b.gid == p.billGid) ||
+                    (cleanNum.isNotBlank() && b.billNumber.trim().equals(cleanNum, ignoreCase = true)) ||
+                    (p.billId != 0L && b.id == p.billId)
+                }
+                val isVoidedInBills = matchingBill != null && (matchingBill.isVoided || matchingBill.paymentStatus == PaymentStatus.VOID)
+                val isDeletedAppBill = cleanNum.startsWith("MC-") && matchingBill == null
+
+                if (isVoidedInBills || isDeletedAppBill) {
+                    orphanTxs.add(p)
+                } else {
+                    validPaymentTxs.add(p)
+                }
             }
         }
 
@@ -702,7 +725,7 @@ object UdhariLedger {
             .map { it.billNumber }.toSet()
 
         val validTxs = allTransactions.filter {
-            !it.isReversed && it.status != "TRASH" &&
+            !it.isReversed && it.status != "TRASH" && it.status != "IGNORED" &&
             !voidedBillIds.contains(it.billId) &&
             !(it.billNumber.isNotBlank() && voidedBillNumbers.contains(it.billNumber))
         }
