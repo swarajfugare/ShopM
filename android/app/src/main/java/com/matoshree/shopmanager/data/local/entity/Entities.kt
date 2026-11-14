@@ -24,6 +24,7 @@ import com.matoshree.shopmanager.domain.model.SyncStatus
 data class BillEntity(
     @PrimaryKey(autoGenerate = true) val id: Long = 0,
     val gid: String = "",
+    val docId: String? = null,
     val serverId: Long? = null,
     val shopId: Long = 1,
     val customerId: Long? = null,
@@ -88,6 +89,7 @@ data class BillEntity(
 data class BillItemEntity(
     @PrimaryKey(autoGenerate = true) val id: Long = 0,
     val gid: String = "",
+    val docId: String? = null,
     val billId: Long,
     val billGid: String = "",
     val productId: Long? = null,
@@ -115,6 +117,7 @@ data class BillItemEntity(
 data class CustomerEntity(
     @PrimaryKey(autoGenerate = true) val id: Long = 0,
     val gid: String = "",
+    val docId: String? = null,
     val serverId: Long? = null,
     val shopId: Long = 1,
     val name: String,
@@ -151,6 +154,7 @@ data class CustomerEntity(
 data class CategoryEntity(
     @PrimaryKey(autoGenerate = true) val id: Long = 0,
     val gid: String = "",
+    val docId: String? = null,
     val serverId: Long? = null,
     val shopId: Long = 1,
     val name: String,
@@ -170,6 +174,7 @@ data class CategoryEntity(
 data class ProductEntity(
     @PrimaryKey(autoGenerate = true) val id: Long = 0,
     val gid: String = "",
+    val docId: String? = null,
     val serverId: Long? = null,
     val shopId: Long = 1,
     val categoryId: Long? = null,
@@ -198,6 +203,7 @@ data class ProductEntity(
 data class ExpenseEntity(
     @PrimaryKey(autoGenerate = true) val id: Long = 0,
     val gid: String = "",
+    val docId: String? = null,
     val serverId: Long? = null,
     val shopId: Long = 1,
     val transactionUuid: String,
@@ -220,6 +226,7 @@ data class ExpenseEntity(
 data class DailyClosingEntity(
     @PrimaryKey(autoGenerate = true) val id: Long = 0,
     val gid: String = "",
+    val docId: String? = null,
     val serverId: Long? = null,
     val shopId: Long = 1,
     val closingDate: String,

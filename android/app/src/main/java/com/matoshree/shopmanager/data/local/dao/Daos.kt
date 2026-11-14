@@ -151,11 +151,16 @@ interface BillDao {
     suspend fun disassociateCustomerBills(customerId: Long)
 
     @Transaction
+    @Query("SELECT * FROM bills WHERE docId = :docId LIMIT 1")
+    suspend fun getBillByDocId(docId: String): BillWithItems?
+
+    @Transaction
     suspend fun upsertServerBill(bill: BillEntity, items: List<BillItemEntity>): Long {
-        val existingByGid = if (bill.gid.isNotBlank()) getBillByGid(bill.gid) else null
-        val existingByUuid = if (existingByGid == null && bill.transactionUuid.isNotBlank()) getBillByUuid(bill.transactionUuid) else null
-        val existingByServer = if (existingByGid == null && existingByUuid == null && bill.serverId != null && bill.serverId > 0) getBillByServerId(bill.serverId) else null
-        val existing = existingByGid ?: existingByUuid ?: existingByServer
+        val existingByDocId = if (!bill.docId.isNullOrBlank()) getBillByDocId(bill.docId) else null
+        val existingByGid = if (existingByDocId == null && bill.gid.isNotBlank()) getBillByGid(bill.gid) else null
+        val existingByUuid = if (existingByDocId == null && existingByGid == null && bill.transactionUuid.isNotBlank()) getBillByUuid(bill.transactionUuid) else null
+        val existingByServer = if (existingByDocId == null && existingByGid == null && existingByUuid == null && bill.serverId != null && bill.serverId > 0) getBillByServerId(bill.serverId) else null
+        val existing = existingByDocId ?: existingByGid ?: existingByUuid ?: existingByServer
 
         if (existing != null) {
             val localId = existing.bill.id
@@ -237,6 +242,12 @@ interface CustomerDao {
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertCustomers(customers: List<CustomerEntity>)
+
+    @Update
+    suspend fun updateCustomer(customer: CustomerEntity)
+
+    @Query("SELECT * FROM customers WHERE docId = :docId LIMIT 1")
+    suspend fun getCustomerByDocId(docId: String): CustomerEntity?
 
     @Query("SELECT * FROM customers WHERE isActive = 1 ORDER BY id DESC")
     fun getAllCustomers(): Flow<List<CustomerEntity>>
@@ -334,16 +345,17 @@ interface CustomerDao {
     @Transaction
     suspend fun upsertServerCustomer(customer: CustomerEntity) {
         val cleanMob = com.matoshree.shopmanager.utils.PhoneUtils.clean10DigitMobileInput(customer.mobile)
-        val existingByGid = if (customer.gid.isNotBlank()) getCustomerByGid(customer.gid) else null
-        val existingByServer = if (existingByGid == null && customer.serverId != null && customer.serverId > 0) getCustomerByServerId(customer.serverId) else null
-        val existingByMobile = if (existingByGid == null && existingByServer == null && cleanMob.length == 10) getCustomerByMobileFuzzy(customer.mobile, cleanMob) else null
-        val existingByName = if (existingByGid == null && existingByServer == null && existingByMobile == null && cleanMob.isBlank() && customer.name.isNotBlank()) {
+        val existingByDocId = if (!customer.docId.isNullOrBlank()) getCustomerByDocId(customer.docId) else null
+        val existingByGid = if (existingByDocId == null && customer.gid.isNotBlank()) getCustomerByGid(customer.gid) else null
+        val existingByServer = if (existingByDocId == null && existingByGid == null && customer.serverId != null && customer.serverId > 0) getCustomerByServerId(customer.serverId) else null
+        val existingByMobile = if (existingByDocId == null && existingByGid == null && existingByServer == null && cleanMob.length == 10) getCustomerByMobileFuzzy(customer.mobile, cleanMob) else null
+        val existingByName = if (existingByDocId == null && existingByGid == null && existingByServer == null && existingByMobile == null && cleanMob.isBlank() && customer.name.isNotBlank()) {
             val byName = getCustomerByName(customer.name)
             if (byName != null && com.matoshree.shopmanager.utils.PhoneUtils.clean10DigitMobileInput(byName.mobile).isBlank()) {
                 byName
             } else null
         } else null
-        val existing = existingByGid ?: existingByServer ?: existingByMobile ?: existingByName
+        val existing = existingByDocId ?: existingByGid ?: existingByServer ?: existingByMobile ?: existingByName
 
         if (existing != null) {
             val existingCleanMob = com.matoshree.shopmanager.utils.PhoneUtils.clean10DigitMobileInput(existing.mobile)
@@ -353,14 +365,18 @@ interface CustomerDao {
                 existing.address != customer.address ||
                 existing.totalBills != customer.totalBills ||
                 Math.abs(existing.lifetimeSpend - customer.lifetimeSpend) > 0.01 ||
-                existing.isActive != customer.isActive
+                existing.isActive != customer.isActive ||
+                existing.gid != customer.gid ||
+                existing.docId != customer.docId
             ) {
                 val updated = customer.copy(
                     id = existing.id,
+                    gid = if (customer.gid.isNotBlank()) customer.gid else existing.gid,
+                    docId = customer.docId ?: existing.docId,
                     serverId = existing.serverId ?: customer.serverId,
                     mobile = if (cleanMob.length == 10) cleanMob else existing.mobile
                 )
-                insertCustomer(updated)
+                updateCustomer(updated)
             }
         } else {
             val normalized = customer.copy(
@@ -410,6 +426,9 @@ interface ProductDao {
 
     @Query("UPDATE products SET isActive = 0 WHERE gid = :gid")
     suspend fun archiveProductByGid(gid: String)
+
+    @Query("SELECT * FROM products")
+    suspend fun getAllProductsDirect(): List<ProductEntity>
 
     @Query("SELECT * FROM products WHERE categoryGid = :categoryGid AND isActive = 1")
     suspend fun getProductsByCategoryGid(categoryGid: String): List<ProductEntity>
@@ -488,6 +507,9 @@ interface ProductDao {
     @Query("SELECT * FROM categories WHERE name = :name LIMIT 1")
     suspend fun getCategoryByName(name: String): CategoryEntity?
 
+    @Query("SELECT * FROM categories")
+    suspend fun getAllCategoriesDirect(): List<CategoryEntity>
+
     @Query("SELECT * FROM categories WHERE isActive = 1 ORDER BY name ASC")
     fun getAllCategories(): Flow<List<CategoryEntity>>
 
@@ -529,6 +551,9 @@ interface ExpenseDao {
     @Query("SELECT * FROM expenses ORDER BY expenseDate DESC, id DESC")
     fun getAllExpenses(): Flow<List<ExpenseEntity>>
 
+    @Query("SELECT * FROM expenses")
+    suspend fun getAllExpensesDirect(): List<ExpenseEntity>
+
     @Query("SELECT * FROM expenses WHERE transactionUuid = :uuid LIMIT 1")
     suspend fun getExpenseByUuid(uuid: String): ExpenseEntity?
 
@@ -567,6 +592,9 @@ interface DailyClosingDao {
 
     @Query("SELECT * FROM daily_closings ORDER BY closingDate DESC")
     fun getAllClosings(): Flow<List<DailyClosingEntity>>
+
+    @Query("SELECT * FROM daily_closings")
+    suspend fun getAllClosingsDirect(): List<DailyClosingEntity>
 
     @Transaction
     suspend fun upsertServerClosing(closing: DailyClosingEntity) {

@@ -6,6 +6,7 @@ import kotlinx.serialization.Serializable
 data class Customer(
     val id: Long = 0,
     val gid: String = "",
+    val docId: String? = null,
     val shopId: Long = 1,
     val name: String,
     val mobile: String,
@@ -25,6 +26,7 @@ data class Customer(
 ) {
     fun canonicalKey(): String {
         if (gid.isNotBlank()) return gid
+        if (!docId.isNullOrBlank()) return docId
         val clean = com.matoshree.shopmanager.utils.PhoneUtils.clean10DigitMobileInput(mobile)
         return when {
             clean.length == 10 -> "mob_$clean"
@@ -39,6 +41,7 @@ data class Customer(
 data class Category(
     val id: Long = 0,
     val gid: String = "",
+    val docId: String? = null,
     val shopId: Long = 1,
     val name: String,
     val description: String? = null,
@@ -50,6 +53,7 @@ data class Category(
 data class Product(
     val id: Long = 0,
     val gid: String = "",
+    val docId: String? = null,
     val shopId: Long = 1,
     val categoryId: Long? = null,
     val categoryGid: String? = null,

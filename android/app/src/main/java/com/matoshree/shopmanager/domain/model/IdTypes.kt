@@ -52,10 +52,10 @@ object IdFormat {
         val suffix = id.removePrefix(type.prefix)
         if (suffix.isEmpty()) return false
 
-        // Check if legacy ID format: prefix + 'L' + Crockford Base32 string (at least 6 chars)
+        // Check if legacy ID format: prefix + 'L' + Crockford Base32 string (at least 2 chars)
         if (suffix.startsWith("L")) {
             val legacyEncoded = suffix.substring(1)
-            if (legacyEncoded.length < 4) return false
+            if (legacyEncoded.length < 2) return false
             return legacyEncoded.all { CROCKFORD_CHARS.contains(it, ignoreCase = true) }
         }
 
@@ -145,6 +145,47 @@ object IdGenerator {
         val encoded = encodeBytesToBase32(bytes)
         return "${type.prefix}L$encoded"
     }
+
+    // F1: One deterministic rule per entity type used everywhere
+    fun customerGid(docId: String?): String =
+        if (!docId.isNullOrBlank()) legacyGid(IdType.CUSTOMER, docId) else generate(IdType.CUSTOMER)
+
+    fun newCustomerGid(): String = generate(IdType.CUSTOMER)
+
+    fun billGid(docId: String?): String =
+        if (!docId.isNullOrBlank()) legacyGid(IdType.BILL, docId) else generate(IdType.BILL)
+
+    fun newBillGid(): String = generate(IdType.BILL)
+
+    fun billItemGid(docId: String?): String =
+        if (!docId.isNullOrBlank()) legacyGid(IdType.BILL_ITEM, docId) else generate(IdType.BILL_ITEM)
+
+    fun productGid(docId: String?): String =
+        if (!docId.isNullOrBlank()) legacyGid(IdType.PRODUCT, docId) else generate(IdType.PRODUCT)
+
+    fun categoryGid(docId: String?): String =
+        if (!docId.isNullOrBlank()) legacyGid(IdType.CATEGORY, docId) else generate(IdType.CATEGORY)
+
+    fun stockMovementGid(docId: String?): String =
+        if (!docId.isNullOrBlank()) legacyGid(IdType.STOCK_MOVEMENT, docId) else generate(IdType.STOCK_MOVEMENT)
+
+    fun udhariGid(docId: String?): String =
+        if (!docId.isNullOrBlank()) legacyGid(IdType.UDHARI, docId) else generate(IdType.UDHARI)
+
+    fun paymentGid(docId: String?): String =
+        if (!docId.isNullOrBlank()) legacyGid(IdType.PAYMENT, docId) else generate(IdType.PAYMENT)
+
+    fun reversalGid(docId: String?): String =
+        if (!docId.isNullOrBlank()) legacyGid(IdType.REVERSAL, docId) else generate(IdType.REVERSAL)
+
+    fun expenseGid(docId: String?): String =
+        if (!docId.isNullOrBlank()) legacyGid(IdType.EXPENSE, docId) else generate(IdType.EXPENSE)
+
+    fun dailyClosingGid(docId: String?): String =
+        if (!docId.isNullOrBlank()) legacyGid(IdType.DAILY_CLOSING, docId) else generate(IdType.DAILY_CLOSING)
+
+    fun reminderGid(docId: String?): String =
+        if (!docId.isNullOrBlank()) legacyGid(IdType.REMINDER, docId) else generate(IdType.REMINDER)
 
     private fun encodeTimestamp(timeMs: Long, chars: CharArray) {
         var t = timeMs

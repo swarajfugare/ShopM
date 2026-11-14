@@ -45,6 +45,7 @@ enum class SyncStatus {
 data class BillItem(
     val id: Long = 0,
     val gid: String = "",
+    val docId: String? = null,
     val billId: Long = 0,
     val billGid: String = "",
     val productId: Long? = null,
@@ -65,6 +66,7 @@ data class BillItem(
 data class Bill(
     val id: Long = 0,
     val gid: String = "",
+    val docId: String? = null,
     val shopId: Long = 1,
     val customerId: Long? = null,
     val customerGid: String? = null,
@@ -105,6 +107,7 @@ data class Bill(
 ) {
     fun canonicalKey(): String {
         if (gid.isNotBlank()) return gid
+        if (!docId.isNullOrBlank()) return docId
         return if (transactionUuid.isNotBlank()) transactionUuid else if (billNumber.isNotBlank()) billNumber else "bill_$id"
     }
 }

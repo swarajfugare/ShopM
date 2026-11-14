@@ -20,10 +20,19 @@ import java.util.UUID
 
 // Extension mappers between Room Entities and Domain Models
 fun CustomerEntity.toDomain(): Customer {
-    val effectiveGid = if (gid.isNotBlank()) gid else if (serverId != null && serverId > 0) IdGenerator.legacyGid(IdType.CUSTOMER, "srv_$serverId") else if (id > 0) IdGenerator.legacyGid(IdType.CUSTOMER, "cust_$id") else IdGenerator.generate(IdType.CUSTOMER)
+    val effectiveGid = if (!docId.isNullOrBlank()) {
+        IdGenerator.customerGid(docId)
+    } else if (gid.isNotBlank() && !IdFormat.isLegacy(gid)) {
+        gid
+    } else if (gid.isNotBlank()) {
+        gid
+    } else {
+        IdGenerator.generate(IdType.CUSTOMER)
+    }
     return Customer(
         id = id,
         gid = effectiveGid,
+        docId = docId,
         shopId = shopId,
         name = name,
         mobile = mobile,
@@ -43,10 +52,19 @@ fun CustomerEntity.toDomain(): Customer {
 }
 
 fun Customer.toEntity(): CustomerEntity {
-    val effectiveGid = if (gid.isNotBlank()) gid else IdGenerator.generate(IdType.CUSTOMER)
+    val effectiveGid = if (!docId.isNullOrBlank()) {
+        IdGenerator.customerGid(docId)
+    } else if (gid.isNotBlank() && !IdFormat.isLegacy(gid)) {
+        gid
+    } else if (gid.isNotBlank()) {
+        gid
+    } else {
+        IdGenerator.generate(IdType.CUSTOMER)
+    }
     return CustomerEntity(
         id = if (id > 0) id else 0,
         gid = effectiveGid,
+        docId = docId,
         serverId = null,
         shopId = shopId,
         name = name,
@@ -66,7 +84,15 @@ fun Customer.toEntity(): CustomerEntity {
 }
 
 fun ProductEntity.toDomain(): Product {
-    val effectiveGid = if (gid.isNotBlank()) gid else if (id > 0) IdGenerator.legacyGid(IdType.PRODUCT, "prod_$id") else IdGenerator.generate(IdType.PRODUCT)
+    val effectiveGid = if (!docId.isNullOrBlank()) {
+        IdGenerator.productGid(docId)
+    } else if (gid.isNotBlank() && !IdFormat.isLegacy(gid)) {
+        gid
+    } else if (gid.isNotBlank()) {
+        gid
+    } else {
+        IdGenerator.generate(IdType.PRODUCT)
+    }
     val effectiveAdded = if (totalStockAdded > 0) totalStockAdded else (currentStock + totalSold)
     return Product(
         id = id,
@@ -90,10 +116,19 @@ fun ProductEntity.toDomain(): Product {
 }
 
 fun Product.toEntity(): ProductEntity {
-    val effectiveGid = if (gid.isNotBlank()) gid else IdGenerator.generate(IdType.PRODUCT)
+    val effectiveGid = if (!docId.isNullOrBlank()) {
+        IdGenerator.productGid(docId)
+    } else if (gid.isNotBlank() && !IdFormat.isLegacy(gid)) {
+        gid
+    } else if (gid.isNotBlank()) {
+        gid
+    } else {
+        IdGenerator.generate(IdType.PRODUCT)
+    }
     return ProductEntity(
         id = if (id > 0) id else 0,
         gid = effectiveGid,
+        docId = docId,
         serverId = null,
         shopId = shopId,
         categoryId = categoryId,
@@ -113,9 +148,16 @@ fun Product.toEntity(): ProductEntity {
     )
 }
 
-
 fun CategoryEntity.toDomain(): Category {
-    val effectiveGid = if (gid.isNotBlank()) gid else if (id > 0) IdGenerator.legacyGid(IdType.CATEGORY, "cat_$id") else IdGenerator.generate(IdType.CATEGORY)
+    val effectiveGid = if (!docId.isNullOrBlank()) {
+        IdGenerator.categoryGid(docId)
+    } else if (gid.isNotBlank() && !IdFormat.isLegacy(gid)) {
+        gid
+    } else if (gid.isNotBlank()) {
+        gid
+    } else {
+        IdGenerator.generate(IdType.CATEGORY)
+    }
     return Category(
         id = id,
         gid = effectiveGid,
@@ -127,10 +169,19 @@ fun CategoryEntity.toDomain(): Category {
 }
 
 fun Category.toEntity(): CategoryEntity {
-    val effectiveGid = if (gid.isNotBlank()) gid else IdGenerator.generate(IdType.CATEGORY)
+    val effectiveGid = if (!docId.isNullOrBlank()) {
+        IdGenerator.categoryGid(docId)
+    } else if (gid.isNotBlank() && !IdFormat.isLegacy(gid)) {
+        gid
+    } else if (gid.isNotBlank()) {
+        gid
+    } else {
+        IdGenerator.generate(IdType.CATEGORY)
+    }
     return CategoryEntity(
         id = if (id > 0) id else 0,
         gid = effectiveGid,
+        docId = docId,
         serverId = null,
         shopId = shopId,
         name = name,
@@ -160,11 +211,22 @@ fun BillWithItems.toDomain(): Bill {
         else -> bill.pendingAmount
     }
 
-    val effectiveBillGid = if (bill.gid.isNotBlank()) bill.gid else if (bill.transactionUuid.isNotBlank()) IdGenerator.legacyGid(IdType.BILL, bill.transactionUuid) else if (bill.id > 0) IdGenerator.legacyGid(IdType.BILL, "bill_${bill.id}") else IdGenerator.generate(IdType.BILL)
+    val effectiveBillGid = if (!bill.docId.isNullOrBlank()) {
+        IdGenerator.billGid(bill.docId)
+    } else if (bill.gid.isNotBlank() && !IdFormat.isLegacy(bill.gid)) {
+        bill.gid
+    } else if (bill.transactionUuid.isNotBlank()) {
+        IdGenerator.billGid(bill.transactionUuid)
+    } else if (bill.gid.isNotBlank()) {
+        bill.gid
+    } else {
+        IdGenerator.generate(IdType.BILL)
+    }
 
     return Bill(
         id = if (bill.serverId != null && bill.serverId > 0) bill.serverId else bill.id,
         gid = effectiveBillGid,
+        docId = bill.docId,
         shopId = bill.shopId,
         customerId = bill.customerId,
         customerGid = bill.customerGid,
@@ -237,10 +299,21 @@ fun toBillEntities(
         }
         sdf.format(java.util.Date(effectiveCreatedAt))
     }
-    val effectiveBillGid = if (bill.gid.isNotBlank()) bill.gid else if (bill.transactionUuid.isNotBlank()) IdGenerator.legacyGid(IdType.BILL, bill.transactionUuid) else IdGenerator.generate(IdType.BILL)
+    val effectiveBillGid = if (!bill.docId.isNullOrBlank()) {
+        IdGenerator.billGid(bill.docId)
+    } else if (bill.gid.isNotBlank() && !IdFormat.isLegacy(bill.gid)) {
+        bill.gid
+    } else if (bill.transactionUuid.isNotBlank()) {
+        IdGenerator.billGid(bill.transactionUuid)
+    } else if (bill.gid.isNotBlank()) {
+        bill.gid
+    } else {
+        IdGenerator.generate(IdType.BILL)
+    }
     val billEntity = BillEntity(
         id = 0L,
         gid = effectiveBillGid,
+        docId = bill.docId,
         serverId = bill.id,
         shopId = bill.shopId,
         customerId = bill.customerId,

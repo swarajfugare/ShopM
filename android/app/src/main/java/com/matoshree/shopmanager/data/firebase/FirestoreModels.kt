@@ -46,10 +46,11 @@ data class CustomerDto(
     var updatedAt: Long = System.currentTimeMillis()
 ) {
     fun toDomain(): Customer {
-        val effectiveGid = if (gid.isNotBlank()) gid else if (id.isNotBlank()) IdGenerator.legacyGid(IdType.CUSTOMER, id) else IdGenerator.generate(IdType.CUSTOMER)
+        val effectiveGid = if (id.isNotBlank()) IdGenerator.customerGid(id) else if (gid.isNotBlank() && !IdFormat.isLegacy(gid)) gid else IdGenerator.generate(IdType.CUSTOMER)
         return Customer(
             id = legacyId ?: (id.hashCode().toLong() and 0x7FFFFFFFFFFFFFFFL),
             gid = effectiveGid,
+            docId = id.ifBlank { null },
             shopId = 1,
             name = name,
             mobile = mobile,
@@ -296,12 +297,13 @@ data class BillDto(
         val effectivePaid = if (paidAmount > 0.0) paidAmount else if (paymentSum > 0.0) paymentSum else if (pStatus == PaymentStatus.PAID) finalAmount else 0.0
         val effectivePending = if (pendingAmount > 0.0) pendingAmount else if (effectivePaid > 0.0) (finalAmount - effectivePaid).coerceAtLeast(0.0) else if (pStatus == PaymentStatus.PAID) 0.0 else finalAmount
 
-        val effectiveGid = if (gid.isNotBlank()) gid else if (id.isNotBlank()) IdGenerator.legacyGid(IdType.BILL, id) else if (transactionUuid.isNotBlank()) IdGenerator.legacyGid(IdType.BILL, transactionUuid) else IdGenerator.generate(IdType.BILL)
-        val effectiveCustGid = customerGid ?: if (!customerId.isNullOrBlank()) IdGenerator.legacyGid(IdType.CUSTOMER, customerId!!) else null
+        val effectiveGid = if (id.isNotBlank()) IdGenerator.billGid(id) else if (transactionUuid.isNotBlank()) IdGenerator.billGid(transactionUuid) else if (gid.isNotBlank() && !IdFormat.isLegacy(gid)) gid else IdGenerator.generate(IdType.BILL)
+        val effectiveCustGid = customerGid ?: if (!customerId.isNullOrBlank()) IdGenerator.customerGid(customerId!!) else null
 
         return Bill(
             id = legacyId ?: (id.hashCode().toLong() and 0x7FFFFFFFFFFFFFFFL),
             gid = effectiveGid,
+            docId = id.ifBlank { null },
             shopId = 1,
             customerId = legacyCustomerId ?: customerId?.removePrefix("cust_")?.toLongOrNull(),
             customerGid = effectiveCustGid,
@@ -375,8 +377,8 @@ data class UdhariTransactionDto(
         val tType = try { UdhariTransactionType.valueOf(type) } catch (e: Exception) { UdhariTransactionType.PAYMENT }
         val pMethod = try { PaymentMethod.valueOf(paymentMethod) } catch (e: Exception) { PaymentMethod.CASH }
         val targetType = if (type == "PURCHASE_CREDIT") IdType.UDHARI else if (type == "REVERSAL") IdType.REVERSAL else IdType.PAYMENT
-        val effectiveGid = if (gid.isNotBlank()) gid else if (id.isNotBlank()) IdGenerator.legacyGid(targetType, id) else IdGenerator.generate(targetType)
-        val effectiveCustGid = if (customerGid.isNotBlank()) customerGid else if (customerId > 0L) IdGenerator.legacyGid(IdType.CUSTOMER, "cust_$customerId") else ""
+        val effectiveGid = if (id.isNotBlank()) IdGenerator.legacyGid(targetType, id) else if (gid.isNotBlank() && !IdFormat.isLegacy(gid)) gid else IdGenerator.generate(targetType)
+        val effectiveCustGid = if (customerGid.isNotBlank() && !customerGid.startsWith("cus_Lcust_") && !customerGid.startsWith("cus_Lsrv_") && !customerGid.startsWith("cus_Lmob_")) customerGid else ""
 
         return UdhariTransaction(
             id = id,
