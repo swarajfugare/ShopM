@@ -161,8 +161,11 @@ class MainActivity : FragmentActivity() {
                 }
             }
             "customer_profile" -> {
+                val customerGid = intent.getStringExtra("extra_customer_gid") ?: ""
                 val customerId = intent.getLongExtra(ShopNotificationManager.EXTRA_CUSTOMER_ID, -1L)
-                if (customerId > 0) {
+                if (customerGid.isNotBlank()) {
+                    deepLinkRoute.value = Screen.CustomerProfile.createRoute(customerGid)
+                } else if (customerId > 0) {
                     deepLinkRoute.value = Screen.CustomerProfile.createRoute(customerId)
                 }
             }

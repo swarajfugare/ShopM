@@ -277,7 +277,7 @@ data class UdhariOverallMetrics(
 @Composable
 fun UdhariScreen(
     viewModel: UdhariViewModel,
-    onCustomerClick: (Long) -> Unit,
+    onCustomerClick: (String) -> Unit,
     onBackClick: () -> Unit
 ) {
     val context = LocalContext.current
@@ -458,11 +458,11 @@ fun UdhariScreen(
             } else {
                 items(
                     items = uniqueCustomerList,
-                    key = { item -> "udhari_${item.customer.id}_${item.customer.canonicalKey()}" }
+                    key = { item -> item.customer.gid.ifBlank { "udhari_${item.customer.id}_${item.customer.canonicalKey()}" } }
                 ) { summary ->
                     UdhariCustomerCard(
                         summary = summary,
-                        onClick = { onCustomerClick(summary.customer.id) },
+                        onClick = { onCustomerClick(summary.customer.gid.ifBlank { "id_${summary.customer.id}" }) },
                         onAddPayment = {
                             activePaymentCustomer = summary
                             showPaymentDialog = true

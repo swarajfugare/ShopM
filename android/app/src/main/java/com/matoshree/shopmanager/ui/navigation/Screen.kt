@@ -11,8 +11,9 @@ sealed class Screen(val route: String) {
     }
     object BillsHistory : Screen("bills_history")
     object Customers : Screen("customers")
-    object CustomerProfile : Screen("customer_profile/{customerId}") {
-        fun createRoute(customerId: Long) = "customer_profile/$customerId"
+    object CustomerProfile : Screen("customer_profile/{customerGid}") {
+        fun createRoute(customerGid: String) = "customer_profile/$customerGid"
+        fun createRoute(customerId: Long) = "customer_profile/id_$customerId"
     }
     object Products : Screen("products")
     object ProductLabels : Screen("product_labels")

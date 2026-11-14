@@ -74,6 +74,7 @@ data class TopProductStat(
 
 data class TopCustomerStat(
     val customerId: Long,
+    val customerGid: String = "",
     val name: String,
     val billsCount: Int,
     val totalSpend: Double
@@ -189,7 +190,7 @@ class AnalyticsViewModel(
 @Composable
 fun AnalyticsScreen(
     viewModel: AnalyticsViewModel,
-    onCustomerClick: (Long) -> Unit = {},
+    onCustomerClick: (String) -> Unit = {},
     onBackClick: () -> Unit
 ) {
     val context = LocalContext.current
@@ -330,13 +331,15 @@ fun AnalyticsScreen(
         validBills.forEach { bill ->
             val cleanPhone = PhoneUtils.clean10DigitMobileInput(bill.customerMobile ?: "")
             val matchedCust = when {
+                !bill.customerGid.isNullOrBlank() -> allCustomers.find { it.gid == bill.customerGid }
                 bill.customerId != null && bill.customerId > 0L -> allCustomers.find { it.id == bill.customerId }
                 cleanPhone.length == 10 -> allCustomers.find { PhoneUtils.clean10DigitMobileInput(it.mobile) == cleanPhone }
                 !bill.customerName.isNullOrBlank() -> allCustomers.find { it.name.trim().equals(bill.customerName.trim(), ignoreCase = true) }
                 else -> null
             }
 
-            val key = matchedCust?.id?.toString()
+            val key = matchedCust?.gid?.ifBlank { null }
+                ?: matchedCust?.id?.toString()
                 ?: if (cleanPhone.length == 10) cleanPhone
                 else bill.customerName?.trim() ?: ""
 
@@ -349,7 +352,8 @@ fun AnalyticsScreen(
                 val newCount = (existing?.billsCount ?: 0) + 1
                 val newSpend = (existing?.totalSpend ?: 0.0) + bill.finalAmount
                 val custId = matchedCust?.id ?: 0L
-                periodCustomerStats[key] = TopCustomerStat(custId, displayName, newCount, newSpend)
+                val custGid = matchedCust?.gid ?: ""
+                periodCustomerStats[key] = TopCustomerStat(custId, custGid, displayName, newCount, newSpend)
             }
         }
 
@@ -365,13 +369,15 @@ fun AnalyticsScreen(
             activeBills.forEach { bill ->
                 val cleanPhone = PhoneUtils.clean10DigitMobileInput(bill.customerMobile ?: "")
                 val matchedCust = when {
+                    !bill.customerGid.isNullOrBlank() -> allCustomers.find { it.gid == bill.customerGid }
                     bill.customerId != null && bill.customerId > 0L -> allCustomers.find { it.id == bill.customerId }
                     cleanPhone.length == 10 -> allCustomers.find { PhoneUtils.clean10DigitMobileInput(it.mobile) == cleanPhone }
                     !bill.customerName.isNullOrBlank() -> allCustomers.find { it.name.trim().equals(bill.customerName.trim(), ignoreCase = true) }
                     else -> null
                 }
 
-                val key = matchedCust?.id?.toString()
+                val key = matchedCust?.gid?.ifBlank { null }
+                    ?: matchedCust?.id?.toString()
                     ?: if (cleanPhone.length == 10) cleanPhone
                     else bill.customerName?.trim() ?: ""
 
@@ -384,7 +390,8 @@ fun AnalyticsScreen(
                     val newCount = (existing?.billsCount ?: 0) + 1
                     val newSpend = (existing?.totalSpend ?: 0.0) + bill.finalAmount
                     val custId = matchedCust?.id ?: 0L
-                    allTimeCustomerStats[key] = TopCustomerStat(custId, displayName, newCount, newSpend)
+                    val custGid = matchedCust?.gid ?: ""
+                    allTimeCustomerStats[key] = TopCustomerStat(custId, custGid, displayName, newCount, newSpend)
                 }
             }
 
@@ -396,7 +403,7 @@ fun AnalyticsScreen(
                 allCustomers
                     .filter { it.lifetimeSpend > 0.01 || it.totalBills > 0 }
                     .sortedByDescending { it.lifetimeSpend }
-                    .map { TopCustomerStat(it.id, it.name, it.totalBills, it.lifetimeSpend) }
+                    .map { TopCustomerStat(it.id, it.gid, it.name, it.totalBills, it.lifetimeSpend) }
             }
         }
     }
@@ -1168,7 +1175,9 @@ fun AnalyticsScreen(
                             Row(
                                 modifier = Modifier
                                     .fillMaxWidth()
-                                    .clickable(enabled = cust.customerId > 0L) { onCustomerClick(cust.customerId) }
+                                    .clickable(enabled = cust.customerGid.isNotBlank() || cust.customerId > 0L) {
+                                        onCustomerClick(cust.customerGid.ifBlank { "id_${cust.customerId}" })
+                                    }
                                     .padding(vertical = 6.dp),
                                 horizontalArrangement = Arrangement.SpaceBetween,
                                 verticalAlignment = Alignment.CenterVertically

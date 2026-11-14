@@ -214,8 +214,8 @@ fun AppNavGraph(
             composable(Screen.Udhari.route) {
                 com.matoshree.shopmanager.ui.screens.udhari.UdhariScreen(
                     viewModel = getUdhariViewModel(),
-                    onCustomerClick = { custId ->
-                        navController.navigate(Screen.CustomerProfile.createRoute(custId))
+                    onCustomerClick = { customerGid: String ->
+                        navController.navigate(Screen.CustomerProfile.createRoute(customerGid))
                     },
                     onBackClick = { navController.popBackStack() }
                 )
@@ -362,8 +362,8 @@ fun AppNavGraph(
             composable(Screen.Customers.route) {
                 CustomersListScreen(
                     viewModel = getCustomerViewModel(),
-                    onCustomerClick = { custId ->
-                        navController.navigate(Screen.CustomerProfile.createRoute(custId))
+                    onCustomerClick = { customerGid: String ->
+                        navController.navigate(Screen.CustomerProfile.createRoute(customerGid))
                     },
                     onBackClick = { navController.popBackStack() }
                 )
@@ -371,11 +371,11 @@ fun AppNavGraph(
 
             composable(
                 route = Screen.CustomerProfile.route,
-                arguments = listOf(navArgument("customerId") { type = NavType.LongType })
+                arguments = listOf(navArgument("customerGid") { type = NavType.StringType })
             ) { backStackEntry ->
-                val customerId = backStackEntry.arguments?.getLong("customerId") ?: 0L
+                val customerGid = backStackEntry.arguments?.getString("customerGid") ?: ""
                 CustomerProfileScreen(
-                    customerId = customerId,
+                    customerGid = customerGid,
                     viewModel = getCustomerViewModel(),
                     onBillClick = { billId ->
                         navController.navigate(Screen.BillPreview.createRoute(billId))
@@ -387,8 +387,8 @@ fun AppNavGraph(
             composable(Screen.Analytics.route) {
                 AnalyticsScreen(
                     viewModel = getAnalyticsViewModel(),
-                    onCustomerClick = { custId ->
-                        navController.navigate(Screen.CustomerProfile.createRoute(custId))
+                    onCustomerClick = { customerGid: String ->
+                        navController.navigate(Screen.CustomerProfile.createRoute(customerGid))
                     },
                     onBackClick = { navController.popBackStack() }
                 )

@@ -133,15 +133,25 @@ class CustomerViewModel(
 
     fun loadCustomerProfile(customerId: Long) {
         val cust = _customers.value.find { it.id == customerId }
+        val gid = cust?.gid?.ifBlank { null } ?: "id_$customerId"
+        loadCustomerProfile(gid)
+    }
+
+    fun loadCustomerProfile(customerGid: String) {
+        val numericIdFallback = if (customerGid.startsWith("id_")) customerGid.removePrefix("id_").toLongOrNull() else null
+        val cust = _customers.value.find {
+            it.gid == customerGid || (numericIdFallback != null && it.id == numericIdFallback)
+        }
         val targetMobile = cust?.mobile?.trim() ?: ""
 
         val isDifferentCustomer = selectedCustomerProfile.value != null &&
-            selectedCustomerProfile.value?.id != customerId &&
+            selectedCustomerProfile.value?.gid != customerGid &&
+            (numericIdFallback == null || selectedCustomerProfile.value?.id != numericIdFallback) &&
             (selectedCustomerProfile.value?.mobile.isNullOrBlank() || targetMobile.isBlank() || selectedCustomerProfile.value?.mobile != targetMobile)
 
         profileJob?.cancel()
         profileJob = viewModelScope.launch {
-            if (selectedCustomerProfile.value == null || selectedCustomerProfile.value?.id != customerId) {
+            if (selectedCustomerProfile.value == null || (selectedCustomerProfile.value?.gid != customerGid && (numericIdFallback == null || selectedCustomerProfile.value?.id != numericIdFallback))) {
                 if (cust != null) selectedCustomerProfile.value = cust
             }
             if (isDifferentCustomer) {
@@ -161,10 +171,12 @@ class CustomerViewModel(
                 val allCustomers = _customers.value
                 val cleanTargetPhone = PhoneUtils.clean10DigitMobileInput(targetMobile)
                 val currentCust = allCustomers.find { 
-                    it.id == customerId || (cleanTargetPhone.length == 10 && PhoneUtils.clean10DigitMobileInput(it.mobile) == cleanTargetPhone) 
+                    it.gid == customerGid ||
+                    (numericIdFallback != null && it.id == numericIdFallback) ||
+                    (cleanTargetPhone.length == 10 && PhoneUtils.clean10DigitMobileInput(it.mobile) == cleanTargetPhone)
                 } ?: cust
                 val keyResolver = UdhariLedger.buildCustomerKeyResolver(allCustomers, allBills, txs)
-                val targetKey = keyResolver(currentCust?.mobile ?: targetMobile, currentCust?.name, currentCust?.id ?: customerId) ?: "cust_$customerId"
+                val targetKey = keyResolver(currentCust?.gid ?: customerGid, currentCust?.mobile ?: targetMobile, currentCust?.name, currentCust?.id ?: numericIdFallback) ?: (currentCust?.gid ?: customerGid)
 
                 val ledgerResult = UdhariLedger.computeCustomerLedger(
                     customerKey = targetKey,
@@ -175,12 +187,12 @@ class CustomerViewModel(
 
                 val customerSpecificBills = allBills.filter { b ->
                     !b.isVoided && b.paymentStatus != PaymentStatus.VOID &&
-                    keyResolver(b.customerMobile, b.customerName, b.customerId) == targetKey
+                    keyResolver(b.customerGid, b.customerMobile, b.customerName, b.customerId) == targetKey
                 }.distinctBy { if (it.transactionUuid.isNotBlank()) it.transactionUuid else it.billNumber }
 
                 val validTxs = txs.filter { tx ->
                     !tx.isReversed && tx.status != "TRASH" &&
-                    keyResolver(tx.customerMobile, tx.customerName, tx.customerId) == targetKey
+                    keyResolver(tx.customerGid, tx.customerMobile, tx.customerName, tx.customerId) == targetKey
                 }.distinctBy { if (it.transactionUuid.isNotBlank()) it.transactionUuid else "${it.id}_${it.billId}" }
 
                 if (customerBills.value != customerSpecificBills) {
@@ -284,6 +296,7 @@ class CustomerViewModel(
         }
     }
 
+    val selectedCustomerGids = MutableStateFlow<Set<String>>(emptySet())
     val selectedCustomerIds = MutableStateFlow<Set<Long>>(emptySet())
     val selectedListTag = MutableStateFlow<String>("All")
     val userCreatedLists = MutableStateFlow<Set<String>>(setOf("VIP", "Regular", "Kondharki"))
@@ -297,56 +310,78 @@ class CustomerViewModel(
         }
     }
 
+    fun toggleCustomerSelection(customerGid: String) {
+        val currentGids = selectedCustomerGids.value.toMutableSet()
+        if (currentGids.contains(customerGid)) currentGids.remove(customerGid) else currentGids.add(customerGid)
+        selectedCustomerGids.value = currentGids
+
+        val all = _customers.value
+        selectedCustomerIds.value = all.filter { currentGids.contains(it.gid) || currentGids.contains("id_${it.id}") }.map { it.id }.toSet()
+    }
+
     fun toggleCustomerSelection(customerId: Long) {
-        val current = selectedCustomerIds.value.toMutableSet()
-        if (current.contains(customerId)) current.remove(customerId) else current.add(customerId)
-        selectedCustomerIds.value = current
+        val cust = _customers.value.find { it.id == customerId }
+        val gid = cust?.gid?.ifBlank { null } ?: "id_$customerId"
+        toggleCustomerSelection(gid)
     }
 
     fun selectAllCustomers(select: Boolean, filtered: List<Customer>) {
         if (select) {
+            selectedCustomerGids.value = filtered.map { it.gid.ifBlank { "id_${it.id}" } }.toSet()
             selectedCustomerIds.value = filtered.map { it.id }.toSet()
         } else {
+            selectedCustomerGids.value = emptySet()
             selectedCustomerIds.value = emptySet()
         }
     }
 
     suspend fun addTagToSelectedCustomers(tag: String) {
-        val selected = selectedCustomerIds.value
+        val selected = selectedCustomerGids.value
         val all = _customers.value
         val curLists = userCreatedLists.value.toMutableSet()
         curLists.add(tag)
         userCreatedLists.value = curLists
 
-        selected.forEach { id ->
-            val cust = all.find { it.id == id }
+        selected.forEach { gid ->
+            val cust = all.find { it.gid == gid || "id_${it.id}" == gid }
             if (cust != null) {
                 val currentTags = cust.listTags.toMutableSet()
                 currentTags.add(tag)
-                customerRepository.updateCustomerTags(id, currentTags.toList())
+                if (cust.gid.isNotBlank()) customerRepository.updateCustomerTags(cust.gid, currentTags.toList())
+                if (cust.id > 0) customerRepository.updateCustomerTags(cust.id, currentTags.toList())
             }
         }
+        selectedCustomerGids.value = emptySet()
         selectedCustomerIds.value = emptySet()
+    }
+
+    suspend fun removeTagFromCustomer(customerGid: String, tag: String) {
+        val cust = _customers.value.find { it.gid == customerGid || "id_${it.id}" == customerGid }
+        if (cust != null) {
+            val updated = cust.listTags.filter { it != tag }
+            if (cust.gid.isNotBlank()) customerRepository.updateCustomerTags(cust.gid, updated)
+            if (cust.id > 0) customerRepository.updateCustomerTags(cust.id, updated)
+        }
     }
 
     suspend fun removeTagFromCustomer(customerId: Long, tag: String) {
         val cust = _customers.value.find { it.id == customerId }
-        if (cust != null) {
-            val updated = cust.listTags.filter { it != tag }
-            customerRepository.updateCustomerTags(customerId, updated)
-        }
+        val gid = cust?.gid?.ifBlank { null } ?: "id_$customerId"
+        removeTagFromCustomer(gid, tag)
     }
 
     suspend fun removeTagFromSelectedCustomers(tag: String) {
-        val selected = selectedCustomerIds.value
+        val selected = selectedCustomerGids.value
         val all = _customers.value
-        selected.forEach { id ->
-            val cust = all.find { it.id == id }
+        selected.forEach { gid ->
+            val cust = all.find { it.gid == gid || "id_${it.id}" == gid }
             if (cust != null) {
                 val updated = cust.listTags.filter { it != tag }
-                customerRepository.updateCustomerTags(id, updated)
+                if (cust.gid.isNotBlank()) customerRepository.updateCustomerTags(cust.gid, updated)
+                if (cust.id > 0) customerRepository.updateCustomerTags(cust.id, updated)
             }
         }
+        selectedCustomerGids.value = emptySet()
         selectedCustomerIds.value = emptySet()
     }
 
@@ -355,7 +390,8 @@ class CustomerViewModel(
         all.forEach { cust ->
             if (cust.listTags.contains(tag)) {
                 val updated = cust.listTags.filter { it != tag }
-                customerRepository.updateCustomerTags(cust.id, updated)
+                if (cust.gid.isNotBlank()) customerRepository.updateCustomerTags(cust.gid, updated)
+                if (cust.id > 0) customerRepository.updateCustomerTags(cust.id, updated)
             }
         }
         val cur = userCreatedLists.value.toMutableSet()
@@ -367,21 +403,26 @@ class CustomerViewModel(
     }
 
     suspend fun deleteSelectedCustomers(): Pair<Int, Int> {
-        val selected = selectedCustomerIds.value
+        val selected = selectedCustomerGids.value
         val all = _customers.value
         var deleted = 0
         var skipped = 0
-        selected.forEach { id ->
-            val cust = all.find { it.id == id }
+        selected.forEach { gid ->
+            val cust = all.find { it.gid == gid || "id_${it.id}" == gid }
             if (cust != null) {
                 if (cust.outstandingBalance > 0.01) {
                     skipped++
                 } else {
-                    customerRepository.deleteOrArchiveCustomer(id, cust.mobile, cust.name)
+                    if (cust.gid.isNotBlank()) {
+                        customerRepository.deleteOrArchiveCustomer(cust.gid, cust.mobile, cust.name)
+                    } else {
+                        customerRepository.deleteOrArchiveCustomer(cust.id, cust.mobile, cust.name)
+                    }
                     deleted++
                 }
             }
         }
+        selectedCustomerGids.value = emptySet()
         selectedCustomerIds.value = emptySet()
         return Pair(deleted, skipped)
     }
@@ -398,7 +439,7 @@ class CustomerViewModel(
             val newBal = customerOutstandingDue.value + amount
             customerOutstandingDue.value = newBal
             selectedCustomerProfile.value = customer.copy(outstandingBalance = newBal)
-            loadCustomerProfile(customer.id)
+            if (customer.gid.isNotBlank()) loadCustomerProfile(customer.gid) else loadCustomerProfile(customer.id)
         }
         return res
     }
@@ -507,10 +548,12 @@ class CustomerViewModel(
 
         val transaction = UdhariTransaction(
             customerId = customer.id,
+            customerGid = customer.gid,
             customerName = customer.name,
             customerMobile = customer.mobile,
             customerVillage = customer.address,
             billId = if (bills.size == 1) (targetBill?.id ?: 0L) else 0L,
+            billGid = if (bills.size == 1) targetBill?.gid else null,
             billNumber = billNumberSummary,
             type = UdhariTransactionType.PAYMENT,
             amount = safeAmount,
@@ -532,7 +575,7 @@ class CustomerViewModel(
             } catch (_: Exception) { }
             val targetKey = customer.canonicalKey()
             _customers.value = _customers.value.map { if (it.canonicalKey() == targetKey) it.copy(outstandingBalance = newBalance) else it }
-            loadCustomerProfile(customer.id)
+            if (customer.gid.isNotBlank()) loadCustomerProfile(customer.gid) else loadCustomerProfile(customer.id)
             Result.success(transaction)
         } else {
             Result.failure(result.exceptionOrNull() ?: Exception("Payment recording failed"))
@@ -609,12 +652,13 @@ class CustomerViewModel(
 @Composable
 fun CustomersListScreen(
     viewModel: CustomerViewModel,
-    onCustomerClick: (Long) -> Unit,
+    onCustomerClick: (String) -> Unit,
     onBackClick: () -> Unit
 ) {
     val customers by viewModel.customers.collectAsState()
     val search by viewModel.searchQuery.collectAsState()
     val selectedIds by viewModel.selectedCustomerIds.collectAsState()
+    val selectedGids by viewModel.selectedCustomerGids.collectAsState()
     val selectedTagFilter by viewModel.selectedListTag.collectAsState()
     var showAddDialog by remember { mutableStateOf(false) }
     var showAddToListDialog by remember { mutableStateOf(false) }
@@ -936,21 +980,22 @@ fun CustomersListScreen(
                         verticalArrangement = Arrangement.spacedBy(10.dp),
                         contentPadding = PaddingValues(bottom = 80.dp)
                     ) {
-                        items(filteredCustomers, key = { customer -> "cust_${customer.id}_${customer.canonicalKey()}" }) { customer ->
-                            val isSelected = selectedIds.contains(customer.id)
+                        items(filteredCustomers, key = { customer -> customer.gid.ifBlank { "cust_${customer.id}_${customer.canonicalKey()}" } }) { customer ->
+                            val targetGid = customer.gid.ifBlank { "id_${customer.id}" }
+                            val isSelected = selectedGids.contains(targetGid) || selectedIds.contains(customer.id)
                             CustomerListItemCard(
                                 customer = customer,
                                 isSelected = isSelected,
-                                isSelectionMode = selectedIds.isNotEmpty(),
+                                isSelectionMode = selectedGids.isNotEmpty() || selectedIds.isNotEmpty(),
                                 onCardClick = {
-                                    if (selectedIds.isNotEmpty()) {
-                                        viewModel.toggleCustomerSelection(customer.id)
+                                    if (selectedGids.isNotEmpty() || selectedIds.isNotEmpty()) {
+                                        viewModel.toggleCustomerSelection(targetGid)
                                     } else {
-                                        onCustomerClick(customer.id)
+                                        onCustomerClick(targetGid)
                                     }
                                 },
                                 onLongClick = {
-                                    viewModel.toggleCustomerSelection(customer.id)
+                                    viewModel.toggleCustomerSelection(targetGid)
                                 }
                             )
                         }
@@ -1218,7 +1263,7 @@ fun CustomerListItemCard(
 
 @Composable
 fun CustomerProfileScreen(
-    customerId: Long,
+    customerGid: String,
     viewModel: CustomerViewModel,
     onBillClick: (Long) -> Unit,
     onBackClick: () -> Unit
@@ -1226,8 +1271,8 @@ fun CustomerProfileScreen(
     val context = LocalContext.current
     val coroutineScope = rememberCoroutineScope()
 
-    LaunchedEffect(customerId) {
-        viewModel.loadCustomerProfile(customerId)
+    LaunchedEffect(customerGid) {
+        viewModel.loadCustomerProfile(customerGid)
     }
 
     val customer by viewModel.selectedCustomerProfile.collectAsState()
@@ -2008,7 +2053,8 @@ fun CustomerProfileScreen(
                 if (outstandingDue <= 0.01) {
                     Button(
                         onClick = {
-                            viewModel.deleteOrArchiveCustomer(customerId, customer?.mobile ?: "", customer?.name ?: "") { msg ->
+                            val targetId = customer?.id ?: (if (customerGid.startsWith("id_")) customerGid.removePrefix("id_").toLongOrNull() ?: 0L else 0L)
+                            viewModel.deleteOrArchiveCustomer(targetId, customer?.mobile ?: "", customer?.name ?: "") { msg ->
                                 Toast.makeText(context, msg, Toast.LENGTH_SHORT).show()
                                 showDeleteDialog = false
                                 onBackClick()
@@ -3473,6 +3519,21 @@ fun UdhariActionDialog(
             }
         },
         containerColor = WarmWhite
+    )
+}
+
+@Composable
+fun CustomerProfileScreen(
+    customerId: Long,
+    viewModel: CustomerViewModel,
+    onBillClick: (Long) -> Unit,
+    onBackClick: () -> Unit
+) {
+    CustomerProfileScreen(
+        customerGid = "id_$customerId",
+        viewModel = viewModel,
+        onBillClick = onBillClick,
+        onBackClick = onBackClick
     )
 }
 
