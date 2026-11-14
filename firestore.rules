@@ -37,21 +37,37 @@ service cloud.firestore {
       return (!('amount' in data) || (data.amount is number && data.amount >= 0));
     }
 
+    function isValidGidFormat(prefix, gid) {
+      return gid is string &&
+        gid[0] == prefix[0] &&
+        gid[1] == prefix[1] &&
+        gid[2] == prefix[2] &&
+        gid[3] == prefix[3] &&
+        (gid.size() == 30 || (gid.size() >= 6 && gid[4] == 'L'));
+    }
+
     function isValidGid(prefix, docId) {
       let data = request.resource.data;
       return !('gid' in data) || (
-        data.gid is string &&
-        (data.gid == docId || ('legacyId' in data) || ('transactionUuid' in data) || ('closingDate' in data) || ('date' in data)) &&
-        data.gid.size() == 30 &&
-        data.gid[0] == prefix[0] &&
-        data.gid[1] == prefix[1] &&
-        data.gid[2] == prefix[2] &&
-        data.gid[3] == prefix[3]
+        isValidGidFormat(prefix, data.gid) &&
+        (data.gid == docId || (data.gid.size() >= 6 && data.gid[4] == 'L'))
       );
     }
 
-    function isImmutableGid() {
-      return !('gid' in resource.data) || !('gid' in request.resource.data) || request.resource.data.gid == resource.data.gid;
+    function isImmutableOrOneTimeLegacyCorrection(prefix) {
+      let hasOldGid = 'gid' in resource.data;
+      let hasNewGid = 'gid' in request.resource.data;
+      let existingGid = resource.data.gid;
+      let newGid = request.resource.data.gid;
+      return (!hasOldGid) ||
+        (hasNewGid && (
+          newGid == existingGid ||
+          (
+            existingGid.size() >= 6 &&
+            existingGid[4] == 'L' &&
+            isValidGidFormat(prefix, newGid)
+          )
+        ));
     }
 
     // 1. Shop Root & Member Authorization
@@ -67,27 +83,27 @@ service cloud.firestore {
     match /customers/{customerId} {
       allow read, delete: if isAuthorizedOwner();
       allow create: if isAuthorizedOwner() && isValidCustomer() && isValidGid('cus_', customerId);
-      allow update: if isAuthorizedOwner() && isValidCustomer() && isImmutableGid();
+      allow update: if isAuthorizedOwner() && isValidCustomer() && isImmutableOrOneTimeLegacyCorrection('cus_');
     }
 
     // 3. Products & Categories
     match /products/{productId} {
       allow read, delete: if isAuthorizedOwner();
       allow create: if isAuthorizedOwner() && isValidProduct() && isValidGid('prd_', productId);
-      allow update: if isAuthorizedOwner() && isValidProduct() && isImmutableGid();
+      allow update: if isAuthorizedOwner() && isValidProduct() && isImmutableOrOneTimeLegacyCorrection('prd_');
     }
 
     match /categories/{categoryId} {
       allow read, delete: if isAuthorizedOwner();
       allow create: if isAuthorizedOwner() && isValidGid('cat_', categoryId);
-      allow update: if isAuthorizedOwner() && isImmutableGid();
+      allow update: if isAuthorizedOwner() && isImmutableOrOneTimeLegacyCorrection('cat_');
     }
 
     // 4. Bills & Transactions
     match /bills/{billId} {
       allow read, delete: if isAuthorizedOwner();
       allow create: if isAuthorizedOwner() && isValidBill() && isValidGid('bil_', billId);
-      allow update: if isAuthorizedOwner() && isValidBill() && isImmutableGid();
+      allow update: if isAuthorizedOwner() && isValidBill() && isImmutableOrOneTimeLegacyCorrection('bil_');
 
       match /{allChildren=**} {
         allow read, write: if isAuthorizedOwner();
@@ -98,27 +114,27 @@ service cloud.firestore {
     match /udhari_transactions/{txId} {
       allow read, delete: if isAuthorizedOwner();
       allow create: if isAuthorizedOwner() && isValidUdhari() && (isValidGid('udh_', txId) || isValidGid('pay_', txId) || isValidGid('rev_', txId));
-      allow update: if isAuthorizedOwner() && isValidUdhari() && isImmutableGid();
+      allow update: if isAuthorizedOwner() && isValidUdhari() && (isImmutableOrOneTimeLegacyCorrection('udh_') || isImmutableOrOneTimeLegacyCorrection('pay_') || isImmutableOrOneTimeLegacyCorrection('rev_'));
     }
 
     // 6. Expenses & Daily Closings
     match /expenses/{expenseId} {
       allow read, delete: if isAuthorizedOwner();
       allow create: if isAuthorizedOwner() && isValidGid('exp_', expenseId);
-      allow update: if isAuthorizedOwner() && isImmutableGid();
+      allow update: if isAuthorizedOwner() && isImmutableOrOneTimeLegacyCorrection('exp_');
     }
 
     match /daily_closings/{closingId} {
       allow read, delete: if isAuthorizedOwner();
       allow create: if isAuthorizedOwner() && isValidGid('clo_', closingId);
-      allow update: if isAuthorizedOwner() && isImmutableGid();
+      allow update: if isAuthorizedOwner() && isImmutableOrOneTimeLegacyCorrection('clo_');
     }
 
     // 7. Stock Movements & Inventory Audit
     match /stock_movements/{movementId} {
       allow read, delete: if isAuthorizedOwner();
       allow create: if isAuthorizedOwner() && isValidGid('stk_', movementId);
-      allow update: if isAuthorizedOwner() && isImmutableGid();
+      allow update: if isAuthorizedOwner() && isImmutableOrOneTimeLegacyCorrection('stk_');
     }
 
     // 8. Security, Devices, Settings & Diagnostics

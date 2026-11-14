@@ -27,6 +27,7 @@ data class CustomerDiagnosticReport(
     val balanceMismatchCount: Int = 0,
     val duplicateEventsCount: Int = 0,
     val needsReviewCount: Int = 0,
+    val overpaidCustomersCount: Int = 0,
     val details: List<String> = emptyList()
 )
 
@@ -106,13 +107,25 @@ object CustomerDiagnosticManager {
             val shopLedger = com.matoshree.shopmanager.domain.usecase.UdhariLedger.computeShopLedger(allBills, txs, domainCusts)
             val keyResolver = com.matoshree.shopmanager.domain.usecase.UdhariLedger.buildCustomerKeyResolver(domainCusts, allBills, txs)
 
+            var overpaidCount = 0
             for (c in roomActive) {
                 val key = keyResolver(c.mobile, c.name, c.id) ?: "cust_${c.id}"
                 val verifiedBalance = shopLedger.customerResults[key]?.balance ?: 0.0
-                if (Math.abs(c.outstandingBalance - verifiedBalance) > 0.5) {
+                if (verifiedBalance < -0.01) {
+                    overpaidCount++
+                    details.add("जास्त भरणा (data issue): ${c.name} (जास्त: ₹${String.format(java.util.Locale.US, "%.0f", Math.abs(verifiedBalance))})")
+                } else if (Math.abs(c.outstandingBalance - verifiedBalance) > 0.5) {
                     balanceMismatchCount++
                     details.add("उधारी तफावत: ${c.name} (नोंद: ₹${String.format(java.util.Locale.US, "%.0f", c.outstandingBalance)} -> खरी बाकी: ₹${String.format(java.util.Locale.US, "%.0f", verifiedBalance)})")
                 }
+            }
+
+            // Check for duplicate customer candidates
+            val duplicateCandidates = allRoom
+                .groupBy { it.name.trim().lowercase() }
+                .filter { it.key.isNotBlank() && it.value.mapNotNull { c -> c.docId }.distinct().size > 1 }
+            for ((name, candidates) in duplicateCandidates) {
+                details.add("एकाच नावाने भिन्न खाते: $name (${candidates.size} नोंदी)")
             }
 
             // Check for duplicate transactions / orphan credits
@@ -147,6 +160,7 @@ object CustomerDiagnosticManager {
                 balanceMismatchCount = balanceMismatchCount,
                 duplicateEventsCount = duplicateEventsCount,
                 needsReviewCount = needsReviewCount,
+                overpaidCustomersCount = overpaidCount,
                 details = details.take(20)
             )
         } catch (e: Exception) {

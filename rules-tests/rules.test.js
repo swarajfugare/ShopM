@@ -128,7 +128,7 @@ describe('Zero-Trust Security Rules Unit Tests', () => {
       await assertFails(db.collection('unknown_collection').get());
     });
 
-    it('9. Enforces GID prefix and immutability', async () => {
+    it('9. Enforces GID validation, legacy creation, one-time repair, immutability, and overwrite protection', async () => {
       const ownerContext = testEnv.authenticatedContext('owner-uid-1', {
         email: 'swarajfugare23@gmail.com',
         email_verified: true,
@@ -136,7 +136,7 @@ describe('Zero-Trust Security Rules Unit Tests', () => {
       });
       const db = ownerContext.firestore();
 
-      // Valid cus_ GID on customer
+      // (a) ULID create succeeds
       const validCusGid = 'cus_01HM5V7K8P9Q2W3E4R5T6Y7U8I';
       await assertSucceeds(db.collection('customers').doc(validCusGid).set({
         gid: validCusGid,
@@ -144,16 +144,42 @@ describe('Zero-Trust Security Rules Unit Tests', () => {
         mobile: '9876543210'
       }));
 
-      // Invalid prefix fails
+      // (b) Legacy create succeeds (prefix + 'L' + id)
+      const legacyDocId = 'legacy_doc_123';
+      const legacyGid = 'cus_Llegacy_doc_123';
+      await assertSucceeds(db.collection('customers').doc(legacyDocId).set({
+        gid: legacyGid,
+        name: 'Legacy Customer',
+        mobile: '9876543211'
+      }));
+
+      // (c) Legacy -> ULID one-time correction allowed
+      const repairedUlid = 'cus_01HM5V7K8P9Q2W3E4R5T6Y7U99';
+      await assertSucceeds(db.collection('customers').doc(legacyDocId).update({
+        gid: repairedUlid
+      }));
+
+      // (d) Second GID change denied (now that it is a ULID, it is strictly immutable)
+      await assertFails(db.collection('customers').doc(legacyDocId).update({
+        gid: 'cus_01HM5V7K8P9Q2W3E4R5T6Y7UAA'
+      }));
+
+      // (e) Wrong prefix denied on create and update
       const badPrefixDoc = 'bil_01HM5V7K8P9Q2W3E4R5T6Y7U8I';
       await assertFails(db.collection('customers').doc(badPrefixDoc).set({
         gid: badPrefixDoc,
         name: 'Bad Prefix Customer'
       }));
 
-      // GID mutation on update fails
-      await assertFails(db.collection('customers').doc(validCusGid).update({
-        gid: 'cus_01HM5V7K8P9Q2W3E4R5T6Y7U99'
+      // (f) Overwrite denied (attempting to set without GID or with altered GID on existing doc)
+      await assertFails(db.collection('customers').doc(validCusGid).set({
+        name: 'Overwritten Customer Without Gid',
+        mobile: '9876543210'
+      }));
+      await assertFails(db.collection('customers').doc(validCusGid).set({
+        gid: 'cus_01HM5V7K8P9Q2W3E4R5T6Y7U99',
+        name: 'Overwritten Customer With Different Gid',
+        mobile: '9876543210'
       }));
     });
   });

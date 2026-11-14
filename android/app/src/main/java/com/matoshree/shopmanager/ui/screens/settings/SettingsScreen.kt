@@ -2273,7 +2273,10 @@ service cloud.firestore {
                                 if (r.needsReviewCount > 0) {
                                     Text("⚠️ पुनरावलोकन आवश्यक नोंदी: ${r.needsReviewCount}", fontSize = 12.sp, color = BoutiqueError, fontWeight = FontWeight.Bold)
                                 }
-                                if (r.erroneouslyArchivedCount == 0 && r.missingFromRoomCount == 0 && r.duplicateMobileCount == 0 && r.duplicateEventsCount == 0 && r.needsReviewCount == 0) {
+                                if (r.overpaidCustomersCount > 0) {
+                                    Text("⚠️ जास्त भरणा (data issue): ${r.overpaidCustomersCount}", fontSize = 12.sp, color = BoutiqueError, fontWeight = FontWeight.Bold)
+                                }
+                                if (r.erroneouslyArchivedCount == 0 && r.missingFromRoomCount == 0 && r.duplicateMobileCount == 0 && r.duplicateEventsCount == 0 && r.needsReviewCount == 0 && r.overpaidCustomersCount == 0) {
                                     Text("✅ सर्व ग्राहक डेटा परिपूर्ण आणि सुसंगत आहे!", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = BoutiqueSuccess)
                                 }
                             }
