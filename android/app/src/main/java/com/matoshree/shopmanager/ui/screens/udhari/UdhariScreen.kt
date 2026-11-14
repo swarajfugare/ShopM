@@ -52,7 +52,8 @@ import java.util.UUID
 class UdhariViewModel(
     private val udhariRepository: UdhariRepository,
     private val customerRepository: CustomerRepository,
-    private val billRepository: BillRepository
+    private val billRepository: BillRepository,
+    private val udhariStateProvider: com.matoshree.shopmanager.domain.usecase.UdhariStateProvider? = null
 ) : ViewModel() {
 
     private val _searchQuery = MutableStateFlow("")
@@ -67,57 +68,104 @@ class UdhariViewModel(
     val billsFlow = billRepository.getAllBills(limit = 10000).distinctUntilChanged()
     val transactionsFlow = udhariRepository.getAllTransactions().distinctUntilChanged()
 
-    private val baseSummariesFlow = combine(
-        customersFlow,
-        billsFlow,
-        transactionsFlow
-    ) { customers, bills, transactions ->
-        Triple(customers, bills, transactions)
-    }.debounce(200).map { (customers, bills, transactions) ->
-        val activeBills = bills.filter { !it.isVoided }.distinctBy { if (it.transactionUuid.isNotBlank()) it.transactionUuid else it.billNumber }
-        val validTxs = transactions.filter { !it.isReversed }.distinctBy { if (it.transactionUuid.isNotBlank()) it.transactionUuid else "${it.id}_${it.billId}" }
-        val uniqueCustomers = customers.distinctBy { it.canonicalKey() }
+    private val baseSummariesFlow = if (udhariStateProvider != null) {
+        udhariStateProvider.state.map { s ->
+            val activeBills = s.activeBills
+            val validTxs = s.validTransactions
+            val uniqueCustomers = s.customers
+            val ledgerBalances = s.customerBalances
+            val keyResolver = ShopMetricsCalculator.buildCustomerKeyResolver(uniqueCustomers, activeBills, validTxs)
 
-        val keyResolver = ShopMetricsCalculator.buildCustomerKeyResolver(uniqueCustomers, activeBills, validTxs)
-        val ledgerBalances = ShopMetricsCalculator.calculateCustomerLedgerBalances(activeBills, validTxs, uniqueCustomers)
+            uniqueCustomers.map { customer ->
+                val customerKey = keyResolver(customer.mobile, customer.name, customer.id) ?: customer.canonicalKey()
+                val totalPendingFromBills = ledgerBalances[customerKey] ?: 0.0
 
-        uniqueCustomers.map { customer ->
-            val customerKey = keyResolver(customer.mobile, customer.name, customer.id) ?: customer.canonicalKey()
-            val totalPendingFromBills = ledgerBalances[customerKey] ?: 0.0
+                val custBills = activeBills.filter { b ->
+                    keyResolver(b.customerMobile, b.customerName, b.customerId) == customerKey
+                }
+                val custTxs = validTxs.filter { tx ->
+                    keyResolver(tx.customerMobile, tx.customerName, tx.customerId) == customerKey
+                }
 
-            val custBills = activeBills.filter { b ->
-                keyResolver(b.customerMobile, b.customerName, b.customerId) == customerKey
+                val totalPurchases = custBills.sumOf { it.finalAmount } + custTxs.filter { it.type == UdhariTransactionType.PURCHASE_CREDIT && it.billId == 0L }.sumOf { it.amount }
+                val totalPaid = (totalPurchases - totalPendingFromBills).coerceAtLeast(0.0)
+
+                val pendingBills = custBills.filter { it.paymentStatus != PaymentStatus.PAID && it.pendingAmount > 0.01 }
+                val lastPayment = custTxs.filter { it.type == UdhariTransactionType.PAYMENT }.maxByOrNull { it.createdAt }
+
+                val oldestDueDate = pendingBills.mapNotNull { it.dueDate }.minOrNull()
+                val isOverdue = pendingBills.any { it.dueDate != null && DateUtils.isDatePassed(it.dueDate) }
+
+                val availableCredit = customer.creditLimit?.let { (it - totalPendingFromBills).coerceAtLeast(0.0) }
+
+                CustomerUdhariSummary(
+                    customer = customer.copy(outstandingBalance = totalPendingFromBills),
+                    totalOutstanding = totalPendingFromBills,
+                    totalPurchases = totalPurchases,
+                    totalPaid = totalPaid,
+                    pendingBillsCount = pendingBills.size + (if (custTxs.any { it.type == UdhariTransactionType.PURCHASE_CREDIT && it.billId == 0L }) 1 else 0),
+                    lastPaymentDate = lastPayment?.date,
+                    lastPaymentAmount = lastPayment?.amount,
+                    oldestDueDate = oldestDueDate,
+                    isOverdue = isOverdue,
+                    creditLimit = customer.creditLimit,
+                    availableCredit = availableCredit
+                )
             }
-            val custTxs = validTxs.filter { tx ->
-                keyResolver(tx.customerMobile, tx.customerName, tx.customerId) == customerKey
+        }.distinctUntilChanged()
+    } else {
+        combine(
+            customersFlow,
+            billsFlow,
+            transactionsFlow
+        ) { customers, bills, transactions ->
+            Triple(customers, bills, transactions)
+        }.debounce(200).map { (customers, bills, transactions) ->
+            val activeBills = bills.filter { !it.isVoided }.distinctBy { if (it.transactionUuid.isNotBlank()) it.transactionUuid else it.billNumber }
+            val validTxs = transactions.filter { !it.isReversed }.distinctBy { if (it.transactionUuid.isNotBlank()) it.transactionUuid else "${it.id}_${it.billId}" }
+            val uniqueCustomers = customers.distinctBy { it.canonicalKey() }
+
+            val keyResolver = ShopMetricsCalculator.buildCustomerKeyResolver(uniqueCustomers, activeBills, validTxs)
+            val ledgerBalances = ShopMetricsCalculator.calculateCustomerLedgerBalances(activeBills, validTxs, uniqueCustomers)
+
+            uniqueCustomers.map { customer ->
+                val customerKey = keyResolver(customer.mobile, customer.name, customer.id) ?: customer.canonicalKey()
+                val totalPendingFromBills = ledgerBalances[customerKey] ?: 0.0
+
+                val custBills = activeBills.filter { b ->
+                    keyResolver(b.customerMobile, b.customerName, b.customerId) == customerKey
+                }
+                val custTxs = validTxs.filter { tx ->
+                    keyResolver(tx.customerMobile, tx.customerName, tx.customerId) == customerKey
+                }
+
+                val totalPurchases = custBills.sumOf { it.finalAmount } + custTxs.filter { it.type == UdhariTransactionType.PURCHASE_CREDIT && it.billId == 0L }.sumOf { it.amount }
+                val totalPaid = (totalPurchases - totalPendingFromBills).coerceAtLeast(0.0)
+
+                val pendingBills = custBills.filter { it.paymentStatus != PaymentStatus.PAID && it.pendingAmount > 0.01 }
+                val lastPayment = custTxs.filter { it.type == UdhariTransactionType.PAYMENT }.maxByOrNull { it.createdAt }
+
+                val oldestDueDate = pendingBills.mapNotNull { it.dueDate }.minOrNull()
+                val isOverdue = pendingBills.any { it.dueDate != null && DateUtils.isDatePassed(it.dueDate) }
+
+                val availableCredit = customer.creditLimit?.let { (it - totalPendingFromBills).coerceAtLeast(0.0) }
+
+                CustomerUdhariSummary(
+                    customer = customer.copy(outstandingBalance = totalPendingFromBills),
+                    totalOutstanding = totalPendingFromBills,
+                    totalPurchases = totalPurchases,
+                    totalPaid = totalPaid,
+                    pendingBillsCount = pendingBills.size + (if (custTxs.any { it.type == UdhariTransactionType.PURCHASE_CREDIT && it.billId == 0L }) 1 else 0),
+                    lastPaymentDate = lastPayment?.date,
+                    lastPaymentAmount = lastPayment?.amount,
+                    oldestDueDate = oldestDueDate,
+                    isOverdue = isOverdue,
+                    creditLimit = customer.creditLimit,
+                    availableCredit = availableCredit
+                )
             }
-
-            val totalPurchases = custBills.sumOf { it.finalAmount } + custTxs.filter { it.type == UdhariTransactionType.PURCHASE_CREDIT && it.billId == 0L }.sumOf { it.amount }
-            val totalPaid = (totalPurchases - totalPendingFromBills).coerceAtLeast(0.0)
-
-            val pendingBills = custBills.filter { it.paymentStatus != PaymentStatus.PAID && it.pendingAmount > 0.01 }
-            val lastPayment = custTxs.filter { it.type == UdhariTransactionType.PAYMENT }.maxByOrNull { it.createdAt }
-
-            val oldestDueDate = pendingBills.mapNotNull { it.dueDate }.minOrNull()
-            val isOverdue = pendingBills.any { it.dueDate != null && DateUtils.isDatePassed(it.dueDate) }
-
-            val availableCredit = customer.creditLimit?.let { (it - totalPendingFromBills).coerceAtLeast(0.0) }
-
-            CustomerUdhariSummary(
-                customer = customer.copy(outstandingBalance = totalPendingFromBills),
-                totalOutstanding = totalPendingFromBills,
-                totalPurchases = totalPurchases,
-                totalPaid = totalPaid,
-                pendingBillsCount = pendingBills.size + (if (custTxs.any { it.type == UdhariTransactionType.PURCHASE_CREDIT && it.billId == 0L }) 1 else 0),
-                lastPaymentDate = lastPayment?.date,
-                lastPaymentAmount = lastPayment?.amount,
-                oldestDueDate = oldestDueDate,
-                isOverdue = isOverdue,
-                creditLimit = customer.creditLimit,
-                availableCredit = availableCredit
-            )
-        }
-    }.distinctUntilChanged()
+        }.distinctUntilChanged()
+    }
 
     // Combined Udhari customer summaries with query, filter, sort
     val customerSummaries: StateFlow<List<CustomerUdhariSummary>> = combine(
@@ -160,44 +208,59 @@ class UdhariViewModel(
     }.distinctUntilChanged().stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
     // Overall Metrics
-    val udhariMetrics: StateFlow<UdhariOverallMetrics> = combine(
-        customersFlow,
-        billsFlow,
-        transactionsFlow
-    ) { customers, bills, transactions ->
-        Triple(customers, bills, transactions)
-    }.debounce(200).map { (customers, bills, transactions) ->
-        val activeBills = bills.filter { !it.isVoided }
-        val validTxs = transactions.filter { !it.isReversed }
+    val udhariMetrics: StateFlow<UdhariOverallMetrics> = if (udhariStateProvider != null) {
+        udhariStateProvider.state.map { s ->
+            UdhariOverallMetrics(
+                totalOutstanding = s.totalOutstanding,
+                customersWithPending = s.pendingCustomersCount,
+                todayCollections = s.todayCollections,
+                todayCashCollections = s.todayCashCollections,
+                todayUpiCollections = s.todayUpiCollections,
+                thisMonthCollections = s.thisMonthCollections,
+                overdueAmount = s.overdueAmount,
+                pendingBillsCount = s.pendingBillsCount
+            )
+        }.distinctUntilChanged().stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), UdhariOverallMetrics())
+    } else {
+        combine(
+            customersFlow,
+            billsFlow,
+            transactionsFlow
+        ) { customers, bills, transactions ->
+            Triple(customers, bills, transactions)
+        }.debounce(200).map { (customers, bills, transactions) ->
+            val activeBills = bills.filter { !it.isVoided }
+            val validTxs = transactions.filter { !it.isReversed }
 
-        val totalOutstanding = ShopMetricsCalculator.calculateTotalPendingUdhari(activeBills, validTxs, customers)
-        val pendingCustomersCount = ShopMetricsCalculator.calculatePendingCustomersCount(activeBills, validTxs, customers)
-        val pendingBills = activeBills.filter { it.pendingAmount > 0.01 }
+            val totalOutstanding = ShopMetricsCalculator.calculateTotalPendingUdhari(activeBills, validTxs, customers)
+            val pendingCustomersCount = ShopMetricsCalculator.calculatePendingCustomersCount(activeBills, validTxs, customers)
+            val pendingBills = activeBills.filter { it.pendingAmount > 0.01 }
 
-        val todayIso = DateUtils.todayDate()
-        val currentMonthIso = todayIso.take(7)
+            val todayIso = DateUtils.todayDate()
+            val currentMonthIso = todayIso.take(7)
 
-        val todayPayments = validTxs.filter { it.type == UdhariTransactionType.PAYMENT && it.date == todayIso }
-        val todayCollections = todayPayments.sumOf { it.amount }
-        val todayCashCollections = todayPayments.filter { it.paymentMethod == PaymentMethod.CASH }.sumOf { it.amount }
-        val todayUpiCollections = todayPayments.filter { it.paymentMethod == PaymentMethod.UPI }.sumOf { it.amount }
+            val todayPayments = validTxs.filter { it.type == UdhariTransactionType.PAYMENT && it.date == todayIso }
+            val todayCollections = todayPayments.sumOf { it.amount }
+            val todayCashCollections = todayPayments.filter { it.paymentMethod == PaymentMethod.CASH }.sumOf { it.amount }
+            val todayUpiCollections = todayPayments.filter { it.paymentMethod == PaymentMethod.UPI }.sumOf { it.amount }
 
-        val monthPayments = validTxs.filter { it.type == UdhariTransactionType.PAYMENT && it.date.startsWith(currentMonthIso) }
-        val monthCollections = monthPayments.sumOf { it.amount }
+            val monthPayments = validTxs.filter { it.type == UdhariTransactionType.PAYMENT && it.date.startsWith(currentMonthIso) }
+            val monthCollections = monthPayments.sumOf { it.amount }
 
-        val overdueAmount = pendingBills.filter { it.dueDate != null && DateUtils.isDatePassed(it.dueDate) }.sumOf { it.pendingAmount }
+            val overdueAmount = pendingBills.filter { it.dueDate != null && DateUtils.isDatePassed(it.dueDate) }.sumOf { it.pendingAmount }
 
-        UdhariOverallMetrics(
-            totalOutstanding = totalOutstanding,
-            customersWithPending = pendingCustomersCount,
-            todayCollections = todayCollections,
-            todayCashCollections = todayCashCollections,
-            todayUpiCollections = todayUpiCollections,
-            thisMonthCollections = monthCollections,
-            overdueAmount = overdueAmount,
-            pendingBillsCount = pendingBills.size
-        )
-    }.distinctUntilChanged().stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), UdhariOverallMetrics())
+            UdhariOverallMetrics(
+                totalOutstanding = totalOutstanding,
+                customersWithPending = pendingCustomersCount,
+                todayCollections = todayCollections,
+                todayCashCollections = todayCashCollections,
+                todayUpiCollections = todayUpiCollections,
+                thisMonthCollections = monthCollections,
+                overdueAmount = overdueAmount,
+                pendingBillsCount = pendingBills.size
+            )
+        }.distinctUntilChanged().stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), UdhariOverallMetrics())
+    }
 
     fun onSearchChange(q: String) {
         _searchQuery.value = q

@@ -575,12 +575,12 @@ class CustomerRepository(
                 val existing = (if (customer.id > 0) database.customerDao().getCustomerById(customer.id) else null)
                     ?: (if (customer.id > 0) database.customerDao().getCustomerByServerId(customer.id) else null)
                     ?: (if (cleanMob.length == 10) database.customerDao().getCustomerByMobileFuzzy(customer.mobile, cleanMob) else null)
-                    ?: (if (customer.name.isNotBlank()) database.customerDao().getCustomerByName(customer.name) else null)
 
                 val targetLocalId = existing?.id ?: if (customer.id > 0 && customer.id < 1_000_000_000L) customer.id else 0L
                 val entity = customer.toEntity().copy(
                     id = targetLocalId,
-                    serverId = existing?.serverId,
+                    serverId = existing?.serverId ?: if (customer.id >= 1_000_000_000L) customer.id else null,
+                    isActive = true,
                     syncStatus = initialStatus
                 )
                 localId = database.customerDao().insertCustomer(entity)
@@ -707,7 +707,7 @@ class CustomerRepository(
                     database.billDao().deleteBillItems(bWithItems.bill.id)
                 }
                 database.billDao().deleteBillsByCustomerOrDetails(0L, cleanMobile, name)
-                database.customerDao().hardDeleteCustomerByDetails(cleanMobile, name)
+                database.customerDao().hardDeleteCustomerByDetails(cleanMobile)
             } catch (e: Exception) {
                 Log.w("CustomerRepo", "Local purge specific customer note: ${e.message}")
             }

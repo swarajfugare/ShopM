@@ -250,6 +250,9 @@ interface CustomerDao {
     @Query("SELECT * FROM customers WHERE mobile = :mobile LIMIT 1")
     suspend fun getAnyCustomerByMobile(mobile: String): CustomerEntity?
 
+    @Query("SELECT * FROM customers ORDER BY id DESC")
+    suspend fun getAllCustomersDirect(): List<CustomerEntity>
+
     @Query("UPDATE customers SET totalBills = totalBills + 1, lifetimeSpend = lifetimeSpend + :amount, lastPurchaseAt = :purchaseDate WHERE id = :id")
     suspend fun incrementCustomerSpend(id: Long, amount: Double, purchaseDate: String)
 
@@ -262,23 +265,26 @@ interface CustomerDao {
     @Query("UPDATE customers SET isActive = 0 WHERE id = :id")
     suspend fun archiveCustomer(id: Long)
 
-    @Query("UPDATE customers SET isActive = 0 WHERE (:serverId IS NOT NULL AND serverId > 0 AND serverId = :serverId) OR (:cleanMobile != '' AND (mobile = :cleanMobile OR mobile LIKE '%' || :cleanMobile)) OR (:name != '' AND LOWER(TRIM(name)) = LOWER(TRIM(:name)))")
-    suspend fun archiveCustomerComprehensive(serverId: Long?, cleanMobile: String, name: String)
+    @Query("UPDATE customers SET isActive = 0 WHERE (:serverId IS NOT NULL AND serverId > 0 AND serverId = :serverId) OR (:cleanMobile != '' AND LENGTH(:cleanMobile) = 10 AND mobile = :cleanMobile)")
+    suspend fun archiveCustomerComprehensive(serverId: Long?, cleanMobile: String)
 
-    @Query("DELETE FROM customers WHERE (:serverId IS NOT NULL AND serverId > 0 AND serverId = :serverId) OR (:cleanMobile != '' AND (mobile = :cleanMobile OR mobile LIKE '%' || :cleanMobile)) OR (:name != '' AND LOWER(TRIM(name)) = LOWER(TRIM(:name)))")
-    suspend fun hardDeleteCustomerComprehensive(serverId: Long?, cleanMobile: String, name: String)
+    @Query("DELETE FROM customers WHERE (:serverId IS NOT NULL AND serverId > 0 AND serverId = :serverId) OR (:cleanMobile != '' AND LENGTH(:cleanMobile) = 10 AND mobile = :cleanMobile)")
+    suspend fun hardDeleteCustomerComprehensive(serverId: Long?, cleanMobile: String)
 
     @Query("DELETE FROM customers WHERE id = :id")
     suspend fun hardDeleteCustomer(id: Long)
 
-    @Query("DELETE FROM customers WHERE (mobile IS NOT NULL AND mobile != '' AND (mobile = :mobile OR mobile LIKE '%' || :mobile || '%')) OR (name IS NOT NULL AND LOWER(name) = LOWER(:name))")
-    suspend fun hardDeleteCustomerByDetails(mobile: String, name: String)
+    @Query("DELETE FROM customers WHERE (mobile IS NOT NULL AND LENGTH(TRIM(mobile)) = 10 AND mobile = :mobile)")
+    suspend fun hardDeleteCustomerByDetails(mobile: String)
 
     @Query("UPDATE customers SET totalBills = 0, lifetimeSpend = 0.0 WHERE id = :id")
     suspend fun resetCustomerStats(id: Long)
 
     @Query("UPDATE customers SET isActive = 1 WHERE id = :id")
     suspend fun unarchiveCustomer(id: Long)
+
+    @Query("UPDATE customers SET isActive = 1 WHERE mobile = :mobile OR (:cleanMobile != '' AND mobile = :cleanMobile)")
+    suspend fun unarchiveCustomerByMobile(mobile: String, cleanMobile: String = "")
 
     @Query("UPDATE customers SET isActive = 1 WHERE name LIKE '%' || :name || '%'")
     suspend fun unarchiveCustomerByName(name: String)
@@ -547,5 +553,26 @@ interface SettingsDao {
 
     @Query("SELECT * FROM app_settings")
     fun observeAll(): Flow<List<SettingsEntity>>
+}
+
+@Dao
+interface ReminderLogDao {
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insertLog(log: ReminderLogEntity)
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insertLogs(logs: List<ReminderLogEntity>)
+
+    @Query("SELECT * FROM reminder_logs ORDER BY timestamp DESC LIMIT 200")
+    fun getRecentLogs(): Flow<List<ReminderLogEntity>>
+
+    @Query("SELECT * FROM reminder_logs ORDER BY timestamp DESC LIMIT :limit")
+    suspend fun getRecentLogsDirect(limit: Int = 100): List<ReminderLogEntity>
+
+    @Query("SELECT * FROM reminder_logs WHERE timestamp >= :sinceTimestamp ORDER BY timestamp DESC")
+    fun getLogsSince(sinceTimestamp: Long): Flow<List<ReminderLogEntity>>
+
+    @Query("DELETE FROM reminder_logs WHERE timestamp < :cutoffTimestamp")
+    suspend fun deleteOldLogs(cutoffTimestamp: Long)
 }
 

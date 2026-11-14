@@ -994,62 +994,6 @@ fun SaleSummaryScreen(
                     }
                 }
             }
-
-            // WHATSAPP UDHARI REMINDER CARD (Only reminder is sent)
-            item {
-                val sendWa by viewModel.sendWhatsAppOnComplete.collectAsState()
-                val hasCustMobile = selectedCustomer != null && selectedCustomer!!.mobile.isNotBlank()
-                val isCreditSale = actualPendingAmount > 0.01
-
-                if (isCreditSale) {
-                    MatoshreeCard(hasGoldTopBorder = sendWa) {
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Row(
-                                verticalAlignment = Alignment.CenterVertically,
-                                modifier = Modifier.weight(1f)
-                            ) {
-                                Icon(Icons.Default.Send, contentDescription = null, tint = if (sendWa && hasCustMobile) BoutiqueSuccess else MutedCharcoal, modifier = Modifier.size(20.dp))
-                                Spacer(modifier = Modifier.width(8.dp))
-                                Column {
-                                    Text("उधारी आठवण व्हॉट्सॲप मेसेज", style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold))
-                                    Text(
-                                        text = if (hasCustMobile) "ग्राहकाला (${selectedCustomer!!.mobile}) शिल्लक उधारीचा (${CurrencyFormatter.format(actualPendingAmount)}) आठवण मेसेज जाईल" else "ग्राहकाचा मोबाईल नंबर आवश्यक आहे",
-                                        fontSize = 11.sp,
-                                        color = if (hasCustMobile) MutedCharcoal else BoutiqueError
-                                    )
-                                }
-                            }
-                            Switch(
-                                checked = sendWa && hasCustMobile,
-                                onCheckedChange = { viewModel.sendWhatsAppOnComplete.value = it },
-                                enabled = hasCustMobile,
-                                colors = SwitchDefaults.colors(
-                                    checkedThumbColor = WarmWhite,
-                                    checkedTrackColor = BoutiqueSuccess
-                                )
-                            )
-                        }
-                    }
-                } else {
-                    MatoshreeCard {
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            modifier = Modifier.fillMaxWidth()
-                        ) {
-                            Icon(Icons.Default.Info, contentDescription = null, tint = DeepEmerald, modifier = Modifier.size(18.dp))
-                            Spacer(modifier = Modifier.width(8.dp))
-                            Text(
-                                text = "पूर्ण भरणा झालेल्या बिलांचा व्हॉट्सॲप मेसेज पाठवला जात नाही (केवळ उधारी आठवण मेसेज सक्रिय आहे).",
-                                style = MaterialTheme.typography.bodySmall.copy(color = MutedCharcoal, fontSize = 11.sp)
-                            )
-                        }
-                    }
-                }
-            }
         }
     }
 

@@ -35,7 +35,9 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.matoshree.shopmanager.data.local.dao.SettingsDao
 import com.matoshree.shopmanager.data.repository.BillRepository
+import com.matoshree.shopmanager.data.repository.toDomain
 import com.matoshree.shopmanager.domain.model.Bill
+import kotlinx.coroutines.tasks.await
 import com.matoshree.shopmanager.domain.model.PaymentMethod
 import com.matoshree.shopmanager.domain.model.PaymentStatus
 import com.matoshree.shopmanager.ui.components.MatoshreeCard
@@ -1532,12 +1534,34 @@ fun BillPreviewScreen(
                         }
                         coroutineScope.launch {
                             isSendingWaBill = true
+                            val trueBalance = try {
+                                val db = com.matoshree.shopmanager.data.local.AppDatabase.getInstance(context)
+                                val bList = db.billDao().getAllBillsDirect(5000).map { it.toDomain() }
+                                val cList = db.customerDao().getAllCustomersDirect().map { it.toDomain() }
+                                val txs = mutableListOf<com.matoshree.shopmanager.domain.model.UdhariTransaction>()
+                                if (com.matoshree.shopmanager.data.firebase.FirebaseManager.isNetworkAvailable()) {
+                                    val snap = com.matoshree.shopmanager.data.firebase.FirebaseManager.udhariTransactionsCollection().limit(1000).get().await()
+                                    snap.documents.mapNotNullTo(txs) { doc ->
+                                        doc.toObject(com.matoshree.shopmanager.data.firebase.UdhariTransactionDto::class.java)?.apply { id = doc.id }?.toDomain()
+                                    }
+                                }
+                                val ledger = com.matoshree.shopmanager.domain.usecase.ShopMetricsCalculator.calculateCustomerLedgerBalances(bList, txs, cList)
+                                val keyRes = com.matoshree.shopmanager.domain.usecase.ShopMetricsCalculator.buildCustomerKeyResolver(cList, bList, txs)
+                                val k = keyRes(clean, bill!!.customerName, bill!!.customerId) ?: clean
+                                val bal = ledger[k] ?: 0.0
+                                if (bal > 0.01) bal else bill!!.pendingAmount
+                            } catch (e: Exception) {
+                                bill!!.pendingAmount
+                            }
+
                             val res = com.matoshree.shopmanager.utils.WhatsAppWebhookManager.sendUdhariReminderWhatsApp(
                                 context = context,
                                 customerName = bill!!.customerName ?: "ग्राहक",
                                 customerMobile = clean,
-                                outstandingDue = bill!!.pendingAmount,
+                                outstandingDue = trueBalance,
                                 dueDate = bill!!.dueDate,
+                                reminderType = "MANUAL",
+                                silent = false,
                                 settings = settings
                             )
                             isSendingWaBill = false

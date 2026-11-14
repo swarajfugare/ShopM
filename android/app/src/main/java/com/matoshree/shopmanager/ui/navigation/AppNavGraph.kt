@@ -66,8 +66,9 @@ fun AppNavGraph(
     val syncRepository = remember { SyncRepository(database) }
     val settingsDao = remember { database.settingsDao() }
     val udhariRepository = remember { UdhariRepository(syncManager = syncManager) }
+    val udhariStateProvider = remember { com.matoshree.shopmanager.domain.usecase.UdhariStateProvider(customerRepository, billRepository, udhariRepository) }
 
-    val dashboardViewModel = remember { DashboardViewModel(billRepository, udhariRepository, productRepository, customerRepository) }
+    val dashboardViewModel = remember { DashboardViewModel(billRepository, udhariRepository, productRepository, customerRepository, udhariStateProvider) }
     val saleViewModel = remember { SaleViewModel(billRepository, customerRepository, productRepository) }
 
     // Lazy on-demand ViewModels: Prevent 8 heavy ViewModels from initializing simultaneously on unlock,
@@ -81,7 +82,7 @@ fun AppNavGraph(
     val lazyCustomerViewModel = remember { lazy { CustomerViewModel(customerRepository, billRepository, udhariRepository) } }
     fun getCustomerViewModel(): CustomerViewModel = lazyCustomerViewModel.value
 
-    val lazyUdhariViewModel = remember { lazy { com.matoshree.shopmanager.ui.screens.udhari.UdhariViewModel(udhariRepository, customerRepository, billRepository) } }
+    val lazyUdhariViewModel = remember { lazy { com.matoshree.shopmanager.ui.screens.udhari.UdhariViewModel(udhariRepository, customerRepository, billRepository, udhariStateProvider) } }
     fun getUdhariViewModel(): com.matoshree.shopmanager.ui.screens.udhari.UdhariViewModel = lazyUdhariViewModel.value
 
     val lazyClosingViewModel = remember { lazy { DailyClosingViewModel(billRepository, dailyClosingRepository, udhariRepository, expenseRepository) } }
@@ -307,14 +308,6 @@ fun AppNavGraph(
                                 navController.navigate(Screen.BillPreview.createRoute(bill.id)) {
                                     popUpTo(Screen.Dashboard.route)
                                 }
-                                // Asynchronously dispatch automatic WhatsApp bill in background without delaying navigation
-                                kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.IO).launch {
-                                    try {
-                                        com.matoshree.shopmanager.utils.WhatsAppWebhookManager.sendBillAutoWhatsApp(context, bill)
-                                    } catch (we: Exception) {
-                                        android.util.Log.w("AppNavGraph", "Background WhatsApp dispatch note: ${we.message}")
-                                    }
-                                }
                             } catch (e: Exception) {
                                 android.util.Log.e("AppNavGraph", "Error completing quick sale: ${e.message}", e)
                             }
@@ -330,26 +323,10 @@ fun AppNavGraph(
                     onCompleteSale = {
                         coroutineScope.launch {
                             try {
-                                val chosenTemplateType = saleViewModel.selectedWhatsAppTemplateType.value
-                                val shouldSendWa = saleViewModel.sendWhatsAppOnComplete.value
                                 val bill = saleViewModel.completeSale(com.matoshree.shopmanager.domain.model.SaleType.DETAILED)
                                 saleViewModel.reset()
                                 navController.navigate(Screen.BillPreview.createRoute(bill.id)) {
                                     popUpTo(Screen.Dashboard.route)
-                                }
-                                if (shouldSendWa) {
-                                    // Asynchronously dispatch automatic WhatsApp bill in background without delaying navigation
-                                    kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.IO).launch {
-                                        try {
-                                            com.matoshree.shopmanager.utils.WhatsAppWebhookManager.sendBillAutoWhatsApp(
-                                                context = context,
-                                                bill = bill,
-                                                templateTypeOverride = chosenTemplateType
-                                            )
-                                        } catch (we: Exception) {
-                                            android.util.Log.w("AppNavGraph", "Background WhatsApp dispatch note: ${we.message}")
-                                        }
-                                    }
                                 }
                             } catch (e: Exception) {
                                 android.util.Log.e("AppNavGraph", "Error completing detailed sale: ${e.message}", e)

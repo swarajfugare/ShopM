@@ -338,8 +338,7 @@ class RealtimeSyncManager private constructor(
                     for (target in toArchive) {
                         database.customerDao().archiveCustomerComprehensive(
                             serverId = target.first,
-                            cleanMobile = target.second,
-                            name = target.third
+                            cleanMobile = target.second
                         )
                     }
                 }

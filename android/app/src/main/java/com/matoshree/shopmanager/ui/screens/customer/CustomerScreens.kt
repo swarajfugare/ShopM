@@ -660,12 +660,12 @@ class CustomerViewModel(
             val existing = findCustomerByMobile(cleanMobile)
             if (existing != null && existing.id != existingId) {
                 if (existing.name.trim().equals(cleanName, ignoreCase = true)) {
-                    return Result.success(existing.id)
-                }
-                if (!allowOverwriteName) {
+                    targetId = existing.id
+                } else if (!allowOverwriteName) {
                     return Result.failure(IllegalStateException("EXISTS_DIFFERENT_NAME:${existing.id}:${existing.name}"))
+                } else {
+                    targetId = existing.id
                 }
-                targetId = existing.id
             } else if (existing == null) {
                 // Check if customer was deleted or archived - automatically revive them with clean slate!
                 val anyExisting = try {

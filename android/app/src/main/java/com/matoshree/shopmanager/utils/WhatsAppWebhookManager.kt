@@ -7,6 +7,7 @@ import android.widget.Toast
 import androidx.security.crypto.EncryptedSharedPreferences
 import androidx.security.crypto.MasterKey
 import com.matoshree.shopmanager.data.firebase.CustomerDto
+import com.matoshree.shopmanager.data.repository.toDomain
 import com.matoshree.shopmanager.domain.model.Bill
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
@@ -38,6 +39,7 @@ object WhatsAppWebhookManager {
     private const val KEY_REMINDER_TEMPLATE = "whatsapp_reminder_payload_template"
     private const val KEY_CLEARED_TEMPLATE = "whatsapp_cleared_payload_template"
     private const val KEY_UDHARI_REMINDER = "whatsapp_udhari_reminder_enabled"
+    private const val KEY_AUTO_REMINDERS_FROM_THIS_DEVICE = "whatsapp_auto_reminders_from_this_device"
     private const val KEY_SELECTED_BILL_TEMPLATE_OPTION = "whatsapp_selected_bill_template_option" // "AUTO", "BILL", "REMINDER", "CUSTOM"
     private const val KEY_BILL_TEMPLATE_NAME = "whatsapp_bill_template_name"
     private const val KEY_REMINDER_TEMPLATE_NAME = "whatsapp_reminder_template_name"
@@ -211,6 +213,123 @@ object WhatsAppWebhookManager {
         getPrefs(context).edit().putBoolean(KEY_UDHARI_REMINDER, enabled).apply()
     }
 
+    fun isAutoRemindersFromThisDeviceEnabled(context: Context): Boolean {
+        return getPrefs(context).getBoolean(KEY_AUTO_REMINDERS_FROM_THIS_DEVICE, false)
+    }
+
+    fun setAutoRemindersFromThisDeviceEnabled(context: Context, enabled: Boolean) {
+        getPrefs(context).edit().putBoolean(KEY_AUTO_REMINDERS_FROM_THIS_DEVICE, enabled).apply()
+    }
+
+    suspend fun claimDailyReminder(
+        cleanMobile: String,
+        customerName: String,
+        amount: Double,
+        type: String,
+        todayDate: String = java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.ENGLISH).apply { timeZone = DateUtils.kolkataTimeZone }.format(java.util.Date())
+    ): Boolean = withContext(Dispatchers.IO) {
+        if (cleanMobile.length != 10) return@withContext false
+        val claimId = "${cleanMobile}_${todayDate}"
+        try {
+            if (!com.matoshree.shopmanager.data.firebase.FirebaseManager.isNetworkAvailable()) {
+                return@withContext true
+            }
+            com.matoshree.shopmanager.data.firebase.FirebaseManager.ensureAuthenticated()
+            val docRef = com.matoshree.shopmanager.data.firebase.FirebaseManager.shopDoc().collection("reminder_claims").document(claimId)
+            val claimed = com.matoshree.shopmanager.data.firebase.FirebaseManager.firestore.runTransaction { transaction ->
+                val snapshot = transaction.get(docRef)
+                if (snapshot.exists()) {
+                    val status = snapshot.getString("status") ?: ""
+                    val claimedAt = snapshot.getLong("claimedAt") ?: 0L
+                    val isRecent = (System.currentTimeMillis() - claimedAt) < 30 * 60 * 1000L
+                    if (status == "SENT" || isRecent) {
+                        return@runTransaction false
+                    }
+                }
+                transaction.set(
+                    docRef,
+                    mapOf(
+                        "id" to claimId,
+                        "customerMobile" to cleanMobile,
+                        "customerName" to customerName,
+                        "amount" to amount,
+                        "type" to type,
+                        "status" to "CLAIMED",
+                        "claimedByDevice" to (android.os.Build.MODEL ?: "Android"),
+                        "claimedAt" to System.currentTimeMillis(),
+                        "date" to todayDate
+                    )
+                )
+                true
+            }.await()
+            claimed
+        } catch (e: Exception) {
+            Log.w(TAG, "Distributed reminder claim note: ${e.message}")
+            false
+        }
+    }
+
+    suspend fun updateClaimStatus(
+        cleanMobile: String,
+        status: String,
+        errorMessage: String? = null,
+        todayDate: String = java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.ENGLISH).apply { timeZone = DateUtils.kolkataTimeZone }.format(java.util.Date())
+    ) = withContext(Dispatchers.IO) {
+        try {
+            val claimId = "${cleanMobile}_${todayDate}"
+            val docRef = com.matoshree.shopmanager.data.firebase.FirebaseManager.shopDoc().collection("reminder_claims").document(claimId)
+            val updateMap = mutableMapOf<String, Any>(
+                "status" to status,
+                "updatedAt" to System.currentTimeMillis()
+            )
+            if (errorMessage != null) updateMap["errorMessage"] = errorMessage
+            docRef.set(updateMap, com.google.firebase.firestore.SetOptions.merge()).await()
+        } catch (e: Exception) {
+            Log.w(TAG, "Update claim status note: ${e.message}")
+        }
+    }
+
+    suspend fun recordReminderLog(
+        context: Context,
+        customerName: String,
+        customerMobile: String,
+        amount: Double,
+        type: String,
+        status: String,
+        errorMessage: String? = null
+    ) = withContext(Dispatchers.IO) {
+        val clean10 = PhoneUtils.clean10DigitMobileInput(customerMobile)
+        val todayDate = java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.ENGLISH).apply { timeZone = DateUtils.kolkataTimeZone }.format(java.util.Date())
+        val logId = "rem_${System.currentTimeMillis()}_${clean10}"
+        val logEntity = com.matoshree.shopmanager.data.local.entity.ReminderLogEntity(
+            id = logId,
+            customerName = customerName,
+            customerMobile = clean10,
+            amount = amount,
+            type = type,
+            status = status,
+            errorMessage = errorMessage,
+            timestamp = System.currentTimeMillis(),
+            date = todayDate
+        )
+
+        try {
+            val db = com.matoshree.shopmanager.data.local.AppDatabase.getInstance(context)
+            db.reminderLogDao().insertLog(logEntity)
+        } catch (e: Exception) {
+            Log.w(TAG, "Room reminder log insert note: ${e.message}")
+        }
+
+        try {
+            if (com.matoshree.shopmanager.data.firebase.FirebaseManager.isNetworkAvailable()) {
+                com.matoshree.shopmanager.data.firebase.FirebaseManager.ensureAuthenticated()
+                com.matoshree.shopmanager.data.firebase.FirebaseManager.shopDoc().collection("reminder_logs").document(logId).set(logEntity).await()
+            }
+        } catch (e: Exception) {
+            Log.w(TAG, "Firestore reminder log note: ${e.message}")
+        }
+    }
+
     /**
      * Automatically dispatches a message when a bill is completed.
      * In accordance with user policy, this app sends ONLY Udhari Reminders (no bill notification).
@@ -237,21 +356,28 @@ object WhatsAppWebhookManager {
         customerMobile: String,
         outstandingDue: Double,
         dueDate: String? = null,
+        reminderType: String = "MANUAL",
+        silent: Boolean = false,
         settings: PrintShareHelper.ShopSettingsSnapshot = PrintShareHelper.ShopSettingsSnapshot()
     ): Result<String> = withContext(Dispatchers.IO) {
+        val clean10 = PhoneUtils.clean10DigitMobileInput(customerMobile)
+        val custName = customerName.ifBlank { "ग्राहक" }
+
         try {
             val webhookUrl = getWebhookUrl(context)
             if (webhookUrl.isBlank()) {
-                return@withContext Result.failure(IllegalStateException("WhatsApp webhook URL is not configured."))
+                val err = "WhatsApp webhook URL is not configured."
+                recordReminderLog(context, custName, clean10, outstandingDue, reminderType, "FAILED", err)
+                return@withContext Result.failure(IllegalStateException(err))
             }
 
             if (customerMobile.isBlank() || !PhoneUtils.isValidIndianMobile(customerMobile)) {
-                return@withContext Result.failure(IllegalArgumentException("Customer has no valid 10-digit mobile number."))
+                val err = "Customer has no valid 10-digit mobile number."
+                recordReminderLog(context, custName, clean10, outstandingDue, reminderType, "FAILED", err)
+                return@withContext Result.failure(IllegalArgumentException(err))
             }
 
-            val clean10 = PhoneUtils.clean10DigitMobileInput(customerMobile)
             val waDestination = "91$clean10"
-            val custName = customerName.ifBlank { "ग्राहक" }
             val shopName = settings.shopName.ifBlank { "मातोश्री कलेक्शन" }
             val shopAddress = settings.address.ifBlank { "कोंढारकी, पंढरपूर" }
             val shopMobile = settings.mobile.ifBlank { "8208610261" }
@@ -367,21 +493,35 @@ $dueDateText
 
             if (response.isSuccessful) {
                 Log.i(TAG, "WhatsApp Udhari reminder successfully dispatched to $waDestination: ${response.code}")
-                withContext(Dispatchers.Main) {
-                    Toast.makeText(context, "$custName यांना व्हॉट्सॲपवर उधारी आठवण मेसेज पाठवला", Toast.LENGTH_SHORT).show()
+                updateClaimStatus(clean10, "SENT", null)
+                recordReminderLog(context, custName, clean10, outstandingDue, reminderType, "SUCCESS", null)
+                if (!silent) {
+                    withContext(Dispatchers.Main) {
+                        Toast.makeText(context, "$custName यांना व्हॉट्सॲपवर उधारी आठवण मेसेज पाठवला", Toast.LENGTH_SHORT).show()
+                    }
                 }
                 Result.success(responseBody)
             } else {
+                val err = "HTTP ${response.code}: $responseBody"
                 Log.e(TAG, "WhatsApp API responded with error ${response.code}: $responseBody")
-                withContext(Dispatchers.Main) {
-                    Toast.makeText(context, "व्हॉट्सॲप API एरर (${response.code}): $responseBody", Toast.LENGTH_LONG).show()
+                updateClaimStatus(clean10, "FAILED", err)
+                recordReminderLog(context, custName, clean10, outstandingDue, reminderType, "FAILED", err)
+                if (!silent) {
+                    withContext(Dispatchers.Main) {
+                        Toast.makeText(context, "व्हॉट्सॲप API एरर (${response.code}): $responseBody", Toast.LENGTH_LONG).show()
+                    }
                 }
-                Result.failure(Exception("HTTP ${response.code}: $responseBody"))
+                Result.failure(Exception(err))
             }
         } catch (e: Exception) {
-            Log.e(TAG, "WhatsApp Udhari reminder exception: ${e.message}", e)
-            withContext(Dispatchers.Main) {
-                Toast.makeText(context, "व्हॉट्सॲप त्रुटी: ${e.message}", Toast.LENGTH_LONG).show()
+            val err = e.message ?: "Unknown error"
+            Log.e(TAG, "WhatsApp Udhari reminder exception: $err", e)
+            updateClaimStatus(clean10, "FAILED", err)
+            recordReminderLog(context, custName, clean10, outstandingDue, reminderType, "FAILED", err)
+            if (!silent) {
+                withContext(Dispatchers.Main) {
+                    Toast.makeText(context, "व्हॉट्सॲप त्रुटी: $err", Toast.LENGTH_LONG).show()
+                }
             }
             Result.failure(e)
         }
@@ -407,6 +547,7 @@ $dueDateText
     /**
      * Centralized batch reminder dispatch: Scans all customers with pending balance across
      * Cloud Firestore and local Room database, and dispatches automated WhatsApp reminders.
+     * Uses ShopMetricsCalculator.calculateCustomerLedgerBalances to guarantee the exact total balance.
      */
     suspend fun dispatchBulkUdhariReminders(
         context: Context,
@@ -418,52 +559,81 @@ $dueDateText
                 return@withContext Result.failure(IllegalStateException("कृपया आधी सेटिंग्जमध्ये व्हॉट्सॲप Webhook URL सेव्ह करा."))
             }
 
-            // Map: clean10 -> Pair(Name, DueAmount)
-            val pendingMap = mutableMapOf<String, Pair<String, Double>>()
+            // 1. Fetch from Local Room database
+            val db = com.matoshree.shopmanager.data.local.AppDatabase.getInstance(context)
+            val localBills = db.billDao().getAllBillsDirect(10000).map { it.toDomain() }
+            val localCustomers = db.customerDao().getAllCustomersDirect().map { it.toDomain() }
 
-            // 1. From Cloud Firestore customers collection
+            // 2. Fetch Udhari transactions (from Firestore or cache)
+            val transactions = mutableListOf<com.matoshree.shopmanager.domain.model.UdhariTransaction>()
             try {
                 if (com.matoshree.shopmanager.data.firebase.FirebaseManager.isNetworkAvailable()) {
                     com.matoshree.shopmanager.data.firebase.FirebaseManager.ensureAuthenticated()
-                    val custSnap = com.matoshree.shopmanager.data.firebase.FirebaseManager.customersCollection().get().await()
-                    custSnap.documents.forEach { doc ->
-                        val cust = doc.toObject(com.matoshree.shopmanager.data.firebase.CustomerDto::class.java)
-                        if (cust != null && cust.status != "ARCHIVED" && cust.status != "TRASH" && cust.outstandingAmount > 0.01 && !cust.mobile.isNullOrBlank()) {
-                            val clean = PhoneUtils.clean10DigitMobileInput(cust.mobile)
-                            if (clean.length == 10) {
-                                pendingMap[clean] = cust.name to cust.outstandingAmount
-                            }
-                        }
+                    val txSnap = com.matoshree.shopmanager.data.firebase.FirebaseManager.udhariTransactionsCollection().limit(2000).get().await()
+                    txSnap.documents.mapNotNullTo(transactions) { doc ->
+                        doc.toObject(com.matoshree.shopmanager.data.firebase.UdhariTransactionDto::class.java)?.apply { id = doc.id }?.toDomain()
                     }
                 }
             } catch (e: Exception) {
-                Log.w(TAG, "Firestore customers fetch for bulk reminders: ${e.message}")
+                Log.w(TAG, "Bulk reminders tx fetch note: ${e.message}")
             }
 
-            // 2. From Local Room database (active bills & customers)
+            // 3. Merge Customers from Cloud if available
+            val allCustomers = localCustomers.toMutableList()
             try {
-                val db = com.matoshree.shopmanager.data.local.AppDatabase.getInstance(context)
-                val allBills = db.billDao().getAllBillsDirect(500)
-                val pendingBills = allBills.filter { !it.bill.isVoided && it.bill.paymentStatus != com.matoshree.shopmanager.domain.model.PaymentStatus.PAID }
-
-                for (bWithItems in pendingBills) {
-                    val b = bWithItems.bill
-                    val mob = b.customerMobile
-                    if (!mob.isNullOrBlank()) {
-                        val clean = PhoneUtils.clean10DigitMobileInput(mob)
-                        if (clean.length == 10 && !pendingMap.containsKey(clean)) {
-                            val due = if (b.finalAmount > 0) b.finalAmount else 0.0
-                            if (due > 0.01) {
-                                pendingMap[clean] = (b.customerName ?: "ग्राहक") to due
-                            }
-                        }
+                if (com.matoshree.shopmanager.data.firebase.FirebaseManager.isNetworkAvailable()) {
+                    val custSnap = com.matoshree.shopmanager.data.firebase.FirebaseManager.customersCollection().get().await()
+                    val cloudCusts = custSnap.documents.mapNotNull { doc ->
+                        doc.toObject(com.matoshree.shopmanager.data.firebase.CustomerDto::class.java)?.apply { id = doc.id }?.toDomain()
                     }
+                    allCustomers.addAll(cloudCusts)
                 }
             } catch (e: Exception) {
-                Log.w(TAG, "Local Room fetch for bulk reminders: ${e.message}")
+                Log.w(TAG, "Bulk reminders cust fetch note: ${e.message}")
             }
 
-            val total = pendingMap.size
+            val uniqueCustomers = allCustomers.distinctBy { it.canonicalKey() }
+            val ledgerBalances = com.matoshree.shopmanager.domain.usecase.ShopMetricsCalculator.calculateCustomerLedgerBalances(
+                activeBills = localBills,
+                transactions = transactions,
+                customers = uniqueCustomers
+            )
+            val keyResolver = com.matoshree.shopmanager.domain.usecase.ShopMetricsCalculator.buildCustomerKeyResolver(
+                customers = uniqueCustomers,
+                bills = localBills,
+                transactions = transactions
+            )
+
+            // Map: clean10 -> Pair(Name, DueAmount)
+            val pendingMap = mutableMapOf<String, Pair<String, Double>>()
+
+            for (cust in uniqueCustomers) {
+                val clean = PhoneUtils.clean10DigitMobileInput(cust.mobile)
+                if (clean.length == 10 && PhoneUtils.isValidIndianMobile(clean)) {
+                    val custKey = keyResolver(cust.mobile, cust.name, cust.id) ?: "mob_$clean"
+                    val due = ledgerBalances[custKey] ?: 0.0
+                    if (due > 0.01) {
+                        pendingMap[clean] = cust.name to due
+                    }
+                }
+            }
+
+            // Also check any customers who exist in bills with pending amount
+            for (b in localBills.filter { !it.isVoided && it.pendingAmount > 0.01 }) {
+                val mob = b.customerMobile ?: ""
+                val clean = PhoneUtils.clean10DigitMobileInput(mob)
+                if (clean.length == 10 && PhoneUtils.isValidIndianMobile(clean) && !pendingMap.containsKey(clean)) {
+                    val custKey = keyResolver(b.customerMobile, b.customerName, b.customerId) ?: "mob_$clean"
+                    val due = ledgerBalances[custKey] ?: b.pendingAmount
+                    if (due > 0.01) {
+                        pendingMap[clean] = (b.customerName ?: "ग्राहक") to due
+                    }
+                }
+            }
+
+            // Safety Cap: Maximum 200 messages per run
+            val recipients = pendingMap.entries.take(200)
+            val total = recipients.size
             if (total == 0) {
                 return@withContext Result.success(0 to 0)
             }
@@ -472,10 +642,17 @@ $dueDateText
             var failedCount = 0
             var currentIndex = 0
 
-            for ((mobile, nameAndDue) in pendingMap) {
+            for ((mobile, nameAndDue) in recipients) {
                 currentIndex++
                 val (custName, due) = nameAndDue
                 onProgress?.invoke(currentIndex, total, custName)
+
+                // Distributed deduplication: claim per customer per day
+                val canClaim = claimDailyReminder(mobile, custName, due, "MONDAY_BULK")
+                if (!canClaim) {
+                    Log.d(TAG, "Bulk reminder for $custName ($mobile) skipped: already claimed or sent today.")
+                    continue
+                }
 
                 try {
                     val res = sendUdhariReminderWhatsApp(
@@ -483,7 +660,9 @@ $dueDateText
                         customerName = custName,
                         customerMobile = mobile,
                         outstandingDue = due,
-                        dueDate = null
+                        dueDate = null,
+                        reminderType = "MONDAY_BULK",
+                        silent = true
                     )
                     if (res.isSuccess) {
                         sentCount++
@@ -493,7 +672,9 @@ $dueDateText
                 } catch (e: Exception) {
                     failedCount++
                 }
-                kotlinx.coroutines.delay(600)
+
+                // Minimum 800ms rate limiting delay between sends
+                kotlinx.coroutines.delay(800L)
             }
 
             Result.success(sentCount to failedCount)

@@ -4,14 +4,9 @@ import android.content.Context
 import android.util.Log
 import androidx.work.CoroutineWorker
 import androidx.work.WorkerParameters
-import com.matoshree.shopmanager.data.firebase.CustomerDto
-import com.matoshree.shopmanager.data.firebase.FirebaseManager
-import com.matoshree.shopmanager.data.local.AppDatabase
-import com.matoshree.shopmanager.utils.CurrencyFormatter
-import com.matoshree.shopmanager.utils.PhoneUtils
+import com.matoshree.shopmanager.utils.DateUtils
 import com.matoshree.shopmanager.utils.WhatsAppWebhookManager
-import kotlinx.coroutines.delay
-import kotlinx.coroutines.tasks.await
+import java.util.Calendar
 
 /**
  * WorkManager worker that runs automatically every Monday (and on-demand)
@@ -26,9 +21,16 @@ class MondayUdhariReminderWorker(
     private val TAG = "MondayReminderWorker"
 
     override suspend fun doWork(): Result {
-        Log.i(TAG, "Starting Monday automated Udhari WhatsApp reminder run...")
+        Log.i(TAG, "Checking Monday automated Udhari WhatsApp reminder prerequisites...")
 
         return try {
+            // 1. Single designated device check: Only run automated messages from the device enabled by owner
+            if (!WhatsAppWebhookManager.isAutoRemindersFromThisDeviceEnabled(context)) {
+                Log.d(TAG, "Automated reminders from this device are turned OFF. Skipping Monday worker.")
+                return Result.success()
+            }
+
+            // 2. Feature enabled check
             val isEnabled = WhatsAppWebhookManager.isUdhariReminderEnabled(context)
             val webhookUrl = WhatsAppWebhookManager.getWebhookUrl(context)
 
@@ -37,6 +39,14 @@ class MondayUdhariReminderWorker(
                 return Result.success()
             }
 
+            // 3. IST (Asia/Kolkata) calendar verification: Ensure today is Monday
+            val cal = Calendar.getInstance(DateUtils.kolkataTimeZone)
+            if (cal.get(Calendar.DAY_OF_WEEK) != Calendar.MONDAY) {
+                Log.d(TAG, "Today is not Monday in Asia/Kolkata timezone (DAY_OF_WEEK=${cal.get(Calendar.DAY_OF_WEEK)}). Skipping.")
+                return Result.success()
+            }
+
+            Log.i(TAG, "Starting Monday automated Udhari WhatsApp reminder run...")
             val result = WhatsAppWebhookManager.dispatchBulkUdhariReminders(context)
             val (sentCount, failedCount) = result.getOrNull() ?: (0 to 0)
 

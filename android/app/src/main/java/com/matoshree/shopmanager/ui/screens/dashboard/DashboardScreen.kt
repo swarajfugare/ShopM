@@ -52,7 +52,8 @@ class DashboardViewModel(
     private val billRepository: BillRepository,
     private val udhariRepository: UdhariRepository = UdhariRepository(),
     private val productRepository: com.matoshree.shopmanager.data.repository.ProductRepository? = null,
-    private val customerRepository: com.matoshree.shopmanager.data.repository.CustomerRepository? = null
+    private val customerRepository: com.matoshree.shopmanager.data.repository.CustomerRepository? = null,
+    private val udhariStateProvider: com.matoshree.shopmanager.domain.usecase.UdhariStateProvider? = null
 ) : ViewModel() {
 
     private val _summary = MutableStateFlow(DashboardSummary())
@@ -72,6 +73,22 @@ class DashboardViewModel(
         observeBills()
         observeProducts()
         observeCustomers()
+        observeUdhariStateProvider()
+    }
+
+    private fun observeUdhariStateProvider() {
+        if (udhariStateProvider != null) {
+            viewModelScope.launch(errorHandler) {
+                udhariStateProvider.state.collectLatest { s ->
+                    isUdhariLoaded.value = !s.isLoading
+                    if (!s.isLoading) {
+                        udhariOutstanding.value = s.totalOutstanding
+                        udhariPendingCount.value = s.pendingCustomersCount
+                        todayCollectedCredit.value = s.todayCollections
+                    }
+                }
+            }
+        }
     }
 
     private fun observeCustomers() {
@@ -198,9 +215,21 @@ class DashboardViewModel(
             val target = 500000.0
             val progress = ((allMonthSales / target) * 100).coerceAtMost(100.0)
 
-            val totalPending = ShopMetricsCalculator.calculateTotalPendingUdhari(allBills, transactions, allCustomersState.value)
-            val pendingCustCount = ShopMetricsCalculator.calculatePendingCustomersCount(allBills, transactions, allCustomersState.value)
-            val todayCollected = ShopMetricsCalculator.calculateTodayCollectedCredit(transactions, today)
+            val totalPending = if (udhariStateProvider != null && !udhariStateProvider.state.value.isLoading) {
+                udhariStateProvider.state.value.totalOutstanding
+            } else {
+                ShopMetricsCalculator.calculateTotalPendingUdhari(allBills, transactions, allCustomersState.value)
+            }
+            val pendingCustCount = if (udhariStateProvider != null && !udhariStateProvider.state.value.isLoading) {
+                udhariStateProvider.state.value.pendingCustomersCount
+            } else {
+                ShopMetricsCalculator.calculatePendingCustomersCount(allBills, transactions, allCustomersState.value)
+            }
+            val todayCollected = if (udhariStateProvider != null && !udhariStateProvider.state.value.isLoading) {
+                udhariStateProvider.state.value.todayCollections
+            } else {
+                ShopMetricsCalculator.calculateTodayCollectedCredit(transactions, today)
+            }
             val estProfit = ShopMetricsCalculator.calculateTodayProfit(activeTodayBills, today)
 
             val newSummary = DashboardSummary(
@@ -258,6 +287,7 @@ fun DashboardScreen(
     val summary by viewModel.summary.collectAsState()
     val totalUdhari by viewModel.udhariOutstanding.collectAsState()
     val pendingCustCount by viewModel.udhariPendingCount.collectAsState()
+    val isUdhariLoaded by viewModel.isUdhariLoaded.collectAsState()
     val todayProfit by viewModel.todayProfitEstimate.collectAsState()
     val todayCreditCollected by viewModel.todayCollectedCredit.collectAsState()
     val lowStockCount by viewModel.lowStockCount.collectAsState()
@@ -454,7 +484,23 @@ fun DashboardScreen(
             }
 
             // UDHARI / CREDIT OUTSTANDING CARD
-            if (totalUdhari > 0) {
+            if (!isUdhariLoaded) {
+                item {
+                    MatoshreeCard(hasGoldTopBorder = true) {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(vertical = 4.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.Center
+                        ) {
+                            CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp, color = DeepEmerald)
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text("उधारी हिशोब लोड होत आहे...", fontSize = 12.sp, color = MutedCharcoal)
+                        }
+                    }
+                }
+            } else if (totalUdhari > 0) {
                 item {
                     MatoshreeCard(
                         hasGoldTopBorder = true,

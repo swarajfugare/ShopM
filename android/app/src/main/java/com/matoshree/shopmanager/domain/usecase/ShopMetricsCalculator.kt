@@ -154,20 +154,27 @@ object ShopMetricsCalculator {
             val txReversals = custTxs.filter { it.type == UdhariTransactionType.REVERSAL }.sumOf { it.amount }
             val totalCredits = (txPayments - txReversals).coerceAtLeast(0.0)
 
-            // 2. Unrepresented Pending Bills (Bills that have pendingAmount > 0 and no matching transaction in custTxs)
-            val txBillIds = custTxs.mapNotNull { if (it.billId != 0L) it.billId else null }.toSet()
-            val txBillNumbers = custTxs.map { it.billNumber }.filter { it.isNotBlank() }.toSet()
+            // 2. Unrepresented Pending Bills (Bills that do not have a matching PURCHASE_CREDIT in custTxs)
+            val creditTxBillIds = custTxs.filter { it.type == UdhariTransactionType.PURCHASE_CREDIT }.mapNotNull { if (it.billId != 0L) it.billId else null }.toSet()
+            val creditTxBillNumbers = custTxs.filter { it.type == UdhariTransactionType.PURCHASE_CREDIT }.map { it.billNumber }.filter { it.isNotBlank() }.toSet()
 
-            val unrepresentedPending = custBills.filter { b ->
+            val txPaymentBillIds = custTxs.filter { it.type == UdhariTransactionType.PAYMENT }.mapNotNull { if (it.billId != 0L) it.billId else null }.toSet()
+            val txPaymentBillNumbers = custTxs.filter { it.type == UdhariTransactionType.PAYMENT }.map { it.billNumber }.filter { it.isNotBlank() }.toSet()
+
+            val unrepresentedDebits = custBills.filter { b ->
                 b.paymentStatus != PaymentStatus.PAID &&
-                b.pendingAmount > 0.01 &&
-                !txBillIds.contains(b.id) &&
-                !txBillNumbers.contains(b.billNumber)
+                !creditTxBillIds.contains(b.id) &&
+                !creditTxBillNumbers.contains(b.billNumber)
             }.sumOf { b ->
-                if (b.pendingAmount > 0.0) b.pendingAmount else (b.finalAmount - b.paidAmount).coerceAtLeast(0.0)
+                val hasPaymentInTxs = txPaymentBillIds.contains(b.id) || txPaymentBillNumbers.contains(b.billNumber)
+                if (hasPaymentInTxs) {
+                    b.finalAmount
+                } else {
+                    if (b.pendingAmount > 0.0) b.pendingAmount else (b.finalAmount - b.paidAmount).coerceAtLeast(0.0)
+                }
             }
 
-            val totalDebits = txCredits + unrepresentedPending
+            val totalDebits = txCredits + unrepresentedDebits
 
             // 3. Fallback to customer's recorded outstandingBalance if no transactions or bills exist
             val recordedBalance = if (custTxs.isEmpty() && custBills.isEmpty() && matchingCust != null) {

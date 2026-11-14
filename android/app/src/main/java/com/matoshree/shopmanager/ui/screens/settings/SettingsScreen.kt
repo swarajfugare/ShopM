@@ -58,7 +58,15 @@ import com.matoshree.shopmanager.ui.components.MatoshreeCard
 import com.matoshree.shopmanager.ui.components.MatoshreeTopAppBar
 import com.matoshree.shopmanager.ui.theme.*
 import com.matoshree.shopmanager.utils.PrintShareHelper
+import com.matoshree.shopmanager.data.diagnostic.CustomerDiagnosticManager
+import com.matoshree.shopmanager.data.diagnostic.CustomerDiagnosticReport
+import com.matoshree.shopmanager.data.diagnostic.CustomerRepairResult
+import com.matoshree.shopmanager.data.local.AppDatabase
+import com.matoshree.shopmanager.data.local.entity.ReminderLogEntity
+import com.matoshree.shopmanager.utils.CurrencyFormatter
+import com.matoshree.shopmanager.utils.DateUtils
 import com.matoshree.shopmanager.utils.WhatsAppWebhookManager
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.launch
@@ -321,6 +329,9 @@ fun SettingsScreen(
     var isTestingPrint by remember { mutableStateOf(false) }
 
     var waUdhariReminderEnabled by remember { mutableStateOf(WhatsAppWebhookManager.isUdhariReminderEnabled(context)) }
+    var waAutoFromThisDevice by remember { mutableStateOf(WhatsAppWebhookManager.isAutoRemindersFromThisDeviceEnabled(context)) }
+    var showReminderLogsDialog by remember { mutableStateOf(false) }
+    var showCustomerDiagnosticDialog by remember { mutableStateOf(false) }
     var isSendingBulkReminders by remember { mutableStateOf(false) }
     var showBulkReminderConfirmDialog by remember { mutableStateOf(false) }
     var bulkReminderStatusText by remember { mutableStateOf("") }
@@ -867,6 +878,46 @@ fun SettingsScreen(
 
                 Spacer(modifier = Modifier.height(10.dp))
 
+                // Single Device Automation Toggle
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text("या फोनवरून स्वयंचलित मेसेज पाठवा", fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                        Text(
+                            "दोन फोन असल्यास केवळ एकाच फोनवर हे चालू ठेवा (दुसऱ्या फोनवर बंद ठेवा, जेणेकरून ग्राहकांना डबल मेसेज जाणार नाहीत)",
+                            style = MaterialTheme.typography.bodySmall.copy(color = MutedCharcoal, fontSize = 11.sp)
+                        )
+                    }
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Switch(
+                        checked = waAutoFromThisDevice,
+                        onCheckedChange = {
+                            waAutoFromThisDevice = it
+                            WhatsAppWebhookManager.setAutoRemindersFromThisDeviceEnabled(context, it)
+                            Toast.makeText(context, if (it) "या फोनवरून ऑटो मेसेज सक्रिय केले" else "या फोनवरून ऑटो मेसेज बंद केले", Toast.LENGTH_SHORT).show()
+                        },
+                        colors = SwitchDefaults.colors(checkedThumbColor = WarmWhite, checkedTrackColor = DeepEmerald)
+                    )
+                }
+
+                Spacer(modifier = Modifier.height(10.dp))
+
+                // View Reminder Logs Button
+                OutlinedButton(
+                    onClick = { showReminderLogsDialog = true },
+                    shape = RoundedCornerShape(8.dp),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Icon(Icons.Default.History, contentDescription = null, modifier = Modifier.size(16.dp))
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text("गेल्या ३० दिवसांचा मेसेज अहवाल पहा", fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+                }
+
+                Spacer(modifier = Modifier.height(10.dp))
+
                 // Credentials status and secure edit button
                 val isWaConfigured = WhatsAppWebhookManager.isConfigured(context)
                 Surface(
@@ -1312,6 +1363,39 @@ fun SettingsScreen(
                 }
         }
         val renderAppControlsCard: @Composable () -> Unit = {}
+        val renderCustomerDiagnosticCard: @Composable () -> Unit = {
+            MatoshreeCard(hasGoldTopBorder = true) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Icon(Icons.Default.ManageAccounts, contentDescription = null, tint = DeepEmerald, modifier = Modifier.size(22.dp))
+                        Spacer(modifier = Modifier.width(10.dp))
+                        Column {
+                            Text("ग्राहक डेटा तपासणी व दुरुस्ती", style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold, color = DeepEmerald))
+                            Text("फोन आणि क्लाउड यादी तपासा, हरवलेले ग्राहक सुरक्षितपणे पूर्ववत करा", style = MaterialTheme.typography.bodySmall.copy(color = MutedCharcoal))
+                        }
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(12.dp))
+
+                Button(
+                    onClick = {
+                        showCustomerDiagnosticDialog = true
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = DeepEmerald),
+                    shape = RoundedCornerShape(8.dp),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Icon(Icons.Default.Build, contentDescription = null, modifier = Modifier.size(16.dp))
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text("ग्राहक डेटा तपासणी व दुरुस्ती सुरू करा", fontWeight = FontWeight.Bold)
+                }
+            }
+        }
         val renderTrashCard: @Composable () -> Unit = {
             MatoshreeCard(hasGoldTopBorder = true) {
                     Row(
@@ -1389,6 +1473,7 @@ fun SettingsScreen(
                             renderSecurityCard()
                             renderDataSyncCard()
                             renderDiagnosticsCard()
+                            renderCustomerDiagnosticCard()
                             renderTrashCard()
                             renderVersionCard()
                         }
@@ -1405,6 +1490,7 @@ fun SettingsScreen(
                 item { renderSecurityCard() }
                 item { renderDataSyncCard() }
                 item { renderDiagnosticsCard() }
+                item { renderCustomerDiagnosticCard() }
                 item { renderTrashCard() }
                 item { renderVersionCard() }
             }
@@ -1973,6 +2059,279 @@ service cloud.firestore {
             dismissButton = {
                 TextButton(onClick = { showCrashReportDialog = false }) {
                     Text("बंद करा")
+                }
+            },
+            containerColor = WarmWhite,
+            shape = RoundedCornerShape(16.dp)
+        )
+    }
+
+    // Last 30 Days WhatsApp Reminder Logs Dialog
+    if (showReminderLogsDialog) {
+        var logs by remember { mutableStateOf<List<ReminderLogEntity>>(emptyList()) }
+        var isLoadingLogs by remember { mutableStateOf(true) }
+
+        LaunchedEffect(Unit) {
+            withContext(kotlinx.coroutines.Dispatchers.IO) {
+                try {
+                    val db = AppDatabase.getInstance(context)
+                    logs = db.reminderLogDao().getRecentLogsDirect(100)
+                } catch (e: Exception) {
+                    android.util.Log.e("SettingsScreen", "Error loading reminder logs: ${e.message}")
+                } finally {
+                    isLoadingLogs = false
+                }
+            }
+        }
+
+        AlertDialog(
+            onDismissRequest = { showReminderLogsDialog = false },
+            title = {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(Icons.Default.History, contentDescription = null, tint = DeepEmerald, modifier = Modifier.size(22.dp))
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text("गेल्या ३० दिवसांचा मेसेज अहवाल", fontWeight = FontWeight.Bold, color = DeepEmerald, fontSize = 16.sp)
+                }
+            },
+            text = {
+                Box(modifier = Modifier.fillMaxWidth().heightIn(min = 100.dp, max = 400.dp)) {
+                    if (isLoadingLogs) {
+                        CircularProgressIndicator(modifier = Modifier.align(Alignment.Center), color = DeepEmerald)
+                    } else if (logs.isEmpty()) {
+                        Column(
+                            modifier = Modifier.fillMaxWidth().padding(vertical = 24.dp),
+                            horizontalAlignment = Alignment.CenterHorizontally
+                        ) {
+                            Icon(Icons.Default.CheckCircle, contentDescription = null, tint = BoutiqueSuccess, modifier = Modifier.size(36.dp))
+                            Spacer(modifier = Modifier.height(8.dp))
+                            Text("गेल्या ३० दिवसांत कोणताही मेसेज पाठवलेला नाही.", fontSize = 13.sp, color = MutedCharcoal)
+                        }
+                    } else {
+                        LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                            items(logs.size) { index ->
+                                val log = logs[index]
+                                Surface(
+                                    shape = RoundedCornerShape(8.dp),
+                                    color = WarmIvory,
+                                    border = BorderStroke(1.dp, if (log.status == "SUCCESS") BoutiqueSuccess.copy(alpha = 0.3f) else BoutiqueError.copy(alpha = 0.3f)),
+                                    modifier = Modifier.fillMaxWidth()
+                                ) {
+                                    Column(modifier = Modifier.padding(10.dp)) {
+                                        Row(
+                                            modifier = Modifier.fillMaxWidth(),
+                                            horizontalArrangement = Arrangement.SpaceBetween,
+                                            verticalAlignment = Alignment.CenterVertically
+                                        ) {
+                                            Text(log.customerName.ifBlank { "ग्राहक" }, fontWeight = FontWeight.Bold, fontSize = 13.sp, color = DeepCharcoal)
+                                            Text(
+                                                CurrencyFormatter.format(log.amount),
+                                                fontWeight = FontWeight.Bold,
+                                                fontSize = 13.sp,
+                                                color = DeepEmerald
+                                            )
+                                        }
+                                        Spacer(modifier = Modifier.height(4.dp))
+                                        Row(
+                                            modifier = Modifier.fillMaxWidth(),
+                                            horizontalArrangement = Arrangement.SpaceBetween,
+                                            verticalAlignment = Alignment.CenterVertically
+                                        ) {
+                                            Text("📱 ${log.customerMobile}", fontSize = 11.sp, color = MutedCharcoal)
+                                            val typeLabel = when (log.type) {
+                                                "MONDAY_BULK" -> "सोमवार आठवण"
+                                                "DUE_DATE" -> "ठरलेली तारीख"
+                                                else -> "मॅन्युअल"
+                                            }
+                                            Surface(
+                                                color = if (log.status == "SUCCESS") BoutiqueSuccess.copy(alpha = 0.15f) else BoutiqueError.copy(alpha = 0.15f),
+                                                shape = RoundedCornerShape(4.dp)
+                                            ) {
+                                                Text(
+                                                    "$typeLabel • ${if (log.status == "SUCCESS") "यशस्वी" else "त्रुटी"}",
+                                                    fontSize = 10.sp,
+                                                    fontWeight = FontWeight.Bold,
+                                                    color = if (log.status == "SUCCESS") BoutiqueSuccess else BoutiqueError,
+                                                    modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                                                )
+                                            }
+                                        }
+                                        if (!log.errorMessage.isNullOrBlank()) {
+                                            Spacer(modifier = Modifier.height(4.dp))
+                                            Text("त्रुटी: ${log.errorMessage}", fontSize = 10.sp, color = BoutiqueError)
+                                        }
+                                        Spacer(modifier = Modifier.height(2.dp))
+                                        Text(log.date, fontSize = 9.sp, color = MutedCharcoal)
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            },
+            confirmButton = {
+                Button(
+                    onClick = { showReminderLogsDialog = false },
+                    colors = ButtonDefaults.buttonColors(containerColor = DeepEmerald),
+                    shape = RoundedCornerShape(8.dp)
+                ) {
+                    Text("ठीक आहे", fontWeight = FontWeight.Bold)
+                }
+            },
+            containerColor = WarmWhite,
+            shape = RoundedCornerShape(16.dp)
+        )
+    }
+
+    // Customer Diagnostic & Safe Repair Dialog
+    if (showCustomerDiagnosticDialog) {
+        var report by remember { mutableStateOf<CustomerDiagnosticReport?>(null) }
+        var isScanning by remember { mutableStateOf(true) }
+        var isRepairing by remember { mutableStateOf(false) }
+        var repairResult by remember { mutableStateOf<CustomerRepairResult?>(null) }
+
+        LaunchedEffect(Unit) {
+            report = CustomerDiagnosticManager.runDiagnosticScan(context)
+            isScanning = false
+        }
+
+        AlertDialog(
+            onDismissRequest = {
+                if (!isRepairing) {
+                    showCustomerDiagnosticDialog = false
+                    report = null
+                    repairResult = null
+                }
+            },
+            title = {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(Icons.Default.ManageAccounts, contentDescription = null, tint = DeepEmerald, modifier = Modifier.size(22.dp))
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text("ग्राहक डेटा तपासणी व दुरुस्ती", fontWeight = FontWeight.Bold, color = DeepEmerald, fontSize = 16.sp)
+                }
+            },
+            text = {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .heightIn(max = 420.dp)
+                        .verticalScroll(rememberScrollState()),
+                    verticalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    if (isScanning) {
+                        Column(
+                            modifier = Modifier.fillMaxWidth().padding(vertical = 32.dp),
+                            horizontalAlignment = Alignment.CenterHorizontally
+                        ) {
+                            CircularProgressIndicator(color = DeepEmerald)
+                            Spacer(modifier = Modifier.height(12.dp))
+                            Text("ग्राहक डेटा तपासणी सुरू आहे...", fontSize = 13.sp, color = MutedCharcoal)
+                        }
+                    } else if (repairResult != null) {
+                        Surface(
+                            shape = RoundedCornerShape(8.dp),
+                            color = BoutiqueSuccess.copy(alpha = 0.1f),
+                            border = BorderStroke(1.dp, BoutiqueSuccess.copy(alpha = 0.3f)),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Column(modifier = Modifier.padding(12.dp)) {
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Icon(Icons.Default.CheckCircle, contentDescription = null, tint = BoutiqueSuccess, modifier = Modifier.size(20.dp))
+                                    Spacer(modifier = Modifier.width(6.dp))
+                                    Text("दुरुस्ती यशस्वी!", fontWeight = FontWeight.Bold, color = BoutiqueSuccess, fontSize = 14.sp)
+                                }
+                                Spacer(modifier = Modifier.height(6.dp))
+                                Text(repairResult!!.message, fontSize = 12.sp, color = DeepEmerald)
+                                Spacer(modifier = Modifier.height(6.dp))
+                                Text("सुरक्षित बॅकअप: ${repairResult!!.backupPath}", fontSize = 10.sp, color = MutedCharcoal)
+                            }
+                        }
+                    } else if (report != null) {
+                        val r = report!!
+                        Surface(
+                            shape = RoundedCornerShape(8.dp),
+                            color = WarmIvory,
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                                Text("तपासणी अहवाल:", fontWeight = FontWeight.Bold, fontSize = 13.sp, color = DeepEmerald)
+                                Text("• फोनमधील सक्रिय ग्राहक: ${r.totalRoomActive}", fontSize = 12.sp)
+                                Text("• फोनमधील अर्काईव्ह ग्राहक: ${r.totalRoomArchived}", fontSize = 12.sp)
+                                Text("• क्लाउडवरील सक्रिय ग्राहक: ${r.totalFirestoreActive}", fontSize = 12.sp)
+
+                                if (r.erroneouslyArchivedCount > 0) {
+                                    Text("⚠️ चुकून अर्काईव्ह झालेले ग्राहक: ${r.erroneouslyArchivedCount}", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = BoutiqueError)
+                                }
+                                if (r.missingFromRoomCount > 0) {
+                                    Text("⚠️ फोनमध्ये नसलेले क्लाउड ग्राहक: ${r.missingFromRoomCount}", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = BoutiqueError)
+                                }
+                                if (r.duplicateMobileCount > 0) {
+                                    Text("⚠️ डुप्लिकेट मोबाईल नोंदी: ${r.duplicateMobileCount}", fontSize = 12.sp, color = ChampagneGold)
+                                }
+                                if (r.erroneouslyArchivedCount == 0 && r.missingFromRoomCount == 0 && r.duplicateMobileCount == 0) {
+                                    Text("✅ सर्व ग्राहक डेटा परिपूर्ण आणि सुसंगत आहे!", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = BoutiqueSuccess)
+                                }
+                            }
+                        }
+
+                        if (r.details.isNotEmpty()) {
+                            Text("तपशील:", fontWeight = FontWeight.Bold, fontSize = 12.sp, color = DeepEmerald)
+                            r.details.forEach { d ->
+                                Text("• $d", fontSize = 11.sp, color = MutedCharcoal)
+                            }
+                        }
+
+                        Text(
+                            "टीप: दुरुस्ती सुरू करण्यापूर्वी सर्व डेटाची संपूर्ण सुरक्षित JSON बॅकअप फाईल सेव्ह केली जाते.",
+                            fontSize = 11.sp,
+                            color = MutedCharcoal
+                        )
+                    }
+                }
+            },
+            confirmButton = {
+                if (repairResult == null && !isScanning) {
+                    Button(
+                        onClick = {
+                            isRepairing = true
+                            coroutineScope.launch {
+                                val res = CustomerDiagnosticManager.performSafeRepair(context)
+                                repairResult = res
+                                isRepairing = false
+                            }
+                        },
+                        enabled = !isRepairing,
+                        colors = ButtonDefaults.buttonColors(containerColor = BoutiqueSuccess),
+                        shape = RoundedCornerShape(8.dp)
+                    ) {
+                        if (isRepairing) {
+                            CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp, color = WarmWhite)
+                            Spacer(modifier = Modifier.width(6.dp))
+                        }
+                        Text("सुरक्षित दुरुस्ती करा (बॅकअपसह)", fontWeight = FontWeight.Bold)
+                    }
+                } else if (repairResult != null) {
+                    Button(
+                        onClick = {
+                            showCustomerDiagnosticDialog = false
+                            report = null
+                            repairResult = null
+                        },
+                        colors = ButtonDefaults.buttonColors(containerColor = DeepEmerald),
+                        shape = RoundedCornerShape(8.dp)
+                    ) {
+                        Text("पूर्ण झाले", fontWeight = FontWeight.Bold)
+                    }
+                }
+            },
+            dismissButton = {
+                if (!isRepairing) {
+                    TextButton(onClick = {
+                        showCustomerDiagnosticDialog = false
+                        report = null
+                        repairResult = null
+                    }) {
+                        Text("बंद करा")
+                    }
                 }
             },
             containerColor = WarmWhite,
