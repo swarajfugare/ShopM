@@ -71,6 +71,8 @@ class DeviceTrustManager(private val context: Context) {
                         "deviceName" to getDeviceName(),
                         "deviceModel" to Build.MODEL,
                         "osVersion" to Build.VERSION.RELEASE,
+                        "appVersion" to "3.5.0",
+                        "versionCode" to 53,
                         "authorizedAt" to System.currentTimeMillis(),
                         "authorizedBy" to email,
                         "authMethod" to "GOOGLE_SIGN_IN",

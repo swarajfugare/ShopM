@@ -238,7 +238,8 @@ class FirestoreUdhariRepository {
             val safePaymentAmount = if (maxPayable > 0.01) payment.amount.coerceIn(0.01, maxPayable) else payment.amount.coerceAtLeast(0.01)
             val newCustDue = (currentCustDue - safePaymentAmount).coerceAtLeast(0.0)
 
-            val txDocId = "udhari_${System.currentTimeMillis()}_${UUID.randomUUID().toString().take(6)}"
+            val effectiveGid = if (payment.gid.isNotBlank()) payment.gid else IdGenerator.generate(IdType.PAYMENT)
+            val txDocId = effectiveGid
             val batch = FirebaseManager.firestore.batch()
             val now = System.currentTimeMillis()
 
@@ -264,7 +265,7 @@ class FirestoreUdhariRepository {
                 val updatedPayments = b.payments.toMutableList().apply {
                     add(
                         BillPaymentDto(
-                            id = UUID.randomUUID().toString(),
+                            id = IdGenerator.generate(IdType.PAYMENT),
                             method = payment.paymentMethod.name,
                             amount = allocation,
                             status = "PAID",
@@ -296,13 +297,18 @@ class FirestoreUdhariRepository {
                 else -> "DIRECT-PAY"
             }
 
+            val resolvedCustGid = if (payment.customerGid.isNotBlank()) payment.customerGid else (matchedCustDocs.firstOrNull()?.toObject(CustomerDto::class.java)?.gid ?: "")
+
             val txDto = UdhariTransactionDto(
                 id = txDocId,
+                gid = effectiveGid,
                 customerId = payment.customerId,
+                customerGid = resolvedCustGid,
                 customerName = payment.customerName,
                 customerMobile = payment.customerMobile,
                 customerVillage = payment.customerVillage,
                 billId = payment.billId,
+                billGid = payment.billGid,
                 billNumber = primaryBillNumber,
                 type = UdhariTransactionType.PAYMENT.name,
                 amount = safePaymentAmount,
@@ -409,14 +415,18 @@ class FirestoreUdhariRepository {
             val newPending = if (currentBill != null) (currentBill.finalAmount - newPaid).coerceAtLeast(0.0) else 0.0
             val newStatus = if (newPaid <= 0.01) "PENDING" else if (newPending <= 0.01) "PAID" else "PARTIAL"
 
-            val reversalDocId = "reversal_${System.currentTimeMillis()}_${UUID.randomUUID().toString().take(6)}"
+            val reversalGid = IdGenerator.generate(IdType.REVERSAL)
+            val reversalDocId = reversalGid
             val reversalDto = UdhariTransactionDto(
                 id = reversalDocId,
+                gid = reversalGid,
                 customerId = originalTx.customerId,
+                customerGid = originalTx.customerGid,
                 customerName = originalTx.customerName,
                 customerMobile = originalTx.customerMobile,
                 customerVillage = originalTx.customerVillage,
                 billId = originalTx.billId,
+                billGid = originalTx.billGid,
                 billNumber = originalTx.billNumber,
                 type = UdhariTransactionType.REVERSAL.name,
                 amount = originalTx.amount,
@@ -555,7 +565,8 @@ class FirestoreUdhariRepository {
     ): Result<UdhariTransaction> {
         return try {
             FirebaseManager.ensureAuthenticated()
-            val txDocId = "udhari_${System.currentTimeMillis()}_${UUID.randomUUID().toString().take(6)}"
+            val creditGid = IdGenerator.generate(IdType.UDHARI)
+            val txDocId = creditGid
             val effectiveDate = date?.ifBlank { DateUtils.todayDate() } ?: DateUtils.todayDate()
             val cleanNote = note?.ifBlank { "जुनी बाकी / Manual Opening Balance" } ?: "जुनी बाकी / Manual Opening Balance"
 
@@ -569,6 +580,7 @@ class FirestoreUdhariRepository {
 
             val custDoc = custSnap?.documents?.find {
                 val c = it.toObject(CustomerDto::class.java)
+                (customer.gid.isNotBlank() && (c?.gid == customer.gid || it.id == customer.gid)) ||
                 (customer.mobile.isNotBlank() && c?.mobile == customer.mobile) ||
                 c?.legacyId == customer.id ||
                 (it.id.hashCode().toLong() and 0x7FFFFFFFFFFFFFFFL) == customer.id
@@ -577,10 +589,13 @@ class FirestoreUdhariRepository {
             val prevDue = custDoc?.toObject(CustomerDto::class.java)?.outstandingAmount ?: customer.outstandingBalance
             val newDue = prevDue + amount
             val targetCustId = custDoc?.toObject(CustomerDto::class.java)?.legacyId ?: customer.id
+            val targetCustGid = if (customer.gid.isNotBlank()) customer.gid else (custDoc?.toObject(CustomerDto::class.java)?.gid ?: "")
 
             val txDto = UdhariTransactionDto(
                 id = txDocId,
+                gid = creditGid,
                 customerId = targetCustId,
+                customerGid = targetCustGid,
                 customerName = customer.name,
                 customerMobile = customer.mobile,
                 customerVillage = customer.address,

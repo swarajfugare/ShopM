@@ -26,6 +26,7 @@ data class CustomerDiagnosticReport(
     val duplicateMobileCount: Int,
     val balanceMismatchCount: Int = 0,
     val duplicateEventsCount: Int = 0,
+    val needsReviewCount: Int = 0,
     val details: List<String> = emptyList()
 )
 
@@ -128,6 +129,14 @@ object CustomerDiagnosticManager {
                 }
             }
 
+            val reviewNeeded = db.customerDao().getReviewNeededCustomers()
+            val needsReviewCount = reviewNeeded.size
+            if (needsReviewCount > 0) {
+                reviewNeeded.forEach {
+                    details.add("पुनरावलोकन आवश्यक: ${it.name} (${it.mobile})")
+                }
+            }
+
             return@withContext CustomerDiagnosticReport(
                 totalRoomActive = roomActive.size,
                 totalRoomArchived = roomArchived.size,
@@ -137,11 +146,15 @@ object CustomerDiagnosticManager {
                 duplicateMobileCount = duplicateCount,
                 balanceMismatchCount = balanceMismatchCount,
                 duplicateEventsCount = duplicateEventsCount,
+                needsReviewCount = needsReviewCount,
                 details = details.take(20)
             )
         } catch (e: Exception) {
             Log.w(TAG, "Balance ledger audit note: ${e.message}")
         }
+
+        val reviewNeeded = db.customerDao().getReviewNeededCustomers()
+        val needsReviewCount = reviewNeeded.size
 
         CustomerDiagnosticReport(
             totalRoomActive = roomActive.size,
@@ -152,6 +165,7 @@ object CustomerDiagnosticManager {
             duplicateMobileCount = duplicateCount,
             balanceMismatchCount = balanceMismatchCount,
             duplicateEventsCount = 0,
+            needsReviewCount = needsReviewCount,
             details = details.take(20)
         )
     }

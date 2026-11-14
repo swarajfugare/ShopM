@@ -225,16 +225,21 @@ class RealtimeSyncManager private constructor(
                         if (isTrashOrVoid) {
                             toVoidUuids.add(uuid)
                         } else {
-                            // Resolve customer to local Room row to eliminate cross-device auto-increment ID collisions
+                            // Resolve customer to local Room row by GID first, then mobile/name fallback
+                            val localCustByGid = if (!bill.customerGid.isNullOrBlank()) database.customerDao().getCustomerByGid(bill.customerGid!!) else null
                             val cleanMob = PhoneUtils.clean10DigitMobileInput(bill.customerMobile ?: "")
-                            val localCust = if (cleanMob.length == 10) {
+                            val localCust = localCustByGid ?: if (cleanMob.length == 10) {
                                 database.customerDao().getCustomerByMobileFuzzy(bill.customerMobile ?: "", cleanMob)
                             } else if (!bill.customerName.isNullOrBlank()) {
                                 database.customerDao().getCustomerByName(bill.customerName)
                             } else null
 
                             val resolvedCustId = localCust?.id ?: bill.customerId
-                            val billToSave = if (resolvedCustId != bill.customerId) bill.copy(customerId = resolvedCustId) else bill
+                            val resolvedCustGid = localCust?.gid ?: bill.customerGid
+                            val billToSave = bill.copy(
+                                customerId = resolvedCustId,
+                                customerGid = resolvedCustGid
+                            )
 
                             val docCreatedAt = doc.getLong("createdAt") ?: doc.getLong("updatedAt") ?: System.currentTimeMillis()
                             val pair = toBillEntities(billToSave, createdAt = docCreatedAt)

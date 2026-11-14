@@ -11,6 +11,7 @@ import kotlinx.coroutines.tasks.await
 
 data class TrashedItem(
     val docId: String,
+    val gid: String = "",
     val legacyId: Long,
     val entityType: String, // "PRODUCT", "CUSTOMER", "BILL"
     val title: String,
@@ -43,6 +44,7 @@ class FirestoreTrashRepository {
 
                     TrashedItem(
                         docId = doc.id,
+                        gid = dto.gid.ifBlank { doc.id },
                         legacyId = idNum,
                         entityType = "PRODUCT",
                         title = dto.name,
@@ -78,6 +80,7 @@ class FirestoreTrashRepository {
 
                     TrashedItem(
                         docId = doc.id,
+                        gid = dto.gid.ifBlank { doc.id },
                         legacyId = idNum,
                         entityType = "CUSTOMER",
                         title = dto.name,
@@ -112,6 +115,7 @@ class FirestoreTrashRepository {
 
                     TrashedItem(
                         docId = doc.id,
+                        gid = dto.gid.ifBlank { doc.id },
                         legacyId = idNum,
                         entityType = "BILL",
                         title = "Bill #${dto.billNumber}",
@@ -148,6 +152,7 @@ class FirestoreTrashRepository {
 
                     TrashedItem(
                         docId = doc.id,
+                        gid = dto.gid.ifBlank { doc.id },
                         legacyId = idNum,
                         entityType = "PAYMENT",
                         title = "$label • ${CurrencyFormatter.format(dto.amount)}",

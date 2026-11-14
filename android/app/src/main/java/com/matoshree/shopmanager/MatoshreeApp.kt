@@ -39,6 +39,15 @@ class MatoshreeApp : Application() {
             }
         }
 
+        // 2b. Execute v3.5.0 Global ID Architecture Migration safely in background
+        CoroutineScope(Dispatchers.IO).launch {
+            try {
+                com.matoshree.shopmanager.data.migration.DataMigrationManager.runMigration(this@MatoshreeApp)
+            } catch (e: Exception) {
+                android.util.Log.w("MatoshreeApp", "Migration v3.5.0 background notice: ${e.message}")
+            }
+        }
+
         // 3. Initialize Version 2 Smart Notifications Engine
         com.matoshree.shopmanager.notifications.ShopNotificationManager.initNotificationChannels(this)
         com.matoshree.shopmanager.notifications.NotificationScheduler.scheduleAllDailyReminders(this)

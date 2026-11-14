@@ -1,5 +1,6 @@
 package com.matoshree.shopmanager.ui.screens.dashboard
 
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
@@ -36,9 +37,11 @@ import com.matoshree.shopmanager.ui.theme.*
 import com.matoshree.shopmanager.domain.usecase.ShopMetricsCalculator
 import com.matoshree.shopmanager.utils.CurrencyFormatter
 import com.matoshree.shopmanager.utils.DateUtils
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.tasks.await
 
 private data class DashboardMetrics(
     val summary: DashboardSummary,
@@ -64,6 +67,7 @@ class DashboardViewModel(
     val lowStockCount = MutableStateFlow(0)
     val todayCollectedCredit = MutableStateFlow(0.0)
     val todayProfitEstimate = MutableStateFlow(0.0)
+    val showOldVersionWarning = MutableStateFlow<String?>(null)
 
     private val errorHandler = kotlinx.coroutines.CoroutineExceptionHandler { _, throwable ->
         android.util.Log.e("DashboardViewModel", "Dashboard error caught safely: ${throwable.message}", throwable)
@@ -74,6 +78,28 @@ class DashboardViewModel(
         observeProducts()
         observeCustomers()
         observeUdhariStateProvider()
+        checkCloudDevicesVersion()
+    }
+
+    private fun checkCloudDevicesVersion() {
+        viewModelScope.launch(Dispatchers.IO + errorHandler) {
+            try {
+                if (com.matoshree.shopmanager.data.firebase.FirebaseManager.isNetworkAvailable()) {
+                    com.matoshree.shopmanager.data.firebase.FirebaseManager.ensureAuthenticated()
+                    val snap = com.matoshree.shopmanager.data.firebase.FirebaseManager.firestore.collection("authorized_devices").get().await()
+                    val olderDevices = snap.documents.mapNotNull { doc ->
+                        val v = doc.getString("appVersion")
+                        val name = doc.getString("deviceName") ?: doc.getString("deviceModel") ?: doc.id
+                        if (!v.isNullOrBlank() && v < "3.5.0") {
+                            name
+                        } else null
+                    }
+                    if (olderDevices.isNotEmpty()) {
+                        showOldVersionWarning.value = "सूचना: दुकानातील इतर फोनवर जुनी आवृत्ती सुरू आहे (${olderDevices.joinToString(", ")}). कृपया सर्व फोनवर v3.5.0 अपडेट करा."
+                    }
+                }
+            } catch (_: Exception) {}
+        }
     }
 
     private fun observeUdhariStateProvider() {
@@ -291,6 +317,7 @@ fun DashboardScreen(
     val todayProfit by viewModel.todayProfitEstimate.collectAsState()
     val todayCreditCollected by viewModel.todayCollectedCredit.collectAsState()
     val lowStockCount by viewModel.lowStockCount.collectAsState()
+    val oldVersionWarning by viewModel.showOldVersionWarning.collectAsState()
 
     Scaffold(
         topBar = {
@@ -343,6 +370,30 @@ fun DashboardScreen(
                 verticalArrangement = Arrangement.spacedBy(14.dp),
                 contentPadding = PaddingValues(top = 12.dp, bottom = 100.dp)
             ) {
+            if (oldVersionWarning != null) {
+                item {
+                    Surface(
+                        shape = RoundedCornerShape(10.dp),
+                        color = BoutiqueWarning.copy(alpha = 0.15f),
+                        border = BorderStroke(1.dp, BoutiqueWarning.copy(alpha = 0.5f)),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(12.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Icon(Icons.Default.Warning, contentDescription = null, tint = BoutiqueWarning, modifier = Modifier.size(24.dp))
+                            Spacer(modifier = Modifier.width(10.dp))
+                            Text(
+                                text = oldVersionWarning!!,
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.SemiBold,
+                                color = DeepCharcoal
+                            )
+                        }
+                    }
+                }
+            }
             // Live Status Banner
             item {
                 Row(

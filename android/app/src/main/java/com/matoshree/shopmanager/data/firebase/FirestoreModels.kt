@@ -24,6 +24,7 @@ data class ShopDto(
 @IgnoreExtraProperties
 data class CustomerDto(
     @DocumentId var id: String = "",
+    var gid: String = "",
     var legacyId: Long? = null,
     var name: String = "",
     var mobile: String = "",
@@ -40,12 +41,15 @@ data class CustomerDto(
     var deletedAt: Long? = null,
     var firstPurchaseAt: String? = null,
     var lastPurchaseAt: String? = null,
+    var needsReview: Boolean = false,
     var createdAt: Long = System.currentTimeMillis(),
     var updatedAt: Long = System.currentTimeMillis()
 ) {
     fun toDomain(): Customer {
+        val effectiveGid = if (gid.isNotBlank()) gid else if (id.isNotBlank()) IdGenerator.legacyGid(IdType.CUSTOMER, id) else IdGenerator.generate(IdType.CUSTOMER)
         return Customer(
             id = legacyId ?: (id.hashCode().toLong() and 0x7FFFFFFFFFFFFFFFL),
+            gid = effectiveGid,
             shopId = 1,
             name = name,
             mobile = mobile,
@@ -60,7 +64,8 @@ data class CustomerDto(
             lastPurchaseAt = lastPurchaseAt,
             isActive = status == "ACTIVE",
             tier = tier,
-            listTags = listTags
+            listTags = listTags,
+            needsReview = needsReview
         )
     }
 }
@@ -68,6 +73,7 @@ data class CustomerDto(
 @IgnoreExtraProperties
 data class CategoryDto(
     @DocumentId var id: String = "",
+    var gid: String = "",
     var legacyId: Long? = null,
     var name: String = "",
     var description: String? = null,
@@ -76,8 +82,10 @@ data class CategoryDto(
     var updatedAt: Long = System.currentTimeMillis()
 ) {
     fun toDomain(): Category {
+        val effectiveGid = if (gid.isNotBlank()) gid else if (id.isNotBlank()) IdGenerator.legacyGid(IdType.CATEGORY, id) else IdGenerator.generate(IdType.CATEGORY)
         return Category(
             id = legacyId ?: (id.hashCode().toLong() and 0x7FFFFFFFFFFFFFFFL),
+            gid = effectiveGid,
             shopId = 1,
             name = name,
             description = description,
@@ -89,10 +97,12 @@ data class CategoryDto(
 @IgnoreExtraProperties
 data class ProductDto(
     @DocumentId var id: String = "",
+    var gid: String = "",
     var legacyId: Long? = null,
     var name: String = "",
     var sku: String? = null,
     var categoryId: String? = null,
+    var categoryGid: String? = null,
     var legacyCategoryId: Long? = null,
     var sellingPrice: Double = 0.0,
     var costPrice: Double? = null,
@@ -109,11 +119,15 @@ data class ProductDto(
     var updatedAt: Long = System.currentTimeMillis()
 ) {
     fun toDomain(): Product {
+        val effectiveGid = if (gid.isNotBlank()) gid else if (id.isNotBlank()) IdGenerator.legacyGid(IdType.PRODUCT, id) else IdGenerator.generate(IdType.PRODUCT)
+        val effectiveCatGid = categoryGid ?: if (!categoryId.isNullOrBlank()) IdGenerator.legacyGid(IdType.CATEGORY, categoryId!!) else null
         val effectiveAdded = if (totalStockAdded > 0) totalStockAdded else (currentStock + totalSold)
         return Product(
             id = legacyId ?: (id.hashCode().toLong() and 0x7FFFFFFFFFFFFFFFL),
+            gid = effectiveGid,
             shopId = 1,
             categoryId = legacyCategoryId,
+            categoryGid = effectiveCatGid,
             name = name,
             sku = sku,
             sellingPrice = sellingPrice,
@@ -133,7 +147,9 @@ data class ProductDto(
 @IgnoreExtraProperties
 data class StockMovementDto(
     @DocumentId var id: String = "",
+    var gid: String = "",
     var productId: Long = 0,
+    var productGid: String? = null,
     var productName: String = "",
     var sku: String? = null,
     var changeType: String = "RESTOCK",
@@ -141,9 +157,11 @@ data class StockMovementDto(
     var stockAfter: Int = 0,
     var note: String? = null,
     var referenceId: String? = null,
+    var billGid: String? = null,
     var timestamp: Long = System.currentTimeMillis()
 ) {
     fun toDomain(): com.matoshree.shopmanager.domain.model.StockMovement {
+        val effectiveGid = if (gid.isNotBlank()) gid else if (id.isNotBlank()) IdGenerator.legacyGid(IdType.STOCK_MOVEMENT, id) else IdGenerator.generate(IdType.STOCK_MOVEMENT)
         val type = try {
             com.matoshree.shopmanager.domain.model.StockChangeType.valueOf(changeType)
         } catch (e: Exception) {
@@ -151,7 +169,9 @@ data class StockMovementDto(
         }
         return com.matoshree.shopmanager.domain.model.StockMovement(
             id = id,
+            gid = effectiveGid,
             productId = productId,
+            productGid = productGid,
             productName = productName,
             sku = sku,
             changeType = type,
@@ -159,6 +179,7 @@ data class StockMovementDto(
             stockAfter = stockAfter,
             note = note,
             referenceId = referenceId,
+            billGid = billGid,
             timestamp = timestamp
         )
     }
@@ -168,12 +189,15 @@ data class StockMovementDto(
 @IgnoreExtraProperties
 data class BillItemDto(
     var id: String = "",
+    var gid: String = "",
     var productId: String? = null,
+    var productGid: String? = null,
     var legacyProductId: Long? = null,
     var productName: String = "",
     var sku: String? = null,
     var categoryId: String? = null,
     var legacyCategoryId: Long? = null,
+    var billGid: String = "",
     var quantity: Int = 1,
     var sellingPrice: Double = 0.0,
     var costPrice: Double = 0.0,
@@ -183,10 +207,15 @@ data class BillItemDto(
     var lineProfit: Double = 0.0
 ) {
     fun toDomain(): BillItem {
+        val effectiveGid = if (gid.isNotBlank()) gid else if (id.isNotBlank()) IdGenerator.legacyGid(IdType.BILL_ITEM, id) else IdGenerator.generate(IdType.BILL_ITEM)
+        val effectiveProdGid = productGid ?: if (!productId.isNullOrBlank()) IdGenerator.legacyGid(IdType.PRODUCT, productId!!) else null
         return BillItem(
             id = id.hashCode().toLong() and 0x7FFFFFFFFFFFFFFFL,
+            gid = effectiveGid,
             billId = 0L,
+            billGid = billGid,
             productId = legacyProductId,
+            productGid = effectiveProdGid,
             productName = productName,
             sku = sku,
             categoryId = legacyCategoryId,
@@ -213,11 +242,13 @@ data class BillPaymentDto(
 @IgnoreExtraProperties
 data class BillDto(
     @DocumentId var id: String = "",
+    var gid: String = "",
     var legacyId: Long? = null,
     var billNumber: String = "",
     var transactionUuid: String = "",
     var saleType: String = "QUICK",
     var customerId: String? = null,
+    var customerGid: String? = null,
     var legacyCustomerId: Long? = null,
     var customerName: String? = null,
     var customerMobile: String? = null,
@@ -250,6 +281,7 @@ data class BillDto(
     var items: List<BillItemDto> = emptyList(),
     var payments: List<BillPaymentDto> = emptyList(),
     var createdByDeviceId: String = "",
+    var needsReview: Boolean = false,
     var createdAt: Long = System.currentTimeMillis(),
     var updatedAt: Long = System.currentTimeMillis()
 ) {
@@ -264,10 +296,15 @@ data class BillDto(
         val effectivePaid = if (paidAmount > 0.0) paidAmount else if (paymentSum > 0.0) paymentSum else if (pStatus == PaymentStatus.PAID) finalAmount else 0.0
         val effectivePending = if (pendingAmount > 0.0) pendingAmount else if (effectivePaid > 0.0) (finalAmount - effectivePaid).coerceAtLeast(0.0) else if (pStatus == PaymentStatus.PAID) 0.0 else finalAmount
 
+        val effectiveGid = if (gid.isNotBlank()) gid else if (id.isNotBlank()) IdGenerator.legacyGid(IdType.BILL, id) else if (transactionUuid.isNotBlank()) IdGenerator.legacyGid(IdType.BILL, transactionUuid) else IdGenerator.generate(IdType.BILL)
+        val effectiveCustGid = customerGid ?: if (!customerId.isNullOrBlank()) IdGenerator.legacyGid(IdType.CUSTOMER, customerId!!) else null
+
         return Bill(
             id = legacyId ?: (id.hashCode().toLong() and 0x7FFFFFFFFFFFFFFFL),
+            gid = effectiveGid,
             shopId = 1,
             customerId = legacyCustomerId ?: customerId?.removePrefix("cust_")?.toLongOrNull(),
+            customerGid = effectiveCustGid,
             customerName = customerName,
             customerMobile = customerMobile,
             billNumber = billNumber,
@@ -298,7 +335,8 @@ data class BillDto(
             syncStatus = SyncStatus.SYNCED,
             isVoided = status == "VOIDED" || status == "TRASH",
             voidReason = voidReason,
-            items = items.map { it.toDomain() }
+            needsReview = needsReview,
+            items = items.map { it.toDomain().copy(billGid = effectiveGid) }
         )
     }
 }
@@ -306,11 +344,14 @@ data class BillDto(
 @IgnoreExtraProperties
 data class UdhariTransactionDto(
     @DocumentId var id: String = "",
+    var gid: String = "",
     var customerId: Long = 0L,
+    var customerGid: String = "",
     var customerName: String = "",
     var customerMobile: String = "",
     var customerVillage: String? = null,
     var billId: Long = 0L,
+    var billGid: String? = null,
     var billNumber: String = "",
     var type: String = "PAYMENT", // PURCHASE_CREDIT, PAYMENT, REVERSAL
     var amount: Double = 0.0,
@@ -327,18 +368,26 @@ data class UdhariTransactionDto(
     var status: String = "ACTIVE", // ACTIVE, TRASH
     var deletedAt: Long? = null,
     var createdByDeviceId: String? = null,
+    var needsReview: Boolean = false,
     var createdAt: Long = System.currentTimeMillis()
 ) {
     fun toDomain(): UdhariTransaction {
         val tType = try { UdhariTransactionType.valueOf(type) } catch (e: Exception) { UdhariTransactionType.PAYMENT }
         val pMethod = try { PaymentMethod.valueOf(paymentMethod) } catch (e: Exception) { PaymentMethod.CASH }
+        val targetType = if (type == "PURCHASE_CREDIT") IdType.UDHARI else if (type == "REVERSAL") IdType.REVERSAL else IdType.PAYMENT
+        val effectiveGid = if (gid.isNotBlank()) gid else if (id.isNotBlank()) IdGenerator.legacyGid(targetType, id) else IdGenerator.generate(targetType)
+        val effectiveCustGid = if (customerGid.isNotBlank()) customerGid else if (customerId > 0L) IdGenerator.legacyGid(IdType.CUSTOMER, "cust_$customerId") else ""
+
         return UdhariTransaction(
             id = id,
+            gid = effectiveGid,
             customerId = customerId,
+            customerGid = effectiveCustGid,
             customerName = customerName,
             customerMobile = customerMobile,
             customerVillage = customerVillage,
             billId = billId,
+            billGid = billGid,
             billNumber = billNumber,
             type = tType,
             amount = amount,
@@ -355,6 +404,7 @@ data class UdhariTransactionDto(
             status = status,
             deletedAt = deletedAt,
             createdByDeviceId = createdByDeviceId,
+            needsReview = needsReview,
             createdAt = createdAt
         )
     }
@@ -363,8 +413,10 @@ data class UdhariTransactionDto(
 @IgnoreExtraProperties
 data class ExpenseDto(
     @DocumentId var id: String = "",
+    var gid: String = "",
     var legacyId: Long? = null,
     var category: String = "GENERAL",
+    var categoryGid: String? = null,
     var amount: Double = 0.0,
     var paymentMethod: String = "CASH",
     var expenseDate: String = "",
@@ -374,10 +426,13 @@ data class ExpenseDto(
 ) {
     fun toDomain(): Expense {
         val pMethod = try { PaymentMethod.valueOf(paymentMethod) } catch (e: Exception) { PaymentMethod.CASH }
+        val effectiveGid = if (gid.isNotBlank()) gid else if (id.isNotBlank()) IdGenerator.legacyGid(IdType.EXPENSE, id) else IdGenerator.generate(IdType.EXPENSE)
         return Expense(
             id = legacyId ?: (id.hashCode().toLong() and 0x7FFFFFFFFFFFFFFFL),
+            gid = effectiveGid,
             shopId = 1,
             category = category,
+            categoryGid = categoryGid,
             amount = amount,
             paymentMethod = pMethod,
             expenseDate = expenseDate,
@@ -389,6 +444,7 @@ data class ExpenseDto(
 @IgnoreExtraProperties
 data class DailyClosingDto(
     @DocumentId var id: String = "", // formatted YYYY-MM-DD
+    var gid: String = "",
     var closingDate: String = "",
     var totalSales: Double = 0.0,
     var cashSales: Double = 0.0,
@@ -404,8 +460,10 @@ data class DailyClosingDto(
     var createdAt: Long = System.currentTimeMillis()
 ) {
     fun toDomain(): DailyClosing {
+        val effectiveGid = if (gid.isNotBlank()) gid else if (closingDate.isNotBlank()) IdGenerator.legacyGid(IdType.DAILY_CLOSING, closingDate) else if (id.isNotBlank()) IdGenerator.legacyGid(IdType.DAILY_CLOSING, id) else IdGenerator.generate(IdType.DAILY_CLOSING)
         return DailyClosing(
             id = id.hashCode().toLong() and 0x7FFFFFFFFFFFFFFFL,
+            gid = effectiveGid,
             shopId = 1,
             closingDate = closingDate,
             totalSales = totalSales,

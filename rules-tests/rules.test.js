@@ -127,6 +127,35 @@ describe('Zero-Trust Security Rules Unit Tests', () => {
       await assertFails(db.collection('admin_secrets').doc('s1').set({ secret: '123' }));
       await assertFails(db.collection('unknown_collection').get());
     });
+
+    it('9. Enforces GID prefix and immutability', async () => {
+      const ownerContext = testEnv.authenticatedContext('owner-uid-1', {
+        email: 'swarajfugare23@gmail.com',
+        email_verified: true,
+        firebase: { sign_in_provider: 'google.com' }
+      });
+      const db = ownerContext.firestore();
+
+      // Valid cus_ GID on customer
+      const validCusGid = 'cus_01HM5V7K8P9Q2W3E4R5T6Y7U8I';
+      await assertSucceeds(db.collection('customers').doc(validCusGid).set({
+        gid: validCusGid,
+        name: 'Valid Gid Customer',
+        mobile: '9876543210'
+      }));
+
+      // Invalid prefix fails
+      const badPrefixDoc = 'bil_01HM5V7K8P9Q2W3E4R5T6Y7U8I';
+      await assertFails(db.collection('customers').doc(badPrefixDoc).set({
+        gid: badPrefixDoc,
+        name: 'Bad Prefix Customer'
+      }));
+
+      // GID mutation on update fails
+      await assertFails(db.collection('customers').doc(validCusGid).update({
+        gid: 'cus_01HM5V7K8P9Q2W3E4R5T6Y7U99'
+      }));
+    });
   });
 
   describe('Storage Security Rules', () => {

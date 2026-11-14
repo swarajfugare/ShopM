@@ -125,6 +125,13 @@ class TrashBinViewModel(
                         val db = com.matoshree.shopmanager.data.local.AppDatabase.getInstance(ctx)
                         when (item.entityType) {
                             "CUSTOMER" -> {
+                                if (item.gid.isNotBlank()) {
+                                    val byGid = db.customerDao().getCustomerByGid(item.gid)
+                                    if (byGid != null) {
+                                        db.customerDao().hardDeleteCustomer(byGid.id)
+                                        db.billDao().disassociateCustomerBills(byGid.id)
+                                    }
+                                }
                                 val cleanMob = item.extraIdentifier.trim()
                                 val targetCust = if (cleanMob.length == 10) {
                                     db.customerDao().getCustomerByMobile(cleanMob)
@@ -138,6 +145,9 @@ class TrashBinViewModel(
                                 }
                             }
                             "PRODUCT" -> {
+                                if (item.gid.isNotBlank()) {
+                                    db.productDao().deleteProductByGid(item.gid)
+                                }
                                 val prod = if (item.extraIdentifier.isNotBlank()) {
                                     db.productDao().getProductBySku(item.extraIdentifier)
                                 } else if (item.legacyId > 0) {
@@ -149,6 +159,9 @@ class TrashBinViewModel(
                                 }
                             }
                             "BILL" -> {
+                                if (item.gid.isNotBlank()) {
+                                    db.billDao().deleteBillByGid(item.gid)
+                                }
                                 val bill = if (item.extraIdentifier.isNotBlank()) {
                                     db.billDao().getBillByUuid(item.extraIdentifier)
                                 } else null

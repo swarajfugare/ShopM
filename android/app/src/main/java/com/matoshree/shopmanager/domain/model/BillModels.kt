@@ -44,8 +44,11 @@ enum class SyncStatus {
 @Serializable
 data class BillItem(
     val id: Long = 0,
+    val gid: String = "",
     val billId: Long = 0,
+    val billGid: String = "",
     val productId: Long? = null,
+    val productGid: String? = null,
     val productName: String,
     val sku: String? = null,
     val categoryId: Long? = null,
@@ -61,8 +64,10 @@ data class BillItem(
 @Serializable
 data class Bill(
     val id: Long = 0,
+    val gid: String = "",
     val shopId: Long = 1,
     val customerId: Long? = null,
+    val customerGid: String? = null,
     val customerName: String? = null,
     val customerMobile: String? = null,
     val billNumber: String,
@@ -95,9 +100,11 @@ data class Bill(
     val syncStatus: SyncStatus = SyncStatus.SYNCED,
     val isVoided: Boolean = false,
     val voidReason: String? = null,
-    val items: List<BillItem> = emptyList()
+    val items: List<BillItem> = emptyList(),
+    val needsReview: Boolean = false
 ) {
     fun canonicalKey(): String {
+        if (gid.isNotBlank()) return gid
         return if (transactionUuid.isNotBlank()) transactionUuid else if (billNumber.isNotBlank()) billNumber else "bill_$id"
     }
 }

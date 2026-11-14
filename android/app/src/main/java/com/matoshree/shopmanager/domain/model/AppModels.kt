@@ -5,6 +5,7 @@ import kotlinx.serialization.Serializable
 @Serializable
 data class Customer(
     val id: Long = 0,
+    val gid: String = "",
     val shopId: Long = 1,
     val name: String,
     val mobile: String,
@@ -19,9 +20,11 @@ data class Customer(
     val lastPurchaseAt: String? = null,
     val isActive: Boolean = true,
     val tier: String = "REGULAR", // VIP or REGULAR
-    val listTags: List<String> = emptyList()
+    val listTags: List<String> = emptyList(),
+    val needsReview: Boolean = false
 ) {
     fun canonicalKey(): String {
+        if (gid.isNotBlank()) return gid
         val clean = com.matoshree.shopmanager.utils.PhoneUtils.clean10DigitMobileInput(mobile)
         return when {
             clean.length == 10 -> "mob_$clean"
@@ -35,6 +38,7 @@ data class Customer(
 @Serializable
 data class Category(
     val id: Long = 0,
+    val gid: String = "",
     val shopId: Long = 1,
     val name: String,
     val description: String? = null,
@@ -45,8 +49,10 @@ data class Category(
 @Serializable
 data class Product(
     val id: Long = 0,
+    val gid: String = "",
     val shopId: Long = 1,
     val categoryId: Long? = null,
+    val categoryGid: String? = null,
     val categoryName: String? = null,
     val name: String,
     val sku: String? = null,
@@ -90,7 +96,9 @@ enum class StockChangeType(val displayName: String) {
 @Serializable
 data class StockMovement(
     val id: String = "",
+    val gid: String = "",
     val productId: Long,
+    val productGid: String? = null,
     val productName: String,
     val sku: String? = null,
     val changeType: StockChangeType = StockChangeType.RESTOCK,
@@ -98,6 +106,7 @@ data class StockMovement(
     val stockAfter: Int = 0,
     val note: String? = null,
     val referenceId: String? = null,
+    val billGid: String? = null,
     val timestamp: Long = System.currentTimeMillis()
 )
 
@@ -105,8 +114,10 @@ data class StockMovement(
 @Serializable
 data class Expense(
     val id: Long = 0,
+    val gid: String = "",
     val shopId: Long = 1,
     val category: String, // RENT, ELECTRICITY, SALARY, TRANSPORT, PACKAGING, MAINTENANCE, OTHER
+    val categoryGid: String? = null,
     val amount: Double,
     val paymentMethod: PaymentMethod = PaymentMethod.CASH,
     val expenseDate: String,
@@ -117,6 +128,7 @@ data class Expense(
 @Serializable
 data class DailyClosing(
     val id: Long = 0,
+    val gid: String = "",
     val shopId: Long = 1,
     val closingDate: String,
     val totalSales: Double = 0.0,

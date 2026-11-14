@@ -9,11 +9,13 @@ import androidx.room.PrimaryKey
     indices = [
         Index("timestamp"),
         Index("date"),
-        Index("customerMobile")
+        Index("customerMobile"),
+        Index("customerGid")
     ]
 )
 data class ReminderLogEntity(
     @PrimaryKey val id: String,
+    val customerGid: String? = null,
     val customerName: String,
     val customerMobile: String,
     val amount: Double,

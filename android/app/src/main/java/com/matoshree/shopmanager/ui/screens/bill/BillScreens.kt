@@ -512,7 +512,7 @@ fun BillsHistoryScreen(
                         verticalArrangement = Arrangement.spacedBy(10.dp),
                         contentPadding = PaddingValues(bottom = 24.dp)
                     ) {
-                        items(filteredBills, key = { bill -> "bill_${bill.id}_${bill.transactionUuid}" }) { bill ->
+                        items(filteredBills, key = { bill -> "bill_${bill.id}_${bill.canonicalKey()}" }) { bill ->
                             val isSelected = selectedBillIds.contains(bill.id)
                             BillListHistoryItemCard(
                                 bill = bill,

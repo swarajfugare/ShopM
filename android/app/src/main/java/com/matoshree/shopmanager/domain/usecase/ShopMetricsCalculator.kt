@@ -64,7 +64,7 @@ object ShopMetricsCalculator {
         customers: List<Customer> = emptyList(),
         bills: List<Bill> = emptyList(),
         transactions: List<UdhariTransaction> = emptyList()
-    ): (mobile: String?, name: String?, localId: Long?) -> String? =
+    ): CustomerKeyResolver =
         UdhariLedger.buildCustomerKeyResolver(customers, bills, transactions)
 
     /**

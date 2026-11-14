@@ -11,11 +11,14 @@ enum class UdhariTransactionType {
 @Serializable
 data class UdhariTransaction(
     val id: String = "",
+    val gid: String = "",
     val customerId: Long,
+    val customerGid: String = "",
     val customerName: String,
     val customerMobile: String,
     val customerVillage: String? = null,
     val billId: Long,
+    val billGid: String? = null,
     val billNumber: String,
     val type: UdhariTransactionType = UdhariTransactionType.PAYMENT,
     val amount: Double,
@@ -32,7 +35,8 @@ data class UdhariTransaction(
     val status: String = "ACTIVE",
     val deletedAt: Long? = null,
     val createdByDeviceId: String? = null,
-    val createdAt: Long = System.currentTimeMillis()
+    val createdAt: Long = System.currentTimeMillis(),
+    val needsReview: Boolean = false
 )
 
 data class CustomerUdhariSummary(

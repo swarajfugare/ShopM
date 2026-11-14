@@ -16,14 +16,18 @@ import com.matoshree.shopmanager.domain.model.SyncStatus
         Index(value = ["transactionUuid"], unique = true),
         Index(value = ["billNumber"]),
         Index(value = ["billDate"]),
-        Index(value = ["customerId"])
+        Index(value = ["customerId"]),
+        Index(value = ["gid"], unique = true),
+        Index(value = ["customerGid"])
     ]
 )
 data class BillEntity(
     @PrimaryKey(autoGenerate = true) val id: Long = 0,
+    val gid: String = "",
     val serverId: Long? = null,
     val shopId: Long = 1,
     val customerId: Long? = null,
+    val customerGid: String? = null,
     val customerName: String? = null,
     val customerMobile: String? = null,
     val billNumber: String,
@@ -55,9 +59,11 @@ data class BillEntity(
     val syncStatus: SyncStatus = SyncStatus.PENDING,
     val isVoided: Boolean = false,
     val voidReason: String? = null,
+    val needsReview: Boolean = false,
     val createdAt: Long = System.currentTimeMillis()
 ) {
     fun canonicalKey(): String {
+        if (gid.isNotBlank()) return gid
         return if (!transactionUuid.isNullOrBlank()) transactionUuid else if (billNumber.isNotBlank()) billNumber else "bill_$id"
     }
 }
@@ -72,12 +78,20 @@ data class BillEntity(
             onDelete = ForeignKey.CASCADE
         )
     ],
-    indices = [Index(value = ["billId"])]
+    indices = [
+        Index(value = ["billId"]),
+        Index(value = ["gid"], unique = true),
+        Index(value = ["billGid"]),
+        Index(value = ["productGid"])
+    ]
 )
 data class BillItemEntity(
     @PrimaryKey(autoGenerate = true) val id: Long = 0,
+    val gid: String = "",
     val billId: Long,
+    val billGid: String = "",
     val productId: Long? = null,
+    val productGid: String? = null,
     val productNameSnapshot: String,
     val skuSnapshot: String? = null,
     val categoryId: Long? = null,
@@ -94,11 +108,13 @@ data class BillItemEntity(
     tableName = "customers",
     indices = [
         Index(value = ["name"]),
-        Index(value = ["mobile"])
+        Index(value = ["mobile"]),
+        Index(value = ["gid"], unique = true)
     ]
 )
 data class CustomerEntity(
     @PrimaryKey(autoGenerate = true) val id: Long = 0,
+    val gid: String = "",
     val serverId: Long? = null,
     val shopId: Long = 1,
     val name: String,
@@ -112,9 +128,11 @@ data class CustomerEntity(
     val firstPurchaseAt: String? = null,
     val lastPurchaseAt: String? = null,
     val isActive: Boolean = true,
+    val needsReview: Boolean = false,
     val syncStatus: SyncStatus = SyncStatus.SYNCED
 ) {
     fun canonicalKey(): String {
+        if (gid.isNotBlank()) return gid
         val clean = com.matoshree.shopmanager.utils.PhoneUtils.clean10DigitMobileInput(mobile)
         return when {
             clean.length == 10 -> "mob_$clean"
@@ -126,9 +144,13 @@ data class CustomerEntity(
     }
 }
 
-@Entity(tableName = "categories")
+@Entity(
+    tableName = "categories",
+    indices = [Index(value = ["gid"], unique = true)]
+)
 data class CategoryEntity(
     @PrimaryKey(autoGenerate = true) val id: Long = 0,
+    val gid: String = "",
     val serverId: Long? = null,
     val shopId: Long = 1,
     val name: String,
@@ -140,14 +162,18 @@ data class CategoryEntity(
     tableName = "products",
     indices = [
         Index(value = ["sku"]),
-        Index(value = ["name"])
+        Index(value = ["name"]),
+        Index(value = ["gid"], unique = true),
+        Index(value = ["categoryGid"])
     ]
 )
 data class ProductEntity(
     @PrimaryKey(autoGenerate = true) val id: Long = 0,
+    val gid: String = "",
     val serverId: Long? = null,
     val shopId: Long = 1,
     val categoryId: Long? = null,
+    val categoryGid: String? = null,
     val name: String,
     val sku: String? = null,
     val sellingPrice: Double,
@@ -164,14 +190,19 @@ data class ProductEntity(
 
 @Entity(
     tableName = "expenses",
-    indices = [Index(value = ["expenseDate"])]
+    indices = [
+        Index(value = ["expenseDate"]),
+        Index(value = ["gid"], unique = true)
+    ]
 )
 data class ExpenseEntity(
     @PrimaryKey(autoGenerate = true) val id: Long = 0,
+    val gid: String = "",
     val serverId: Long? = null,
     val shopId: Long = 1,
     val transactionUuid: String,
     val category: String,
+    val categoryGid: String? = null,
     val amount: Double,
     val paymentMethod: PaymentMethod = PaymentMethod.CASH,
     val expenseDate: String,
@@ -181,10 +212,14 @@ data class ExpenseEntity(
 
 @Entity(
     tableName = "daily_closings",
-    indices = [Index(value = ["closingDate"], unique = true)]
+    indices = [
+        Index(value = ["closingDate"], unique = true),
+        Index(value = ["gid"], unique = true)
+    ]
 )
 data class DailyClosingEntity(
     @PrimaryKey(autoGenerate = true) val id: Long = 0,
+    val gid: String = "",
     val serverId: Long? = null,
     val shopId: Long = 1,
     val closingDate: String,

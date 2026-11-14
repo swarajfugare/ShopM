@@ -37,6 +37,23 @@ service cloud.firestore {
       return (!('amount' in data) || (data.amount is number && data.amount >= 0));
     }
 
+    function isValidGid(prefix, docId) {
+      let data = request.resource.data;
+      return !('gid' in data) || (
+        data.gid is string &&
+        (data.gid == docId || ('legacyId' in data) || ('transactionUuid' in data) || ('closingDate' in data) || ('date' in data)) &&
+        data.gid.size() == 30 &&
+        data.gid[0] == prefix[0] &&
+        data.gid[1] == prefix[1] &&
+        data.gid[2] == prefix[2] &&
+        data.gid[3] == prefix[3]
+      );
+    }
+
+    function isImmutableGid() {
+      return !('gid' in resource.data) || !('gid' in request.resource.data) || request.resource.data.gid == resource.data.gid;
+    }
+
     // 1. Shop Root & Member Authorization
     match /shops/{shopId} {
       allow read, write: if isAuthorizedOwner();
@@ -49,23 +66,28 @@ service cloud.firestore {
     // 2. Customers Collection
     match /customers/{customerId} {
       allow read, delete: if isAuthorizedOwner();
-      allow create, update: if isAuthorizedOwner() && isValidCustomer();
+      allow create: if isAuthorizedOwner() && isValidCustomer() && isValidGid('cus_', customerId);
+      allow update: if isAuthorizedOwner() && isValidCustomer() && isImmutableGid();
     }
 
     // 3. Products & Categories
     match /products/{productId} {
       allow read, delete: if isAuthorizedOwner();
-      allow create, update: if isAuthorizedOwner() && isValidProduct();
+      allow create: if isAuthorizedOwner() && isValidProduct() && isValidGid('prd_', productId);
+      allow update: if isAuthorizedOwner() && isValidProduct() && isImmutableGid();
     }
 
     match /categories/{categoryId} {
-      allow read, write: if isAuthorizedOwner();
+      allow read, delete: if isAuthorizedOwner();
+      allow create: if isAuthorizedOwner() && isValidGid('cat_', categoryId);
+      allow update: if isAuthorizedOwner() && isImmutableGid();
     }
 
     // 4. Bills & Transactions
     match /bills/{billId} {
       allow read, delete: if isAuthorizedOwner();
-      allow create, update: if isAuthorizedOwner() && isValidBill();
+      allow create: if isAuthorizedOwner() && isValidBill() && isValidGid('bil_', billId);
+      allow update: if isAuthorizedOwner() && isValidBill() && isImmutableGid();
 
       match /{allChildren=**} {
         allow read, write: if isAuthorizedOwner();
@@ -75,21 +97,28 @@ service cloud.firestore {
     // 5. Udhari Transactions Ledger
     match /udhari_transactions/{txId} {
       allow read, delete: if isAuthorizedOwner();
-      allow create, update: if isAuthorizedOwner() && isValidUdhari();
+      allow create: if isAuthorizedOwner() && isValidUdhari() && (isValidGid('udh_', txId) || isValidGid('pay_', txId) || isValidGid('rev_', txId));
+      allow update: if isAuthorizedOwner() && isValidUdhari() && isImmutableGid();
     }
 
     // 6. Expenses & Daily Closings
     match /expenses/{expenseId} {
-      allow read, write: if isAuthorizedOwner();
+      allow read, delete: if isAuthorizedOwner();
+      allow create: if isAuthorizedOwner() && isValidGid('exp_', expenseId);
+      allow update: if isAuthorizedOwner() && isImmutableGid();
     }
 
     match /daily_closings/{closingId} {
-      allow read, write: if isAuthorizedOwner();
+      allow read, delete: if isAuthorizedOwner();
+      allow create: if isAuthorizedOwner() && isValidGid('clo_', closingId);
+      allow update: if isAuthorizedOwner() && isImmutableGid();
     }
 
     // 7. Stock Movements & Inventory Audit
     match /stock_movements/{movementId} {
-      allow read, write: if isAuthorizedOwner();
+      allow read, delete: if isAuthorizedOwner();
+      allow create: if isAuthorizedOwner() && isValidGid('stk_', movementId);
+      allow update: if isAuthorizedOwner() && isImmutableGid();
     }
 
     // 8. Security, Devices, Settings & Diagnostics

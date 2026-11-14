@@ -48,6 +48,16 @@ data class ShopUdhariSummary(
     val customerResults: Map<String, CustomerLedgerResult>
 )
 
+fun interface CustomerKeyResolver {
+    fun resolve(gid: String?, mobile: String?, name: String?, localId: Long?): String?
+
+    operator fun invoke(gid: String?, mobile: String?, name: String?, localId: Long?): String? =
+        resolve(gid, mobile, name, localId)
+
+    operator fun invoke(mobile: String?, name: String?, localId: Long?): String? =
+        resolve(null, mobile, name, localId)
+}
+
 /**
  * Authoritative Single Udhari Ledger Calculation Engine.
  * Used identically across:
@@ -59,7 +69,8 @@ data class ShopUdhariSummary(
  */
 object UdhariLedger {
 
-    fun resolveCustomerKey(mobile: String?, name: String?, localId: Long?): String? {
+    fun resolveCustomerKey(gid: String?, mobile: String?, name: String?, localId: Long?): String? {
+        if (!gid.isNullOrBlank()) return gid
         val clean = PhoneUtils.clean10DigitMobileInput(mobile ?: "")
         return when {
             clean.length == 10 -> "mob_$clean"
@@ -69,9 +80,12 @@ object UdhariLedger {
         }
     }
 
+    fun resolveCustomerKey(mobile: String?, name: String?, localId: Long?): String? =
+        resolveCustomerKey(null, mobile, name, localId)
+
     /**
      * Builds a unified resolver that links customer entities, bills, and transactions
-     * so that records sharing mobile, name, or customer ID resolve accurately to the canonical key,
+     * so that records sharing GID, mobile, name, or customer ID resolve accurately to the canonical key,
      * while guaranteeing that distinct 10-digit mobile numbers are NEVER merged,
      * and customers without mobile are NEVER conflated by name alone if their IDs differ.
      */
@@ -79,7 +93,7 @@ object UdhariLedger {
         customers: List<Customer> = emptyList(),
         bills: List<Bill> = emptyList(),
         transactions: List<UdhariTransaction> = emptyList()
-    ): (mobile: String?, name: String?, localId: Long?) -> String? {
+    ): CustomerKeyResolver {
         val aliasToCanonical = mutableMapOf<String, String>()
 
         // Seed from known customer entities (only map name if it is unique among customers)
@@ -91,38 +105,46 @@ object UdhariLedger {
         for (c in customers) {
             val cleanMob = PhoneUtils.clean10DigitMobileInput(c.mobile)
             val cleanName = c.name.trim().lowercase()
-            if (cleanMob.length == 10) {
-                val canonical = "mob_$cleanMob"
-                if (cleanName.isNotBlank() && (nameCount[cleanName] ?: 0) == 1) {
-                    aliasToCanonical["name_$cleanName"] = canonical
-                }
-                if (c.id > 0L) {
-                    aliasToCanonical["id_${c.id}"] = canonical
-                    aliasToCanonical["cust_${c.id}"] = canonical
-                }
+            val canonical = if (c.gid.isNotBlank()) {
+                c.gid
+            } else if (cleanMob.length == 10) {
+                "mob_$cleanMob"
             } else if (cleanName.isNotBlank() && (nameCount[cleanName] ?: 0) == 1) {
-                val canonical = "name_$cleanName"
-                aliasToCanonical["name_$cleanName"] = canonical
-                if (c.id > 0L) {
-                    aliasToCanonical["id_${c.id}"] = canonical
-                    aliasToCanonical["cust_${c.id}"] = canonical
-                }
+                "name_$cleanName"
             } else if (c.id > 0L) {
-                val canonical = "cust_${c.id}"
+                "cust_${c.id}"
+            } else {
+                "cust_unknown_${c.hashCode()}"
+            }
+
+            if (c.gid.isNotBlank()) {
+                aliasToCanonical[c.gid] = canonical
+            }
+            if (cleanMob.length == 10) {
+                aliasToCanonical["mob_$cleanMob"] = canonical
+            }
+            if (cleanName.isNotBlank() && (nameCount[cleanName] ?: 0) == 1) {
+                aliasToCanonical["name_$cleanName"] = canonical
+            }
+            if (c.id > 0L) {
                 aliasToCanonical["id_${c.id}"] = canonical
                 aliasToCanonical["cust_${c.id}"] = canonical
             }
         }
 
-        return { mobile, name, localId ->
-            val cleanMob = PhoneUtils.clean10DigitMobileInput(mobile ?: "")
-            if (cleanMob.length == 10) {
-                "mob_$cleanMob"
+        return CustomerKeyResolver { gid, mobile, name, localId ->
+            if (!gid.isNullOrBlank()) {
+                aliasToCanonical[gid] ?: gid
             } else {
-                val cleanName = name?.trim()?.lowercase() ?: ""
-                (if (localId != null && localId > 0L) (aliasToCanonical["id_$localId"] ?: aliasToCanonical["cust_$localId"]) else null)
-                    ?: (if (cleanName.isNotBlank() && (nameCount[cleanName] ?: 0) == 1) aliasToCanonical["name_$cleanName"] else null)
-                    ?: resolveCustomerKey(mobile, name, localId)
+                val cleanMob = PhoneUtils.clean10DigitMobileInput(mobile ?: "")
+                if (cleanMob.length == 10) {
+                    aliasToCanonical["mob_$cleanMob"] ?: "mob_$cleanMob"
+                } else {
+                    val cleanName = name?.trim()?.lowercase() ?: ""
+                    (if (localId != null && localId > 0L) (aliasToCanonical["id_$localId"] ?: aliasToCanonical["cust_$localId"]) else null)
+                        ?: (if (cleanName.isNotBlank() && (nameCount[cleanName] ?: 0) == 1) aliasToCanonical["name_$cleanName"] else null)
+                        ?: resolveCustomerKey(gid, mobile, name, localId)
+                }
             }
         }
     }
@@ -167,38 +189,48 @@ object UdhariLedger {
 
         val keyResolver = buildCustomerKeyResolver(allCustomers, nonVoidBills, validTxs)
 
-        val cust = allCustomers.find { keyResolver(it.mobile, it.name, it.id) == customerKey }
+        val cust = allCustomers.find {
+            (it.gid.isNotBlank() && it.gid == customerKey) ||
+            keyResolver(it.gid, it.mobile, it.name, it.id) == customerKey
+        }
 
         val rawCustBills = nonVoidBills.filter { b ->
-            keyResolver(b.customerMobile, b.customerName, b.customerId) == customerKey
+            (!b.customerGid.isNullOrBlank() && b.customerGid == customerKey) ||
+            keyResolver(b.customerGid, b.customerMobile, b.customerName, b.customerId) == customerKey
         }.sortedWith(compareBy({ it.billDate }, { it.id }))
 
-        // Deduplicate bills within customer (e.g. local room bill + cloud bill with same billNumber or transactionUuid)
+        // Deduplicate bills within customer (e.g. local room bill + cloud bill with same billNumber or transactionUuid or GID)
+        val seenBillGids = mutableSetOf<String>()
         val seenBillNumbers = mutableSetOf<String>()
         val seenBillUuids = mutableSetOf<String>()
         val custBills = mutableListOf<Bill>()
 
         for (b in rawCustBills) {
+            if (b.gid.isNotBlank() && seenBillGids.contains(b.gid)) continue
             val cleanNum = b.billNumber.trim().uppercase()
             val uuid = b.transactionUuid.trim()
             if (uuid.isNotBlank() && seenBillUuids.contains(uuid)) continue
             if (cleanNum.isNotBlank() && seenBillNumbers.contains(cleanNum)) continue
 
+            if (b.gid.isNotBlank()) seenBillGids.add(b.gid)
             if (uuid.isNotBlank()) seenBillUuids.add(uuid)
             if (cleanNum.isNotBlank()) seenBillNumbers.add(cleanNum)
             custBills.add(b)
         }
 
         val rawCustTxs = validTxs.filter { tx ->
-            keyResolver(tx.customerMobile, tx.customerName, tx.customerId) == customerKey
+            (tx.customerGid.isNotBlank() && tx.customerGid == customerKey) ||
+            keyResolver(tx.customerGid, tx.customerMobile, tx.customerName, tx.customerId) == customerKey
         }
 
         // Deduplicate transactions within customer (prevent duplicate payment/credit events from sync retries)
+        val seenTxGids = mutableSetOf<String>()
         val seenTxIds = mutableSetOf<String>()
         val seenTxUuids = mutableSetOf<String>()
         val custTxs = mutableListOf<UdhariTransaction>()
 
         for (tx in rawCustTxs) {
+            if (tx.gid.isNotBlank() && seenTxGids.contains(tx.gid)) continue
             if (tx.id.isNotBlank() && seenTxIds.contains(tx.id)) continue
             if (tx.transactionUuid.isNotBlank() && seenTxUuids.contains(tx.transactionUuid)) continue
 
@@ -206,13 +238,15 @@ object UdhariLedger {
             val isSemanticDup = custTxs.any { existing ->
                 existing.type == tx.type &&
                 kotlin.math.abs(existing.amount - tx.amount) < 0.001 &&
-                ((existing.billId != 0L && existing.billId == tx.billId) ||
+                ((!existing.billGid.isNullOrBlank() && !tx.billGid.isNullOrBlank() && existing.billGid == tx.billGid) ||
+                 (existing.billId != 0L && existing.billId == tx.billId) ||
                  (existing.billNumber.isNotBlank() && existing.billNumber.trim().equals(tx.billNumber.trim(), ignoreCase = true))) &&
                 existing.date == tx.date &&
                 kotlin.math.abs(existing.createdAt - tx.createdAt) < 120_000L
             }
             if (isSemanticDup) continue
 
+            if (tx.gid.isNotBlank()) seenTxGids.add(tx.gid)
             if (tx.id.isNotBlank()) seenTxIds.add(tx.id)
             if (tx.transactionUuid.isNotBlank()) seenTxUuids.add(tx.transactionUuid)
             custTxs.add(tx)
@@ -252,7 +286,7 @@ object UdhariLedger {
 
             vahiEvents.add(
                 KhatavahiEntry(
-                    id = "bill_${b.id}",
+                    id = if (b.gid.isNotBlank()) b.gid else "bill_${b.id}",
                     date = b.billDate,
                     timeMillis = billMillis,
                     description = itemsDesc,
@@ -267,8 +301,11 @@ object UdhariLedger {
 
             // Direct payment transactions allocated to this bill
             val directTxsForBill = custTxs.filter {
-                it.type == UdhariTransactionType.PAYMENT &&
-                ((it.billId != 0L && it.billId == b.id) || (it.billNumber.isNotBlank() && it.billNumber == b.billNumber))
+                it.type == UdhariTransactionType.PAYMENT && (
+                    (!it.billGid.isNullOrBlank() && b.gid.isNotBlank() && it.billGid == b.gid) ||
+                    (it.billId != 0L && it.billId == b.id) ||
+                    (it.billNumber.isNotBlank() && it.billNumber.trim().equals(b.billNumber.trim(), ignoreCase = true))
+                )
             }
 
             val hasCheckoutTx = directTxsForBill.any {
@@ -287,7 +324,7 @@ object UdhariLedger {
                 totalCheckoutPaid += checkoutPaid
                 vahiEvents.add(
                     KhatavahiEntry(
-                        id = "checkout_pay_${b.id}",
+                        id = "checkout_pay_${if (b.gid.isNotBlank()) b.gid else b.id}",
                         date = b.billDate,
                         timeMillis = billMillis + 100L,
                         description = "बिल भरणा (${b.paymentMethod.name})",
@@ -318,6 +355,7 @@ object UdhariLedger {
         }
 
         // 1b. Process unlinked credit transactions (PURCHASE_CREDIT transactions for bills absent from allBills)
+        val knownCustBillGids = custBills.map { it.gid }.filter { it.isNotBlank() }.toSet()
         val knownCustBillIds = custBills.map { it.id }.filter { it != 0L }.toSet()
         val knownCustBillNumbers = custBills.map { it.billNumber.trim().uppercase() }.filter { it.isNotBlank() }.toSet()
         val knownCustBillUuids = custBills.map { it.transactionUuid.trim() }.filter { it.isNotBlank() }.toSet()
@@ -328,14 +366,15 @@ object UdhariLedger {
             val note = tx.note?.trim()?.uppercase() ?: ""
 
             val matchesKnownBill =
+                (!tx.billGid.isNullOrBlank() && knownCustBillGids.contains(tx.billGid)) ||
                 (tx.billId != 0L && knownCustBillIds.contains(tx.billId)) ||
                 (cleanNum.isNotBlank() && knownCustBillNumbers.contains(cleanNum)) ||
                 (uuid.isNotBlank() && knownCustBillUuids.contains(uuid)) ||
-                custBills.any { b ->
+                (tx.needsReview && custBills.any { b ->
                     (cleanNum.isNotBlank() && b.billNumber.trim().equals(cleanNum, ignoreCase = true)) ||
                     (note.isNotBlank() && b.billNumber.isNotBlank() && note.contains(b.billNumber.trim().uppercase())) ||
                     (tx.billId == 0L && cleanNum.isBlank() && kotlin.math.abs(b.finalAmount - tx.amount) < 0.001 && b.billDate.startsWith(tx.date))
-                }
+                })
 
             tx.type == UdhariTransactionType.PURCHASE_CREDIT && !matchesKnownBill
         }
@@ -440,7 +479,7 @@ object UdhariLedger {
             }
             vahiEvents.add(
                 KhatavahiEntry(
-                    id = "pay_${p.id}",
+                    id = if (p.gid.isNotBlank()) p.gid else "pay_${p.id}",
                     date = p.date,
                     timeMillis = p.createdAt,
                     description = payDesc,
@@ -455,10 +494,12 @@ object UdhariLedger {
         }
 
         // 4. Unallocated payments (payments not directly allocated to any known bill)
+        val knownStateBillGids = custBills.map { it.gid }.filter { it.isNotBlank() }.toSet()
         val knownStateBillIds = billStates.map { it.billId }.filter { it != 0L }.toSet()
         val knownStateBillNumbers = billStates.map { it.billNumber }.filter { it.isNotBlank() }.toSet()
 
         val unallocatedTxs = allPaymentTxs.filter {
+            (it.billGid.isNullOrBlank() || !knownStateBillGids.contains(it.billGid)) &&
             !knownStateBillIds.contains(it.billId) &&
             (it.billNumber.isBlank() || !knownStateBillNumbers.contains(it.billNumber))
         }
@@ -568,13 +609,13 @@ object UdhariLedger {
 
         val allKeys = mutableSetOf<String>()
         allCustomers.forEach { c ->
-            keyResolver(c.mobile, c.name, c.id)?.let { allKeys.add(it) }
+            keyResolver(c.gid, c.mobile, c.name, c.id)?.let { allKeys.add(it) }
         }
         nonVoidBills.forEach { b ->
-            keyResolver(b.customerMobile, b.customerName, b.customerId)?.let { allKeys.add(it) }
+            keyResolver(b.customerGid, b.customerMobile, b.customerName, b.customerId)?.let { allKeys.add(it) }
         }
         validTxs.forEach { tx ->
-            keyResolver(tx.customerMobile, tx.customerName, tx.customerId)?.let { allKeys.add(it) }
+            keyResolver(tx.customerGid, tx.customerMobile, tx.customerName, tx.customerId)?.let { allKeys.add(it) }
         }
 
         val customerResults = mutableMapOf<String, CustomerLedgerResult>()
