@@ -2254,7 +2254,7 @@ service cloud.firestore {
                         ) {
                             Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                                 Text("तपासणी अहवाल:", fontWeight = FontWeight.Bold, fontSize = 13.sp, color = DeepEmerald)
-                                Text("• फोनमधील सक्रिय ग्राहक: ${r.totalRoomActive}", fontSize = 12.sp)
+                                Text("• ग्राहकांची यादी (Directory) / फोन सक्रिय ग्राहक: ${r.totalRoomActive}", fontSize = 12.sp)
                                 Text("• फोनमधील अर्काईव्ह ग्राहक: ${r.totalRoomArchived}", fontSize = 12.sp)
                                 Text("• क्लाउडवरील सक्रिय ग्राहक: ${r.totalFirestoreActive}", fontSize = 12.sp)
 

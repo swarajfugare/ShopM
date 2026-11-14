@@ -56,7 +56,7 @@ data class MigrationResult(
 
 object DataMigrationManager {
     private const val TAG = "DataMigrationManager"
-    private const val SETTING_KEY_MIGRATION_DONE = "migration_v3_5_1_repair_done"
+    private const val SETTING_KEY_MIGRATION_DONE = "migration_v3_5_2_repair_done"
 
     suspend fun isMigrationDone(context: Context): Boolean = withContext(Dispatchers.IO) {
         try {
@@ -309,22 +309,30 @@ object DataMigrationManager {
             null
         }
 
-        // Step 2: Local Room Repair verification
+        // Step 2: Local Room Repair verification & Customer Deduplication
         var localUpdated = 0
         try {
             val customers = db.customerDao().getAllCustomersDirect()
             for (c in customers) {
+                val cleanMob = PhoneUtils.clean10DigitMobileInput(c.mobile)
+                val resolvedDocId = if (cleanMob.length == 10) "cust_m_$cleanMob" else (c.docId ?: c.serverId?.toString())
                 val targetGid = when {
-                    !c.docId.isNullOrBlank() -> IdGenerator.customerGid(c.docId)
+                    !resolvedDocId.isNullOrBlank() -> IdGenerator.customerGid(resolvedDocId)
                     c.serverId != null && c.serverId > 0 -> IdGenerator.customerGid(c.serverId.toString())
                     c.gid.isNotBlank() && IdFormat.isValid(c.gid) -> c.gid
                     else -> IdGenerator.newCustomerGid()
                 }
-                if (c.gid != targetGid || c.docId == null && c.serverId != null) {
-                    val resolvedDocId = c.docId ?: c.serverId?.toString()
+                if (c.gid != targetGid || c.docId != resolvedDocId) {
                     db.customerDao().updateCustomer(c.copy(gid = targetGid, docId = resolvedDocId))
                     localUpdated++
                 }
+            }
+
+            // Deduplicate duplicate customer rows in Room
+            try {
+                db.customerDao().deduplicateCustomerRows()
+            } catch (e: Exception) {
+                Log.w(TAG, "Deduplicate in migration notice: ${e.message}")
             }
 
             val bills = db.billDao().getAllBillsDirect(limit = 100000)
@@ -511,7 +519,7 @@ object DataMigrationManager {
         val isVerified = udhariDiff < 0.01 && billCountDiff == 0 && stockDiff == 0 && expenseDiff < 0.01
 
         if (isVerified) {
-            Log.i(TAG, "v3.5.1 Migration VERIFIED successfully! Udhari diff: $udhariDiff, Bills diff: $billCountDiff, Expense diff: $expenseDiff")
+            Log.i(TAG, "v3.5.2 Migration VERIFIED successfully! Udhari diff: $udhariDiff, Bills diff: $billCountDiff, Expense diff: $expenseDiff")
             db.settingsDao().set(SettingsEntity(SETTING_KEY_MIGRATION_DONE, "true"))
 
             try {

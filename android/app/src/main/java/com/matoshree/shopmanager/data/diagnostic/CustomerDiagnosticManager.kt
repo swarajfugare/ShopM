@@ -47,7 +47,7 @@ object CustomerDiagnosticManager {
     suspend fun runDiagnosticScan(context: Context): CustomerDiagnosticReport = withContext(Dispatchers.IO) {
         val db = AppDatabase.getInstance(context)
         val allRoom = db.customerDao().getAllCustomersDirect()
-        val roomActive = allRoom.filter { it.isActive }
+        val roomActive = allRoom.filter { it.isActive && it.name.isNotBlank() && !it.name.equals("Walk-in", ignoreCase = true) }
         val roomArchived = allRoom.filter { !it.isActive }
 
         val roomMobileSet = roomActive.map { PhoneUtils.clean10DigitMobileInput(it.mobile) }.filter { it.length == 10 }.toSet()
@@ -281,7 +281,7 @@ object CustomerDiagnosticManager {
             val keyResolver = com.matoshree.shopmanager.domain.usecase.UdhariLedger.buildCustomerKeyResolver(currentRoomCusts, allBills, txs)
 
             for (c in currentRoomCusts) {
-                val key = keyResolver(c.mobile, c.name, c.id) ?: "cust_${c.id}"
+                val key = keyResolver(c.gid, c.mobile, c.name, c.id) ?: (c.gid.ifBlank { "cust_${c.id}" })
                 val verifiedBal = shopLedger.customerResults[key]?.balance ?: 0.0
                 if (Math.abs(c.outstandingBalance - verifiedBal) > 0.5) {
                     val entity = c.copy(outstandingBalance = verifiedBal).toEntity()

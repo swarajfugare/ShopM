@@ -85,36 +85,36 @@ object UdhariLedger {
 
     /**
      * Builds a unified resolver that links customer entities, bills, and transactions
-     * so that records sharing GID, mobile, name, or customer ID resolve accurately to the canonical key,
-     * while guaranteeing that distinct 10-digit mobile numbers are NEVER merged,
-     * and customers without mobile are NEVER conflated by name alone if their IDs differ.
+     * strictly by customerGid and normalized 10-digit mobile number.
+     * Numeric ID aliases and name-only fallbacks are strictly excluded to prevent
+     * cross-customer bill/payment contamination.
      */
     fun buildCustomerKeyResolver(
         customers: List<Customer> = emptyList(),
         bills: List<Bill> = emptyList(),
-        transactions: List<UdhariTransaction> = emptyList()
+        transactions: List<UdhariTransaction> = emptyList(),
+        aliases: Map<String, String> = emptyMap()
     ): CustomerKeyResolver {
         val aliasToCanonical = mutableMapOf<String, String>()
+        aliasToCanonical.putAll(aliases)
 
-        // Seed from known customer entities (only map name if it is unique among customers)
-        val nameCount = customers.map { it.name.trim().lowercase() }
-            .filter { it.isNotBlank() }
-            .groupingBy { it }
-            .eachCount()
+        val nameCount = mutableMapOf<String, Int>()
+        for (c in customers) {
+            val cleanName = c.name.trim().lowercase()
+            if (cleanName.isNotBlank()) {
+                nameCount[cleanName] = (nameCount[cleanName] ?: 0) + 1
+            }
+        }
 
         for (c in customers) {
             val cleanMob = PhoneUtils.clean10DigitMobileInput(c.mobile)
             val cleanName = c.name.trim().lowercase()
-            val canonical = if (c.gid.isNotBlank()) {
-                c.gid
-            } else if (cleanMob.length == 10) {
-                "mob_$cleanMob"
-            } else if (cleanName.isNotBlank() && (nameCount[cleanName] ?: 0) == 1) {
-                "name_$cleanName"
-            } else if (c.id > 0L) {
-                "cust_${c.id}"
-            } else {
-                "cust_unknown_${c.hashCode()}"
+            val canonical = when {
+                c.gid.isNotBlank() -> c.gid
+                cleanMob.length == 10 -> "mob_$cleanMob"
+                cleanName.isNotBlank() && (nameCount[cleanName] ?: 0) == 1 -> "name_$cleanName"
+                c.id > 0L -> "cust_${c.id}"
+                else -> "cust_${c.name.trim().lowercase()}"
             }
 
             if (c.gid.isNotBlank()) {
@@ -122,43 +122,50 @@ object UdhariLedger {
             }
             if (cleanMob.length == 10) {
                 aliasToCanonical["mob_$cleanMob"] = canonical
-                aliasToCanonical[IdGenerator.legacyGid(IdType.CUSTOMER, "mob_$cleanMob")] = canonical
+                aliasToCanonical[IdGenerator.customerGid("cust_m_$cleanMob")] = canonical
             }
             if (cleanName.isNotBlank() && (nameCount[cleanName] ?: 0) == 1) {
                 aliasToCanonical["name_$cleanName"] = canonical
-                aliasToCanonical[IdGenerator.legacyGid(IdType.CUSTOMER, "name_$cleanName")] = canonical
             }
-            if (c.id > 0L) {
-                aliasToCanonical["id_${c.id}"] = canonical
+            if (c.id > 0L && cleanMob.length != 10) {
                 aliasToCanonical["cust_${c.id}"] = canonical
-                aliasToCanonical[IdGenerator.legacyGid(IdType.CUSTOMER, "cust_${c.id}")] = canonical
-                aliasToCanonical[IdGenerator.legacyGid(IdType.CUSTOMER, "srv_${c.id}")] = canonical
+                aliasToCanonical["id_${c.id}"] = canonical
             }
         }
 
         return CustomerKeyResolver { gid, mobile, name, localId ->
-            val byGid = if (!gid.isNullOrBlank()) aliasToCanonical[gid] else null
-            if (byGid != null) return@CustomerKeyResolver byGid
+            // 1. Primary: match by customerGid
+            if (!gid.isNullOrBlank()) {
+                val byGid = aliasToCanonical[gid]
+                if (byGid != null) return@CustomerKeyResolver byGid
+            }
 
-            // F1 Resolution Chain: docId/gid -> clean 10-digit mobile -> unique name -> localId
+            // 2. Secondary: match by clean 10-digit mobile number
             val cleanMob = PhoneUtils.clean10DigitMobileInput(mobile ?: "")
             if (cleanMob.length == 10) {
                 val byMob = aliasToCanonical["mob_$cleanMob"]
                 if (byMob != null) return@CustomerKeyResolver byMob
+                return@CustomerKeyResolver "mob_$cleanMob"
+            }
+
+            // 3. Fallback:
+            if (!gid.isNullOrBlank()) {
+                return@CustomerKeyResolver gid
             }
 
             val cleanName = name?.trim()?.lowercase() ?: ""
-            if (cleanName.isNotBlank() && (nameCount[cleanName] ?: 0) == 1) {
+            if (cleanName.isNotBlank()) {
                 val byName = aliasToCanonical["name_$cleanName"]
                 if (byName != null) return@CustomerKeyResolver byName
+                if ((nameCount[cleanName] ?: 0) == 1) return@CustomerKeyResolver "name_$cleanName"
             }
 
             if (localId != null && localId > 0L) {
-                val byId = aliasToCanonical["id_$localId"] ?: aliasToCanonical["cust_$localId"]
+                val byId = aliasToCanonical["cust_$localId"] ?: aliasToCanonical["id_$localId"]
                 if (byId != null) return@CustomerKeyResolver byId
             }
 
-            if (!gid.isNullOrBlank()) gid else resolveCustomerKey(gid, mobile, name, localId)
+            resolveCustomerKey(gid, mobile, name, localId)
         }
     }
 
