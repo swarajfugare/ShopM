@@ -1786,6 +1786,37 @@ class FirestoreBillRepository {
                 batch.update(doc.reference, updateMap)
             }
 
+            // Cascade void/trash to associated udhari transactions
+            try {
+                val bGid = billDto?.gid ?: "bil_$billId"
+                val bNum = billDto?.billNumber ?: billNumber ?: ""
+                val txDocs = mutableListOf<com.google.firebase.firestore.DocumentSnapshot>()
+                if (bGid.isNotBlank()) {
+                    txDocs.addAll(FirebaseManager.udhariTransactionsCollection().whereEqualTo("billGid", bGid).get().await().documents)
+                }
+                if (billId > 0) {
+                    txDocs.addAll(FirebaseManager.udhariTransactionsCollection().whereEqualTo("billId", billId).get().await().documents)
+                }
+                if (bNum.isNotBlank()) {
+                    txDocs.addAll(FirebaseManager.udhariTransactionsCollection().whereEqualTo("billNumber", bNum).get().await().documents)
+                }
+                val distinctTxs = txDocs.distinctBy { it.id }
+                distinctTxs.forEach { tDoc ->
+                    batch.update(
+                        tDoc.reference,
+                        mapOf(
+                            "status" to "TRASH",
+                            "isDeleted" to true,
+                            "deletedAt" to System.currentTimeMillis(),
+                            "linkedBillGid" to bGid,
+                            "updatedAt" to System.currentTimeMillis()
+                        )
+                    )
+                }
+            } catch (e: Exception) {
+                Log.w(TAG, "Void bill cascade udhari txs note: ${e.message}")
+            }
+
             // Adjust customer lifetime spend ONLY if it's a real registered customer
             val targetCustId = billDto?.customerId
             if (!targetCustId.isNullOrBlank() &&

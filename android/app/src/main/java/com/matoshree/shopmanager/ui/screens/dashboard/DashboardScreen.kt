@@ -702,7 +702,7 @@ fun DashboardScreen(
                                 colors = ButtonDefaults.buttonColors(containerColor = DeepEmerald),
                                 shape = RoundedCornerShape(8.dp)
                             ) {
-                                Text("सर्व बिले पहा →", color = WarmWhite, fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                                Text("सर्व बिले", color = WarmWhite, fontWeight = FontWeight.Bold, fontSize = 12.sp)
                             }
                         }
                     }

@@ -502,7 +502,7 @@ fun DailyClosingScreen(
                                         shape = RoundedCornerShape(8.dp),
                                         enabled = denomTotal > 0
                                     ) {
-                                        Text("ही रक्कम भरा", fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                                        Text("रक्कम भरा", fontWeight = FontWeight.Bold, fontSize = 12.sp)
                                     }
                                 }
                             }

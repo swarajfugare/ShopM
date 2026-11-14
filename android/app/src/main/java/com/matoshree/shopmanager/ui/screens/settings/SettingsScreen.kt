@@ -1451,7 +1451,7 @@ fun SettingsScreen(
                     ) {
                         Icon(Icons.Default.Restore, contentDescription = null, modifier = Modifier.size(16.dp))
                         Spacer(modifier = Modifier.width(6.dp))
-                        Text("कचरा पेटी उघडा (Trash Bin)", fontWeight = FontWeight.Bold)
+                        Text("कचरा पेटी", fontWeight = FontWeight.Bold)
                     }
                 }
         }
@@ -2275,26 +2275,65 @@ service cloud.firestore {
                         }
                     } else if (report != null) {
                         val r = report!!
+                        var showAllCloudDocs by remember { mutableStateOf(false) }
+                        val scanTimeStr = remember(r.scanTimestamp) {
+                            java.text.SimpleDateFormat("dd MMM yyyy, hh:mm a", java.util.Locale.getDefault()).apply {
+                                timeZone = java.util.TimeZone.getTimeZone("Asia/Kolkata")
+                            }.format(java.util.Date(r.scanTimestamp))
+                        }
+
                         Surface(
                             shape = RoundedCornerShape(8.dp),
                             color = WarmIvory,
                             modifier = Modifier.fillMaxWidth()
                         ) {
                             Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                                Text("तपासणी अहवाल:", fontWeight = FontWeight.Bold, fontSize = 13.sp, color = DeepEmerald)
-                                Text("• Directory: ${r.directoryCount} / Firestore: ${r.firestoreActiveCount} / Hidden: ${r.hiddenCount}", fontWeight = FontWeight.Bold, fontSize = 12.sp, color = DeepEmerald)
-                                if (r.hiddenReasonBreakdown.isNotEmpty()) {
-                                    r.hiddenReasonBreakdown.forEach { (reason, count) ->
-                                        Text("   - $reason: $count", fontSize = 11.sp, color = MutedCharcoal)
-                                    }
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Text("तपासणी अहवाल:", fontWeight = FontWeight.Bold, fontSize = 13.sp, color = DeepEmerald)
+                                    Text(scanTimeStr, fontSize = 10.sp, color = MutedCharcoal)
                                 }
+
+                                Text("• एकूण क्लाउड दस्तऐवज (Firestore Docs): ${r.totalFirestoreCount}", fontWeight = FontWeight.Bold, fontSize = 12.sp, color = DeepEmerald)
+                                Text("   - डायरेक्टरी मधील ग्राहक: ${r.directoryCount}", fontSize = 11.sp, color = DeepEmerald)
+                                Text("   - एकाच मोबाईलसाठी जुन्या आवृत्त्यांमधील अतिरिक्त नोंदी: ${r.duplicateCloudDocsCount}", fontSize = 11.sp, color = MutedCharcoal)
+                                if (r.archivedCloudDocsCount > 0) Text("   - अर्काईव्ह दस्तऐवज: ${r.archivedCloudDocsCount}", fontSize = 11.sp, color = MutedCharcoal)
+                                if (r.trashCloudDocsCount > 0) Text("   - ट्रॅश / हटवलेले दस्तऐवज: ${r.trashCloudDocsCount}", fontSize = 11.sp, color = MutedCharcoal)
+                                if (r.blankNameCloudDocsCount > 0) Text("   - नाव नसलेले दस्तऐवज: ${r.blankNameCloudDocsCount}", fontSize = 11.sp, color = MutedCharcoal)
+                                if (r.walkInCloudDocsCount > 0) Text("   - वॉक-इन दस्तऐवज: ${r.walkInCloudDocsCount}", fontSize = 11.sp, color = MutedCharcoal)
+                                Text("   = एकूण ताळमेळ: ${r.directoryCount + r.duplicateCloudDocsCount + r.archivedCloudDocsCount + r.trashCloudDocsCount + r.blankNameCloudDocsCount + r.walkInCloudDocsCount} / ${r.totalFirestoreCount} (तंतोतंत बरोबर)", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = BoutiqueSuccess)
+
                                 Text("• फोनमधील अर्काईव्ह ग्राहक: ${r.totalRoomArchived}", fontSize = 12.sp)
 
                                 if (r.orphanPaymentCount > 0) {
                                     Text("⚠️ अनधिकृत/ऑर्फन भरणा नोंदी (Orphan payments): ${r.orphanPaymentCount}", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = BoutiqueError)
-                                    r.orphanPaymentDetails.take(5).forEach { od ->
-                                        Text("   • $od", fontSize = 11.sp, color = BoutiqueError)
+                                    r.orphanPaymentsList.take(5).forEach { op ->
+                                        Row(
+                                            modifier = Modifier.fillMaxWidth().padding(vertical = 1.dp),
+                                            horizontalArrangement = Arrangement.SpaceBetween,
+                                            verticalAlignment = Alignment.CenterVertically
+                                        ) {
+                                            Text("   • ${op.customerName} - #${op.billNumber} (₹${op.amount})", fontSize = 11.sp, color = BoutiqueError, modifier = Modifier.weight(1f))
+                                            TextButton(
+                                                onClick = {
+                                                    coroutineScope.launch {
+                                                        CustomerDiagnosticManager.deleteOrphanTransaction(op.id)
+                                                        report = CustomerDiagnosticManager.runDiagnosticScan(context)
+                                                    }
+                                                },
+                                                contentPadding = PaddingValues(horizontal = 4.dp, vertical = 0.dp)
+                                            ) {
+                                                Text("हटवा", fontSize = 10.sp, color = BoutiqueError)
+                                            }
+                                        }
                                     }
+                                }
+
+                                if (r.phantomTransactionsCount > 0) {
+                                    Text("⚠️ हटवलेल्या बिलांशी जोडलेली उधारी: ${r.phantomTransactionsCount} नोंदी (दुरुस्ती केल्यास ट्रॅश होईल)", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = BoutiqueError)
                                 }
 
                                 if (r.erroneouslyArchivedCount > 0) {
@@ -2313,10 +2352,35 @@ service cloud.firestore {
                                     Text("⚠️ पुनरावलोकन आवश्यक नोंदी: ${r.needsReviewCount}", fontSize = 12.sp, color = BoutiqueError, fontWeight = FontWeight.Bold)
                                 }
                                 if (r.overpaidCustomersCount > 0) {
-                                    Text("⚠️ जास्त भरणा (data issue): ${r.overpaidCustomersCount}", fontSize = 12.sp, color = BoutiqueError, fontWeight = FontWeight.Bold)
+                                    Text("⚠️ जास्त भरणा (data issue): ${r.overpaidCustomersCount} ग्राहक", fontSize = 12.sp, color = BoutiqueError, fontWeight = FontWeight.Bold)
+                                    r.overpaidCustomersList.take(3).forEach { oc ->
+                                        Text("   • ${oc.name} (${oc.mobile}): ₹${String.format(java.util.Locale.US, "%.0f", oc.overpaidAmount)} जास्त - ${oc.reason}", fontSize = 11.sp, color = BoutiqueError)
+                                    }
                                 }
-                                if (r.erroneouslyArchivedCount == 0 && r.missingFromRoomCount == 0 && r.duplicateMobileCount == 0 && r.duplicateEventsCount == 0 && r.needsReviewCount == 0 && r.overpaidCustomersCount == 0) {
+                                if (r.erroneouslyArchivedCount == 0 && r.missingFromRoomCount == 0 && r.duplicateMobileCount == 0 && r.duplicateEventsCount == 0 && r.needsReviewCount == 0 && r.overpaidCustomersCount == 0 && r.phantomTransactionsCount == 0) {
                                     Text("✅ सर्व ग्राहक डेटा परिपूर्ण आणि सुसंगत आहे!", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = BoutiqueSuccess)
+                                }
+
+                                if (r.firestoreDocsList.isNotEmpty()) {
+                                    TextButton(
+                                        onClick = { showAllCloudDocs = !showAllCloudDocs },
+                                        contentPadding = PaddingValues(0.dp)
+                                    ) {
+                                        Text(if (showAllCloudDocs) "सर्व ${r.firestoreDocsList.size} क्लाउड दस्तऐवज लपवा ▲" else "सर्व ${r.firestoreDocsList.size} क्लाउड दस्तऐवज पहा ▼", fontSize = 11.sp, color = DeepEmerald)
+                                    }
+                                    if (showAllCloudDocs) {
+                                        Column(
+                                            modifier = Modifier
+                                                .fillMaxWidth()
+                                                .heightIn(max = 160.dp)
+                                                .verticalScroll(rememberScrollState()),
+                                            verticalArrangement = Arrangement.spacedBy(2.dp)
+                                        ) {
+                                            r.firestoreDocsList.forEach { cd ->
+                                                Text("• [${cd.classification}] ${cd.name} (${cd.mobile.ifBlank { "मोबाईल नाही" }}) - ID: ${cd.docId}", fontSize = 10.sp, color = MutedCharcoal)
+                                            }
+                                        }
+                                    }
                                 }
                             }
                         }
@@ -2355,7 +2419,7 @@ service cloud.firestore {
                             CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp, color = WarmWhite)
                             Spacer(modifier = Modifier.width(6.dp))
                         }
-                        Text("सुरक्षित दुरुस्ती करा (बॅकअपसह)", fontWeight = FontWeight.Bold)
+                        Text("सुरक्षित दुरुस्ती", fontWeight = FontWeight.Bold)
                     }
                 } else if (repairResult != null) {
                     Button(

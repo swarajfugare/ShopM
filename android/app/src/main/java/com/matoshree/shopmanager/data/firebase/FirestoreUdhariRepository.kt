@@ -676,14 +676,19 @@ class FirestoreUdhariRepository {
         return try {
             FirebaseManager.ensureAuthenticated()
             val isOnline = FirebaseManager.isNetworkAvailable()
+            val cleanId = transactionId.removePrefix("manual_").removePrefix("credit_").removePrefix("bill_").substringBefore("_")
+
             val txSnap = try {
-                if (isOnline) {
-                    kotlinx.coroutines.withTimeoutOrNull(800) {
-                        FirebaseManager.udhariTransactionsCollection().document(transactionId).get().await()
-                    } ?: FirebaseManager.udhariTransactionsCollection().document(transactionId).get(com.google.firebase.firestore.Source.CACHE).await()
-                } else {
-                    FirebaseManager.udhariTransactionsCollection().document(transactionId).get(com.google.firebase.firestore.Source.CACHE).await()
+                var doc = FirebaseManager.udhariTransactionsCollection().document(cleanId).get().await()
+                if (!doc.exists()) {
+                    val byGid = FirebaseManager.udhariTransactionsCollection().whereEqualTo("gid", transactionId).get().await()
+                    doc = byGid.documents.firstOrNull() ?: doc
                 }
+                if (!doc.exists()) {
+                    val byNum = FirebaseManager.udhariTransactionsCollection().whereEqualTo("billNumber", cleanId).get().await()
+                    doc = byNum.documents.firstOrNull() ?: doc
+                }
+                doc.takeIf { it.exists() }
             } catch (e: Exception) { null }
 
             if (txSnap == null || !txSnap.exists()) {

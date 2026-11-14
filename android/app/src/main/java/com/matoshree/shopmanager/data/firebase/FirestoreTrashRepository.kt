@@ -201,6 +201,33 @@ class FirestoreTrashRepository {
                         "updatedAt" to System.currentTimeMillis()
                     )
                 ).await()
+                try {
+                    val billDoc = FirebaseManager.billsCollection().document(item.docId).get().await()
+                    val bDto = billDoc.toObject(BillDto::class.java)
+                    val bNum = bDto?.billNumber ?: ""
+                    val txDocs = mutableListOf<com.google.firebase.firestore.DocumentSnapshot>()
+                    val txsByLinked = FirebaseManager.udhariTransactionsCollection().whereEqualTo("linkedBillGid", item.docId).get().await().documents
+                    txDocs.addAll(txsByLinked)
+                    if (bNum.isNotBlank()) {
+                        val txsByNum = FirebaseManager.udhariTransactionsCollection().whereEqualTo("billNumber", bNum).get().await().documents
+                        txDocs.addAll(txsByNum)
+                    }
+                    val distinctTxs = txDocs.distinctBy { it.id }
+                    if (distinctTxs.isNotEmpty()) {
+                        val batch = FirebaseManager.firestore.batch()
+                        distinctTxs.forEach { tDoc ->
+                            batch.update(tDoc.reference, mapOf(
+                                "status" to "ACTIVE",
+                                "isDeleted" to false,
+                                "deletedAt" to null,
+                                "updatedAt" to System.currentTimeMillis()
+                            ))
+                        }
+                        batch.commit().await()
+                    }
+                } catch (e: Exception) {
+                    Log.w(TAG, "Restore bill udhari txs note: ${e.message}")
+                }
             }
             "PAYMENT" -> {
                 FirebaseManager.udhariTransactionsCollection().document(item.docId).update(

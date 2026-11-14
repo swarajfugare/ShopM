@@ -163,8 +163,15 @@ class SaleViewModel(
             return Result.success(existing)
         }
 
+        val (canonicalDocId, canonicalGid) = com.matoshree.shopmanager.domain.model.IdGenerator.canonicalCustomerDocIdAndGid(
+            mobile = cleanMobile,
+            existingDocId = null,
+            existingGid = null
+        )
         val newCustomer = Customer(
             shopId = 1,
+            gid = canonicalGid,
+            docId = canonicalDocId,
             name = cleanName,
             mobile = cleanMobile,
             email = email?.trim()?.ifBlank { null },

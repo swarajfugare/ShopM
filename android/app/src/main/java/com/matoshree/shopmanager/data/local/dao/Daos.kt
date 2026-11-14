@@ -98,9 +98,15 @@ interface BillDao {
     @Query("SELECT * FROM bills WHERE isVoided = 0 ORDER BY id DESC LIMIT :limit")
     suspend fun getAllBillsDirect(limit: Int = 10000): List<BillWithItems>
 
-    @Transaction
-    @Query("SELECT * FROM bills WHERE billDate >= :startDate AND billDate <= :endDate")
+    @Query("SELECT * FROM bills WHERE billDate >= :startDate AND billDate <= :endDate AND isVoided = 0 ORDER BY billDate DESC, id DESC")
     suspend fun getBillsInDateRange(startDate: String, endDate: String): List<BillWithItems>
+
+    @Transaction
+    @Query("SELECT * FROM bills WHERE billDate >= :startDate AND billDate <= :endDate AND isVoided = 0 ORDER BY billDate DESC, id DESC")
+    fun getBillsInDateRangeFlow(startDate: String, endDate: String): Flow<List<BillWithItems>>
+
+    @Query("UPDATE bills SET paidAmount = :paid, pendingAmount = :pending, paymentStatus = :status WHERE id = :id OR (transactionUuid IS NOT NULL AND transactionUuid != '' AND transactionUuid = :uuid) OR (billNumber IS NOT NULL AND billNumber != '' AND billNumber = :billNumber)")
+    suspend fun updateBillPaymentAmounts(id: Long, uuid: String?, billNumber: String?, paid: Double, pending: Double, status: String)
 
     @Query("UPDATE bills SET isVoided = 1, paymentStatus = 'VOID', voidReason = :reason WHERE (:id > 0 AND (id = :id OR serverId = :id)) OR (transactionUuid IS NOT NULL AND transactionUuid != '' AND transactionUuid = :uuid) OR (billNumber IS NOT NULL AND billNumber != '' AND billNumber = :billNumber)")
     suspend fun voidBillComprehensive(id: Long, uuid: String?, billNumber: String?, reason: String)

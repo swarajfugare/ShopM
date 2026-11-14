@@ -17,24 +17,60 @@ import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
 
+data class FirestoreCustomerDocDiagnostic(
+    val docId: String,
+    val name: String,
+    val mobile: String,
+    val classification: String,
+    val status: String,
+    val detail: String = ""
+)
+
+data class OverpaidCustomerInfo(
+    val name: String,
+    val mobile: String,
+    val overpaidAmount: Double,
+    val reason: String
+)
+
+data class OrphanPaymentInfo(
+    val id: String,
+    val customerName: String,
+    val billNumber: String,
+    val amount: Double,
+    val date: String
+)
+
 data class CustomerDiagnosticReport(
+    val scanTimestamp: Long = System.currentTimeMillis(),
+    val totalFirestoreCount: Int = 0,
     val directoryCount: Int = 0,
+    val duplicateCloudDocsCount: Int = 0,
+    val archivedCloudDocsCount: Int = 0,
+    val trashCloudDocsCount: Int = 0,
+    val blankNameCloudDocsCount: Int = 0,
+    val walkInCloudDocsCount: Int = 0,
+    val otherCloudDocsCount: Int = 0,
     val firestoreActiveCount: Int = 0,
     val hiddenCount: Int = 0,
     val hiddenReasonBreakdown: Map<String, Int> = emptyMap(),
     val missingCustomerNames: List<String> = emptyList(),
     val orphanPaymentCount: Int = 0,
     val orphanPaymentDetails: List<String> = emptyList(),
-    val totalRoomActive: Int,
-    val totalRoomArchived: Int,
-    val totalFirestoreActive: Int,
-    val erroneouslyArchivedCount: Int,
-    val missingFromRoomCount: Int,
-    val duplicateMobileCount: Int,
+    val orphanPaymentsList: List<OrphanPaymentInfo> = emptyList(),
+    val totalRoomActive: Int = 0,
+    val totalRoomArchived: Int = 0,
+    val totalFirestoreActive: Int = 0,
+    val erroneouslyArchivedCount: Int = 0,
+    val missingFromRoomCount: Int = 0,
+    val duplicateMobileCount: Int = 0,
     val balanceMismatchCount: Int = 0,
     val duplicateEventsCount: Int = 0,
     val needsReviewCount: Int = 0,
     val overpaidCustomersCount: Int = 0,
+    val overpaidCustomersList: List<OverpaidCustomerInfo> = emptyList(),
+    val phantomTransactionsCount: Int = 0,
+    val firestoreDocsList: List<FirestoreCustomerDocDiagnostic> = emptyList(),
     val details: List<String> = emptyList()
 )
 
@@ -44,6 +80,7 @@ data class CustomerRepairResult(
     val deduplicatedCount: Int,
     val balancesSynchronizedCount: Int = 0,
     val duplicateTransactionsMarkedCount: Int = 0,
+    val phantomTransactionsCleanedCount: Int = 0,
     val backupPath: String,
     val message: String
 )
@@ -84,10 +121,89 @@ object CustomerDiagnosticManager {
         val missingCustNames = mutableListOf<String>()
         val details = mutableListOf<String>()
 
+        var totalFirestoreDocs = 0
+        var duplicateCloudDocsCount = 0
+        var archivedCloudDocsCount = 0
+        var trashCloudDocsCount = 0
+        var blankNameCloudDocsCount = 0
+        var walkInCloudDocsCount = 0
+        var directoryMatchedCloudDocsCount = 0
+        var otherCloudDocsCount = 0
+        val firestoreDocsList = mutableListOf<FirestoreCustomerDocDiagnostic>()
+
         try {
             if (FirebaseManager.isNetworkAvailable()) {
                 FirebaseManager.ensureAuthenticated()
                 val custSnap = FirebaseManager.customersCollection().get().await()
+                totalFirestoreDocs = custSnap.documents.size
+
+                val seenCloudMobiles = mutableSetOf<String>()
+                val seenCloudNames = mutableSetOf<String>()
+
+                for (doc in custSnap.documents) {
+                    val dto = doc.toObject(CustomerDto::class.java)
+                    val docId = doc.id
+                    val name = dto?.name?.trim() ?: ""
+                    val mobile = dto?.mobile?.trim() ?: ""
+                    val cleanMob = PhoneUtils.clean10DigitMobileInput(mobile)
+                    val status = dto?.status ?: "ACTIVE"
+                    val isDeleted = status == "TRASH" || dto?.deletedAt != null
+
+                    val classification: String
+                    val detailMsg: String
+
+                    when {
+                        isDeleted || status == "TRASH" -> {
+                            trashCloudDocsCount++
+                            classification = "TRASH"
+                            detailMsg = "कचरा / वगळलेले खाते"
+                        }
+                        status == "ARCHIVED" -> {
+                            archivedCloudDocsCount++
+                            classification = "ARCHIVED"
+                            detailMsg = "अर्काईव्ह केलेले खाते"
+                        }
+                        name.isBlank() -> {
+                            blankNameCloudDocsCount++
+                            classification = "BLANK_NAME"
+                            detailMsg = "नाव रिकामे असलेली नोंद"
+                        }
+                        name.equals("Walk-in", ignoreCase = true) || name.equals("थेट कस्टमर", ignoreCase = true) -> {
+                            walkInCloudDocsCount++
+                            classification = "WALK_IN"
+                            detailMsg = "थेट विक्री / वॉक-इन खाते"
+                        }
+                        cleanMob.length == 10 && seenCloudMobiles.contains(cleanMob) -> {
+                            duplicateCloudDocsCount++
+                            classification = "DUPLICATE_DOC"
+                            detailMsg = "मोबाईल $cleanMob साठी जुनी/अतिरिक्त क्लाउड नोंद"
+                        }
+                        cleanMob.length != 10 && name.isNotBlank() && seenCloudNames.contains(name.lowercase()) -> {
+                            duplicateCloudDocsCount++
+                            classification = "DUPLICATE_DOC"
+                            detailMsg = "नाव $name साठी जुनी/अतिरिक्त क्लाउड नोंद"
+                        }
+                        else -> {
+                            if (cleanMob.length == 10) seenCloudMobiles.add(cleanMob)
+                            else if (name.isNotBlank()) seenCloudNames.add(name.lowercase())
+                            directoryMatchedCloudDocsCount++
+                            classification = "DIRECTORY"
+                            detailMsg = "डायरेक्टरी मधील प्राथमिक खाते"
+                        }
+                    }
+
+                    firestoreDocsList.add(
+                        FirestoreCustomerDocDiagnostic(
+                            docId = docId,
+                            name = name,
+                            mobile = mobile,
+                            classification = classification,
+                            status = status,
+                            detail = detailMsg
+                        )
+                    )
+                }
+
                 val cloudCusts = custSnap.documents.mapNotNull { doc ->
                     doc.toObject(CustomerDto::class.java)?.apply { id = doc.id }
                 }.filter { it.status != "ARCHIVED" && it.status != "TRASH" }
@@ -143,12 +259,22 @@ object CustomerDiagnosticManager {
             val keyResolver = com.matoshree.shopmanager.domain.usecase.UdhariLedger.buildCustomerKeyResolver(domainCusts, allBills, txs)
 
             var overpaidCount = 0
+            val overpaidList = mutableListOf<OverpaidCustomerInfo>()
             for (c in roomActive) {
-                val key = keyResolver(c.mobile, c.name, c.id) ?: "cust_${c.id}"
+                val key = keyResolver(c.gid, c.mobile, c.name, c.id) ?: (c.gid.ifBlank { "cust_${c.id}" })
                 val verifiedBalance = shopLedger.customerResults[key]?.balance ?: 0.0
                 if (verifiedBalance < -0.01) {
                     overpaidCount++
-                    details.add("जास्त भरणा (data issue): ${c.name} (जास्त: ₹${String.format(java.util.Locale.US, "%.0f", Math.abs(verifiedBalance))})")
+                    val overpaidAmt = Math.abs(verifiedBalance)
+                    overpaidList.add(
+                        OverpaidCustomerInfo(
+                            name = c.name,
+                            mobile = c.mobile,
+                            overpaidAmount = overpaidAmt,
+                            reason = "एकूण बिलांपेक्षा ₹${String.format(java.util.Locale.US, "%.0f", overpaidAmt)} जादा भरणा नोंदवला गेला आहे"
+                        )
+                    )
+                    details.add("जास्त भरणा (data issue): ${c.name} (जास्त: ₹${String.format(java.util.Locale.US, "%.0f", overpaidAmt)})")
                 } else if (Math.abs(c.outstandingBalance - verifiedBalance) > 0.5) {
                     balanceMismatchCount++
                     details.add("उधारी तफावत: ${c.name} (नोंद: ₹${String.format(java.util.Locale.US, "%.0f", c.outstandingBalance)} -> खरी बाकी: ₹${String.format(java.util.Locale.US, "%.0f", verifiedBalance)})")
@@ -177,6 +303,28 @@ object CustomerDiagnosticManager {
                 }
             }
 
+            // Check for phantom transactions referencing deleted bills
+            var phantomTransactionsCount = 0
+            val phantomTxDetails = mutableListOf<String>()
+            for (t in txs) {
+                if (t.type == com.matoshree.shopmanager.domain.model.UdhariTransactionType.PURCHASE_CREDIT && !t.isReversed && t.status != "TRASH" && t.status != "DUPLICATE") {
+                    val hasMatchingActiveBill = allBills.any { b ->
+                        !b.isVoided && (
+                            (!t.billGid.isNullOrBlank() && b.gid == t.billGid) ||
+                            (t.billNumber.isNotBlank() && b.billNumber == t.billNumber) ||
+                            (t.billId > 0 && b.id == t.billId)
+                        )
+                    }
+                    if (!hasMatchingActiveBill && (t.billNumber.isNotBlank() || t.billId > 0 || !t.billGid.isNullOrBlank())) {
+                        phantomTransactionsCount++
+                        phantomTxDetails.add("${t.customerName} - #${t.billNumber} • ₹${t.amount}")
+                    }
+                }
+            }
+            if (phantomTransactionsCount > 0) {
+                details.add("⚠️ हटवलेल्या बिलाशी जोडलेली उधारी: $phantomTransactionsCount नोंदी")
+            }
+
             val reviewNeeded = db.customerDao().getReviewNeededCustomers()
             val needsReviewCount = reviewNeeded.size
             if (needsReviewCount > 0) {
@@ -188,18 +336,36 @@ object CustomerDiagnosticManager {
             val orphanTxs = shopLedger.allOrphanPayments
             val orphanCount = orphanTxs.size
             val orphanDetails = orphanTxs.map { "${it.customerName} - बिल #${it.billNumber.ifBlank { it.billId.toString() }} • ₹${it.amount} (${it.date})" }
+            val orphanInfos = orphanTxs.map {
+                OrphanPaymentInfo(
+                    id = it.id,
+                    customerName = it.customerName,
+                    billNumber = it.billNumber.ifBlank { it.billId.toString() },
+                    amount = it.amount,
+                    date = it.date
+                )
+            }
             if (orphanCount > 0) {
                 details.add("⚠️ अनधिकृत/ऑर्फन भरणा नोंदी: $orphanCount")
             }
 
             return@withContext CustomerDiagnosticReport(
+                scanTimestamp = System.currentTimeMillis(),
+                totalFirestoreCount = totalFirestoreDocs,
                 directoryCount = directoryCount,
+                duplicateCloudDocsCount = duplicateCloudDocsCount,
+                archivedCloudDocsCount = archivedCloudDocsCount,
+                trashCloudDocsCount = trashCloudDocsCount,
+                blankNameCloudDocsCount = blankNameCloudDocsCount,
+                walkInCloudDocsCount = walkInCloudDocsCount,
+                otherCloudDocsCount = otherCloudDocsCount,
                 firestoreActiveCount = firestoreActiveCount,
                 hiddenCount = totalHidden,
                 hiddenReasonBreakdown = hiddenReasons,
                 missingCustomerNames = missingCustNames,
                 orphanPaymentCount = orphanCount,
                 orphanPaymentDetails = orphanDetails,
+                orphanPaymentsList = orphanInfos,
                 totalRoomActive = roomActive.size,
                 totalRoomArchived = roomArchived.size,
                 totalFirestoreActive = firestoreActiveCount,
@@ -210,6 +376,9 @@ object CustomerDiagnosticManager {
                 duplicateEventsCount = duplicateEventsCount,
                 needsReviewCount = needsReviewCount,
                 overpaidCustomersCount = overpaidCount,
+                overpaidCustomersList = overpaidList,
+                phantomTransactionsCount = phantomTransactionsCount,
+                firestoreDocsList = firestoreDocsList,
                 details = details.take(30)
             )
         } catch (e: Exception) {
@@ -220,13 +389,22 @@ object CustomerDiagnosticManager {
         val needsReviewCount = reviewNeeded.size
 
         CustomerDiagnosticReport(
+            scanTimestamp = System.currentTimeMillis(),
+            totalFirestoreCount = totalFirestoreDocs,
             directoryCount = directoryCount,
+            duplicateCloudDocsCount = duplicateCloudDocsCount,
+            archivedCloudDocsCount = archivedCloudDocsCount,
+            trashCloudDocsCount = trashCloudDocsCount,
+            blankNameCloudDocsCount = blankNameCloudDocsCount,
+            walkInCloudDocsCount = walkInCloudDocsCount,
+            otherCloudDocsCount = otherCloudDocsCount,
             firestoreActiveCount = firestoreActiveCount,
             hiddenCount = totalHidden,
             hiddenReasonBreakdown = hiddenReasons,
             missingCustomerNames = missingCustNames,
             orphanPaymentCount = 0,
             orphanPaymentDetails = emptyList(),
+            orphanPaymentsList = emptyList(),
             totalRoomActive = roomActive.size,
             totalRoomArchived = roomArchived.size,
             totalFirestoreActive = firestoreActiveCount,
@@ -236,8 +414,27 @@ object CustomerDiagnosticManager {
             balanceMismatchCount = balanceMismatchCount,
             duplicateEventsCount = 0,
             needsReviewCount = needsReviewCount,
+            overpaidCustomersCount = 0,
+            overpaidCustomersList = emptyList(),
+            phantomTransactionsCount = 0,
+            firestoreDocsList = firestoreDocsList,
             details = details.take(30)
         )
+    }
+
+    suspend fun deleteOrphanTransaction(txId: String): Boolean = withContext(Dispatchers.IO) {
+        try {
+            if (FirebaseManager.isNetworkAvailable()) {
+                FirebaseManager.ensureAuthenticated()
+                FirebaseManager.udhariTransactionsCollection().document(txId)
+                    .update(mapOf("status" to "TRASH", "isDeleted" to true))
+                    .await()
+                true
+            } else false
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to delete orphan tx $txId: ${e.message}", e)
+            false
+        }
     }
 
     suspend fun performSafeRepair(context: Context): CustomerRepairResult = withContext(Dispatchers.IO) {
@@ -257,6 +454,7 @@ object CustomerDiagnosticManager {
                 val obj = JSONObject()
                 obj.put("id", c.id)
                 obj.put("serverId", c.serverId)
+                obj.put("gid", c.gid)
                 obj.put("name", c.name)
                 obj.put("mobile", c.mobile)
                 obj.put("address", c.address)
@@ -310,10 +508,9 @@ object CustomerDiagnosticManager {
             Log.e(TAG, "Repair cloud pass failed: ${e.message}", e)
         }
 
-        // 3. Reconcile customer identities (no rows deleted, all given canonical docId/gid)
         var deduplicatedCount = 0
 
-        // 4. Synchronize customer balances with single authoritative ledger
+        // 3. Synchronize customer balances with single authoritative ledger
         var balancesSynchronizedCount = 0
         try {
             val allBills = db.billDao().getAllBillsDirect(50000).map { it.toDomain() }
@@ -341,7 +538,7 @@ object CustomerDiagnosticManager {
             Log.w(TAG, "Balance repair note: ${e.message}")
         }
 
-        // 5. Mark duplicate transactions in Firestore with status = DUPLICATE (restorable, excluded from ledger)
+        // 4. Mark duplicate transactions in Firestore with status = DUPLICATE
         var duplicateTransactionsMarkedCount = 0
         try {
             if (FirebaseManager.isNetworkAvailable()) {
@@ -366,14 +563,43 @@ object CustomerDiagnosticManager {
             Log.w(TAG, "Duplicate transaction mark note: ${e.message}")
         }
 
+        // 5. Cascade soft-delete phantom udhari transactions whose bill was deleted/voided
+        var phantomTransactionsCleanedCount = 0
+        try {
+            if (FirebaseManager.isNetworkAvailable()) {
+                val allBillsWithItems = db.billDao().getAllBillsDirect(50000)
+                val activeBills = allBillsWithItems.map { it.toDomain() }.filter { !it.isVoided }
+                val rawTxs = FirebaseManager.udhariTransactionsCollection().limit(2000).get().await()
+                for (doc in rawTxs.documents) {
+                    val dto = doc.toObject(com.matoshree.shopmanager.data.firebase.UdhariTransactionDto::class.java) ?: continue
+                    if (dto.type == "PURCHASE_CREDIT" && !dto.isReversed && dto.status != "TRASH" && dto.status != "DUPLICATE") {
+                        val hasActive = activeBills.any { b ->
+                            (!dto.billGid.isNullOrBlank() && b.gid == dto.billGid) ||
+                            (!dto.billNumber.isNullOrBlank() && b.billNumber == dto.billNumber) ||
+                            (dto.billId != null && dto.billId > 0 && b.id == dto.billId)
+                        }
+                        if (!hasActive && (!dto.billNumber.isNullOrBlank() || (dto.billId != null && dto.billId > 0) || !dto.billGid.isNullOrBlank())) {
+                            FirebaseManager.udhariTransactionsCollection().document(doc.id)
+                                .update(mapOf("status" to "TRASH", "isDeleted" to true))
+                                .await()
+                            phantomTransactionsCleanedCount++
+                        }
+                    }
+                }
+            }
+        } catch (e: Exception) {
+            Log.w(TAG, "Phantom transaction cleanup note: ${e.message}")
+        }
+
         CustomerRepairResult(
             reactivatedCount = reactivatedCount,
             importedCount = importedCount,
             deduplicatedCount = deduplicatedCount,
             balancesSynchronizedCount = balancesSynchronizedCount,
             duplicateTransactionsMarkedCount = duplicateTransactionsMarkedCount,
+            phantomTransactionsCleanedCount = phantomTransactionsCleanedCount,
             backupPath = backupFile.absolutePath,
-            message = "दुरुस्ती यशस्वी: $reactivatedCount ग्राहक पुन्हा सक्रिय केले, $importedCount ग्राहक क्लाउडवरून आणले, $deduplicatedCount डुप्लिकेट नोंदी हटवल्या, $duplicateTransactionsMarkedCount डुप्लिकेट ट्रॅन्झॅक्शन्स मार्क केले, $balancesSynchronizedCount खाती अचूक ताळमेळ केली."
+            message = "दुरुस्ती यशस्वी: $reactivatedCount ग्राहक पुन्हा सक्रिय केले, $importedCount ग्राहक क्लाउडवरून आणले, $phantomTransactionsCleanedCount हटवलेल्या बिलांच्या उधारी नोंदी साफ केल्या, $duplicateTransactionsMarkedCount डुप्लिकेट ट्रॅन्झॅक्शन्स मार्क केले, $balancesSynchronizedCount खाती अचूक ताळमेळ केली."
         )
     }
 }

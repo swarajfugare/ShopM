@@ -88,7 +88,7 @@ fun AppNavGraph(
     val lazyClosingViewModel = remember { lazy { DailyClosingViewModel(billRepository, dailyClosingRepository, udhariRepository, expenseRepository) } }
     fun getClosingViewModel(): DailyClosingViewModel = lazyClosingViewModel.value
 
-    val lazyAnalyticsViewModel = remember { lazy { AnalyticsViewModel(billRepository, customerRepository, productRepository, expenseRepository, dailyClosingRepository) } }
+    val lazyAnalyticsViewModel = remember { lazy { AnalyticsViewModel(billRepository, customerRepository, productRepository, expenseRepository, dailyClosingRepository, udhariRepository) } }
     fun getAnalyticsViewModel(): AnalyticsViewModel = lazyAnalyticsViewModel.value
 
     val lazyInventoryViewModel = remember { lazy { com.matoshree.shopmanager.ui.screens.inventory.InventoryViewModel(productRepository) } }

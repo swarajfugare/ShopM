@@ -15,6 +15,7 @@ import kotlinx.coroutines.flow.callbackFlow
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.channels.awaitClose
+import kotlinx.coroutines.tasks.await
 import kotlinx.coroutines.launch
 import java.util.UUID
 
@@ -605,6 +606,49 @@ class BillRepository(
         }
         val targetLocalId = localBill?.bill?.id ?: billId
         database?.billDao()?.voidBillComprehensive(targetLocalId, targetUuid, targetBillNumber, reason)
+    }
+
+    suspend fun recomputeStoredBillValuesFromLedger(transactions: List<UdhariTransaction> = emptyList()): Int {
+        val db = database ?: return 0
+        val allBillsWithItems = db.billDao().getAllBillsDirect(50000)
+        val allBills = allBillsWithItems.map { it.toDomain() }
+        val allCusts = db.customerDao().getAllCustomersDirect().map { it.toDomain() }
+        val allTxs = if (transactions.isNotEmpty()) {
+            transactions
+        } else {
+            try {
+                if (FirebaseManager.isNetworkAvailable()) {
+                    FirebaseManager.ensureAuthenticated()
+                    val snap = FirebaseManager.udhariTransactionsCollection().limit(3000).get().await()
+                    snap.documents.mapNotNull { doc ->
+                        doc.toObject(UdhariTransactionDto::class.java)?.apply { id = doc.id }?.toDomain()
+                    }
+                } else emptyList()
+            } catch (e: Exception) {
+                emptyList()
+            }
+        }
+
+        val shopLedger = com.matoshree.shopmanager.domain.usecase.UdhariLedger.computeShopLedger(allBills, allTxs, allCusts)
+        var updatedCount = 0
+
+        for (b in allBills) {
+            val key = com.matoshree.shopmanager.domain.usecase.UdhariLedger.resolveCustomerKey(b.customerGid, b.customerMobile, b.customerName, b.customerId)
+            val custResult = shopLedger.customerResults[key]
+            val breakdown = custResult?.billBreakdowns?.find { it.billId == b.id || (it.billNumber.isNotBlank() && it.billNumber == b.billNumber) }
+
+            if (breakdown != null) {
+                val newPaid = breakdown.checkoutPaid + breakdown.directPayments + breakdown.fifoPayments
+                val newPending = breakdown.remainingOutstanding
+                val newStatus = if (newPending <= 0.01) PaymentStatus.PAID.name else if (newPaid > 0.01) PaymentStatus.PARTIAL.name else PaymentStatus.PENDING.name
+
+                if (Math.abs(b.pendingAmount - newPending) > 0.01 || Math.abs(b.paidAmount - newPaid) > 0.01 || b.paymentStatus.name != newStatus) {
+                    db.billDao().updateBillPaymentAmounts(b.id, b.transactionUuid, b.billNumber, newPaid, newPending, newStatus)
+                    updatedCount++
+                }
+            }
+        }
+        return updatedCount
     }
 }
 

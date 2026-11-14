@@ -103,6 +103,8 @@ class CustomerViewModel(
     val customerOutstandingDue = MutableStateFlow<Double>(0.0)
     val customerBillStats = MutableStateFlow<Map<String, Pair<Int, Double>>>(emptyMap())
     val customerCalculationBreakdown = MutableStateFlow(com.matoshree.shopmanager.domain.usecase.CustomerCalculationBreakdown())
+    val customerBillBreakdowns = MutableStateFlow<List<com.matoshree.shopmanager.domain.usecase.BillLedgerBreakdown>>(emptyList())
+    val customerOrphanTransactions = MutableStateFlow<List<UdhariTransaction>>(emptyList())
     val shopSettings = MutableStateFlow(PrintShareHelper.ShopSettingsSnapshot())
     private val syncedCustomerIds = mutableSetOf<Long>()
 
@@ -220,6 +222,8 @@ class CustomerViewModel(
                     allTransactions = txs,
                     allCustomers = allCustomers
                 )
+                customerBillBreakdowns.value = ledgerResult.billBreakdowns
+                customerOrphanTransactions.value = ledgerResult.orphanTransactions
 
                 val customerSpecificBills = allBills.filter { b ->
                     !b.isVoided && b.paymentStatus != PaymentStatus.VOID &&
@@ -554,7 +558,7 @@ class CustomerViewModel(
                     targetId = existing.id
                 }
             } else if (existing == null) {
-                // Check if customer was deleted or archived - automatically revive them with clean slate!
+                // Check if customer was deleted or archived - revive them safely WITHOUT purging history!
                 val anyExisting = try {
                     customerRepository.findAnyCustomerByMobile(cleanMobile)
                 } catch (e: Exception) {
@@ -562,17 +566,20 @@ class CustomerViewModel(
                 }
                 if (anyExisting != null && (!anyExisting.isActive || anyExisting.id != existingId)) {
                     targetId = anyExisting.id
-                    try {
-                        customerRepository.purgeCustomerHistory(targetId, cleanMobile, cleanName)
-                    } catch (e: Exception) {
-                        android.util.Log.w("CustomerVM", "Purge history on revive note: ${e.message}")
-                    }
                 }
             }
         }
 
+        val (canonicalDocId, canonicalGid) = com.matoshree.shopmanager.domain.model.IdGenerator.canonicalCustomerDocIdAndGid(
+            mobile = cleanMobile,
+            existingDocId = null,
+            existingGid = null
+        )
+
         val custToSave = Customer(
             id = targetId,
+            gid = canonicalGid,
+            docId = canonicalDocId,
             shopId = 1,
             name = cleanName,
             mobile = cleanMobile,
@@ -586,16 +593,11 @@ class CustomerViewModel(
 
         return try {
             val id = customerRepository.saveCustomer(custToSave)
-            val updatedCust = custToSave.copy(id = id)
-            val targetKey = updatedCust.canonicalKey()
-            _customers.value = (_customers.value.filterNot { it.canonicalKey() == targetKey } + updatedCust).sortedBy { it.name }
+            // DO NOT manually mutate _customers.value! Room Flow is the SINGLE SOURCE OF TRUTH.
+            // When saveCustomer inserts/updates Room, observeCustomers() immediately emits the unified, de-duplicated list.
             if (targetId > 0 && selectedCustomerProfile.value?.id == targetId) {
+                val updatedCust = custToSave.copy(id = id)
                 selectedCustomerProfile.value = updatedCust
-                customerBills.value = emptyList()
-                customerTransactions.value = emptyList()
-                customerAllPayments.value = emptyList()
-                customerKhatavahi.value = emptyList()
-                customerOutstandingDue.value = 0.0
             }
             Result.success(id)
         } catch (e: Exception) {
@@ -610,9 +612,14 @@ class CustomerViewModel(
         paymentMethod: PaymentMethod,
         note: String? = null
     ): Result<UdhariTransaction> {
+        if (customerOutstandingDue.value > 0.01 && amount > customerOutstandingDue.value + 0.01) {
+            return Result.failure(
+                IllegalArgumentException("भरणा रक्कम बाकी उधारीपेक्षा जास्त असू शकत नाही. चालू बाकी: ₹${CurrencyFormatter.format(customerOutstandingDue.value)}")
+            )
+        }
+        val safeAmount = amount
         val bills = customerBills.value.filter { !it.isVoided && it.paymentStatus != PaymentStatus.PAID }.sortedBy { it.billDate }
         val targetBill = bills.firstOrNull()
-        val safeAmount = if (customerOutstandingDue.value > 0.0) amount.coerceIn(0.01, customerOutstandingDue.value) else amount.coerceAtLeast(0.01)
 
         val billNumberSummary = when {
             bills.size > 1 -> "MULTI-BILL (${bills.size} बिले)"
@@ -1364,6 +1371,8 @@ fun CustomerProfileScreen(
     val allPayments by viewModel.customerAllPayments.collectAsState()
     val khatavahiEntries by viewModel.customerKhatavahi.collectAsState()
     val outstandingDue by viewModel.customerOutstandingDue.collectAsState()
+    val billBreakdowns by viewModel.customerBillBreakdowns.collectAsState()
+    val orphanTransactions by viewModel.customerOrphanTransactions.collectAsState()
     val shopSettings by viewModel.shopSettings.collectAsState()
 
     var showManualUdhariDialog by remember { mutableStateOf(false) }
@@ -1584,11 +1593,15 @@ fun CustomerProfileScreen(
                                         horizontalArrangement = Arrangement.spacedBy(12.dp)
                                     ) {
                                         Box(modifier = Modifier.weight(1f)) {
-                                            CustomerBillCardItem(bill = pair[0], onBillClick = onBillClick)
+                                            val b1 = pair[0]
+                                            val bd1 = billBreakdowns.find { it.billId == b1.id || (it.billNumber.isNotBlank() && it.billNumber == b1.billNumber) }
+                                            CustomerBillCardItem(bill = b1, billBreakdown = bd1, onBillClick = onBillClick)
                                         }
                                         if (pair.size > 1) {
                                             Box(modifier = Modifier.weight(1f)) {
-                                                CustomerBillCardItem(bill = pair[1], onBillClick = onBillClick)
+                                                val b2 = pair[1]
+                                                val bd2 = billBreakdowns.find { it.billId == b2.id || (it.billNumber.isNotBlank() && it.billNumber == b2.billNumber) }
+                                                CustomerBillCardItem(bill = b2, billBreakdown = bd2, onBillClick = onBillClick)
                                             }
                                         } else {
                                             Spacer(modifier = Modifier.weight(1f))
@@ -1597,7 +1610,8 @@ fun CustomerProfileScreen(
                                 }
                             } else {
                                 items(bills, key = { bill -> "bill_${bill.id}_${bill.transactionUuid}" }) { bill ->
-                                    CustomerBillCardItem(bill = bill, onBillClick = onBillClick)
+                                    val bd = billBreakdowns.find { it.billId == bill.id || (it.billNumber.isNotBlank() && it.billNumber == bill.billNumber) }
+                                    CustomerBillCardItem(bill = bill, billBreakdown = bd, onBillClick = onBillClick)
                                 }
                             }
                         }
@@ -1755,6 +1769,71 @@ fun CustomerProfileScreen(
                                     Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                                         Text("बाकी उधारी (Net Due):", fontWeight = FontWeight.Bold, color = DeepEmerald)
                                         Text(CurrencyFormatter.format(calc.netDue), fontWeight = FontWeight.Bold, color = if (calc.netDue > 0.01) BoutiqueError else BoutiqueSuccess, fontSize = 16.sp)
+                                    }
+                                }
+                            }
+                        }
+
+                        if (orphanTransactions.isNotEmpty()) {
+                            item {
+                                Surface(
+                                    shape = RoundedCornerShape(12.dp),
+                                    color = BoutiqueError.copy(alpha = 0.05f),
+                                    border = BorderStroke(1.dp, BoutiqueError.copy(alpha = 0.3f)),
+                                    modifier = Modifier.fillMaxWidth()
+                                ) {
+                                    Column(
+                                        modifier = Modifier.padding(12.dp),
+                                        verticalArrangement = Arrangement.spacedBy(6.dp)
+                                    ) {
+                                        Row(verticalAlignment = Alignment.CenterVertically) {
+                                            Icon(Icons.Default.Warning, contentDescription = null, tint = BoutiqueError, modifier = Modifier.size(16.dp))
+                                            Spacer(modifier = Modifier.width(6.dp))
+                                            Text("संदर्भ बिल उपलब्ध नसलेल्या नोंदी (${orphanTransactions.size})", fontWeight = FontWeight.Bold, fontSize = 13.sp, color = BoutiqueError)
+                                        }
+                                        Text(
+                                            "या नोंदी ज्या बिलांशी जोडलेल्या होत्या ते बिल फोनमध्ये उपलब्ध नाही (उदा. हटवलेले बिल). या नोंदी चालू उधारीतून सुरक्षितपणे वगळल्या आहेत.",
+                                            style = MaterialTheme.typography.bodySmall.copy(color = MutedCharcoal)
+                                        )
+                                        HorizontalDivider(color = OutlineVariantGrey.copy(alpha = 0.2f))
+                                        for (ot in orphanTransactions) {
+                                            Row(
+                                                modifier = Modifier.fillMaxWidth().padding(vertical = 2.dp),
+                                                horizontalArrangement = Arrangement.SpaceBetween,
+                                                verticalAlignment = Alignment.CenterVertically
+                                            ) {
+                                                Column(modifier = Modifier.weight(1f)) {
+                                                    Text(
+                                                        if (ot.type == UdhariTransactionType.PURCHASE_CREDIT) "उधारी: #${ot.billNumber}" else "भरणा: #${ot.billNumber}",
+                                                        fontWeight = FontWeight.SemiBold,
+                                                        fontSize = 12.sp
+                                                    )
+                                                    Text(ot.date, style = MaterialTheme.typography.bodySmall.copy(color = MutedCharcoal, fontSize = 11.sp))
+                                                }
+                                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                                    Text(
+                                                        CurrencyFormatter.format(ot.amount),
+                                                        fontWeight = FontWeight.Bold,
+                                                        fontSize = 13.sp,
+                                                        color = if (ot.type == UdhariTransactionType.PURCHASE_CREDIT) BoutiqueError else BoutiqueSuccess
+                                                    )
+                                                    Spacer(modifier = Modifier.width(8.dp))
+                                                    TextButton(
+                                                        onClick = {
+                                                            coroutineScope.launch {
+                                                                val res = viewModel.deleteOrReverseManualUdhari(ot.id)
+                                                                if (res.isSuccess) {
+                                                                    Toast.makeText(context, "नोंद हटवली", Toast.LENGTH_SHORT).show()
+                                                                }
+                                                            }
+                                                        },
+                                                        contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp)
+                                                    ) {
+                                                        Text("हटवा", color = BoutiqueError, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                                                    }
+                                                }
+                                            }
+                                        }
                                     }
                                 }
                             }
@@ -2164,41 +2243,90 @@ fun CustomerProfileScreen(
                         Text("भरणा जमा", fontWeight = FontWeight.Bold)
                     }
 
-                    // Action 3: Edit or Delete
-                    if (!isBillLinked) {
-                        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                            OutlinedButton(
-                                onClick = {
-                                    val tx = entry.transaction
-                                    selectedLedgerEntryForAction = null
-                                    if (tx != null) {
-                                        selectedUdhariForAction = tx
+                    // Action 3: Edit or Delete / Actions based on type
+                    if (isBillLinked && matchingBill == null) {
+                        // Orphan/Ghost row referencing a deleted bill
+                        Surface(
+                            color = BoutiqueError.copy(alpha = 0.08f),
+                            shape = RoundedCornerShape(6.dp),
+                            modifier = Modifier.fillMaxWidth().padding(vertical = 2.dp)
+                        ) {
+                            Text(
+                                text = "⚠️ संदर्भ बिल उपलब्ध नाही (हटवलेले बिल)",
+                                color = BoutiqueError,
+                                fontSize = 12.sp,
+                                modifier = Modifier.padding(8.dp),
+                                fontWeight = FontWeight.SemiBold
+                            )
+                        }
+                        Button(
+                            onClick = {
+                                val txId = entry.transaction?.id ?: entry.id.removePrefix("bill_").removePrefix("manual_").substringBefore("_")
+                                selectedLedgerEntryForAction = null
+                                coroutineScope.launch {
+                                    val res = viewModel.deleteOrReverseManualUdhari(txId)
+                                    if (res.isSuccess) {
+                                        Toast.makeText(context, "उधारी नोंद हटवली", Toast.LENGTH_SHORT).show()
+                                    } else {
+                                        Toast.makeText(context, res.exceptionOrNull()?.message ?: "त्रुटी आली", Toast.LENGTH_SHORT).show()
                                     }
-                                },
-                                shape = RoundedCornerShape(8.dp),
-                                modifier = Modifier.weight(1f).height(42.dp)
-                            ) {
-                                Text("बदला", fontWeight = FontWeight.Bold, color = DeepEmerald)
-                            }
-
-                            Button(
-                                onClick = {
-                                    val txId = entry.transaction?.id ?: entry.id.removePrefix("manual_").substringBefore("_")
-                                    selectedLedgerEntryForAction = null
-                                    coroutineScope.launch {
-                                        val res = viewModel.deleteOrReverseManualUdhari(txId)
-                                        if (res.isSuccess) {
-                                            Toast.makeText(context, "उधारी नोंद हटवली", Toast.LENGTH_SHORT).show()
-                                        } else {
-                                            Toast.makeText(context, res.exceptionOrNull()?.message ?: "त्रुटी आली", Toast.LENGTH_SHORT).show()
+                                }
+                            },
+                            shape = RoundedCornerShape(8.dp),
+                            colors = ButtonDefaults.buttonColors(containerColor = BoutiqueError),
+                            modifier = Modifier.fillMaxWidth().height(42.dp)
+                        ) {
+                            Icon(Icons.Default.Delete, contentDescription = null, modifier = Modifier.size(16.dp))
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text("हटवा", fontWeight = FontWeight.Bold)
+                        }
+                    } else if (isBillLinked && matchingBill != null) {
+                        Text(
+                            text = "💡 हे बिल-संबंधित उधारी आहे. रद्द करण्यासाठी 'बिल पहा' वर जाऊन बिल रद्द करा.",
+                            style = MaterialTheme.typography.bodySmall.copy(color = MutedCharcoal)
+                        )
+                    } else {
+                        val hasPayments = (entry.creditAmount > 0.01) || (entry.debitAmount < (entry.transaction?.amount ?: 0.0) - 0.01)
+                        if (hasPayments) {
+                            Text(
+                                text = "या उधारीवर भरणा झालेला आहे. बदलण्यासाठी/हटवण्यासाठी प्रथम भरणा रद्द करा.",
+                                style = MaterialTheme.typography.bodySmall.copy(color = BoutiqueError)
+                            )
+                        } else {
+                            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                OutlinedButton(
+                                    onClick = {
+                                        val tx = entry.transaction
+                                        selectedLedgerEntryForAction = null
+                                        if (tx != null) {
+                                            selectedUdhariForAction = tx
                                         }
-                                    }
-                                },
-                                shape = RoundedCornerShape(8.dp),
-                                colors = ButtonDefaults.buttonColors(containerColor = BoutiqueError),
-                                modifier = Modifier.weight(1f).height(42.dp)
-                            ) {
-                                Text("हटवा", fontWeight = FontWeight.Bold)
+                                    },
+                                    shape = RoundedCornerShape(8.dp),
+                                    modifier = Modifier.weight(1f).height(42.dp)
+                                ) {
+                                    Text("बदला", fontWeight = FontWeight.Bold, color = DeepEmerald)
+                                }
+
+                                Button(
+                                    onClick = {
+                                        val txId = entry.transaction?.id ?: entry.id.removePrefix("manual_").substringBefore("_")
+                                        selectedLedgerEntryForAction = null
+                                        coroutineScope.launch {
+                                            val res = viewModel.deleteOrReverseManualUdhari(txId)
+                                            if (res.isSuccess) {
+                                                Toast.makeText(context, "उधारी नोंद हटवली", Toast.LENGTH_SHORT).show()
+                                            } else {
+                                                Toast.makeText(context, res.exceptionOrNull()?.message ?: "त्रुटी आली", Toast.LENGTH_SHORT).show()
+                                            }
+                                        }
+                                    },
+                                    shape = RoundedCornerShape(8.dp),
+                                    colors = ButtonDefaults.buttonColors(containerColor = BoutiqueError),
+                                    modifier = Modifier.weight(1f).height(42.dp)
+                                ) {
+                                    Text("हटवा", fontWeight = FontWeight.Bold)
+                                }
                             }
                         }
                     }
@@ -2896,7 +3024,7 @@ fun CustomerActionsAndDueCard(
                 ) {
                     Icon(Icons.Default.Payment, contentDescription = null, modifier = Modifier.size(16.dp))
                     Spacer(modifier = Modifier.width(6.dp))
-                    Text("+ पेमेंट जमा", fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                    Text("पेमेंट जमा", fontWeight = FontWeight.Bold, fontSize = 13.sp)
                 }
 
                 Button(
@@ -2907,7 +3035,7 @@ fun CustomerActionsAndDueCard(
                 ) {
                     Icon(Icons.Default.PostAdd, contentDescription = null, modifier = Modifier.size(16.dp))
                     Spacer(modifier = Modifier.width(6.dp))
-                    Text("+ उधारी नोंद", fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                    Text("उधारी नोंद", fontWeight = FontWeight.Bold, fontSize = 13.sp)
                 }
             }
 
@@ -2945,7 +3073,14 @@ fun CustomerActionsAndDueCard(
 }
 
 @Composable
-fun CustomerBillCardItem(bill: Bill, onBillClick: (Long) -> Unit) {
+fun CustomerBillCardItem(
+    bill: Bill,
+    billBreakdown: com.matoshree.shopmanager.domain.usecase.BillLedgerBreakdown? = null,
+    onBillClick: (Long) -> Unit
+) {
+    val effectivePending = billBreakdown?.remainingOutstanding ?: bill.pendingAmount
+    val isPending = !bill.isVoided && effectivePending > 0.01
+
     MatoshreeCard(onClick = { onBillClick(bill.id) }) {
         Row(
             modifier = Modifier.fillMaxWidth(),
@@ -2955,10 +3090,10 @@ fun CustomerBillCardItem(bill: Bill, onBillClick: (Long) -> Unit) {
             Column(modifier = Modifier.weight(1f)) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Text(bill.billNumber, fontWeight = FontWeight.SemiBold, color = DeepEmerald)
-                    if (bill.pendingAmount > 0.01) {
+                    if (isPending) {
                         Spacer(modifier = Modifier.width(6.dp))
                         Text(
-                            text = "(बाकी: ${CurrencyFormatter.format(bill.pendingAmount)})",
+                            text = "(बाकी: ${CurrencyFormatter.format(effectivePending)})",
                             color = BoutiqueError,
                             fontWeight = FontWeight.Bold,
                             fontSize = 11.sp
@@ -2975,9 +3110,9 @@ fun CustomerBillCardItem(bill: Bill, onBillClick: (Long) -> Unit) {
                 Text(CurrencyFormatter.format(bill.finalAmount), fontWeight = FontWeight.Bold, fontSize = 15.sp)
                 Spacer(modifier = Modifier.height(2.dp))
                 StatusBadge(
-                    status = if (bill.isVoided) "रद्द (Void)" else if (bill.pendingAmount > 0.01) "अंशतः उधारी" else "पूर्ण भरणा",
-                    isSuccess = !bill.isVoided && bill.pendingAmount <= 0.01,
-                    isError = bill.isVoided || bill.pendingAmount > 0.01
+                    status = if (bill.isVoided) "रद्द (Void)" else if (isPending) "अंशतः उधारी" else "पूर्ण भरणा",
+                    isSuccess = !bill.isVoided && !isPending,
+                    isError = bill.isVoided || isPending
                 )
             }
         }
@@ -3745,7 +3880,7 @@ fun UdhariActionDialog(
                     ) {
                         Icon(Icons.Default.ReceiptLong, contentDescription = null, modifier = Modifier.size(16.dp))
                         Spacer(modifier = Modifier.width(6.dp))
-                        Text("मूळ बिल पहा (#${transaction.billNumber})", fontWeight = FontWeight.Bold)
+                        Text("बिल पहा", fontWeight = FontWeight.Bold)
                     }
                 }
 
@@ -3758,7 +3893,7 @@ fun UdhariActionDialog(
                 ) {
                     Icon(Icons.Default.Payments, contentDescription = null, modifier = Modifier.size(16.dp))
                     Spacer(modifier = Modifier.width(6.dp))
-                    Text("या उधारीची जमा नोंद करा", fontWeight = FontWeight.Bold)
+                    Text("पेमेंट करा", fontWeight = FontWeight.Bold)
                 }
 
                 Text("मुदत तारीख बदला / सेट करा:", fontWeight = FontWeight.Bold, fontSize = 13.sp, color = DeepEmerald)

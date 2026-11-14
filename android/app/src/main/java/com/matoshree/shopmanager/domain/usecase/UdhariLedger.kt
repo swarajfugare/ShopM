@@ -28,6 +28,7 @@ data class CustomerCalculationBreakdown(
     val manualPaidAmount: Double = 0.0,
     val unallocatedPaidAmount: Double = 0.0,
     val orphanAmount: Double = 0.0,
+    val orphanCount: Int = 0,
     val netDue: Double = 0.0
 )
 
@@ -46,6 +47,7 @@ data class CustomerLedgerResult(
     val lastPaymentAmount: Double?,
     val events: List<KhatavahiEntry>,
     val orphanPayments: List<UdhariTransaction> = emptyList(),
+    val orphanTransactions: List<UdhariTransaction> = emptyList(),
     val calculationBreakdown: CustomerCalculationBreakdown = CustomerCalculationBreakdown()
 )
 
@@ -59,7 +61,8 @@ data class ShopUdhariSummary(
     val overdueAmount: Double,
     val pendingBillsCount: Int,
     val customerResults: Map<String, CustomerLedgerResult>,
-    val allOrphanPayments: List<UdhariTransaction> = emptyList()
+    val allOrphanPayments: List<UdhariTransaction> = emptyList(),
+    val allOrphanTransactions: List<UdhariTransaction> = emptyList()
 )
 
 fun interface CustomerKeyResolver {
@@ -408,20 +411,44 @@ object UdhariLedger {
             tx.type == UdhariTransactionType.PURCHASE_CREDIT && !matchesKnownBill
         }
 
-        val unlinkedBillTxs = unlinkedCreditTxs.filter { it.billId != 0L || it.billNumber.isNotBlank() }
-            .groupBy { if (it.billId != 0L) "id_${it.billId}" else "num_${it.billNumber}" }
+        // 1b. Process unlinked credit transactions (separate pure manual debits from orphan credits referencing deleted/missing bills vs legacy bills)
+        val orphanCreditTxs = mutableListOf<UdhariTransaction>()
+        val manualDebits = mutableListOf<UdhariTransaction>()
+        val legacyCreditTxs = mutableListOf<UdhariTransaction>()
 
-        var totalUnlinkedBillAmount = 0.0
+        for (tx in unlinkedCreditTxs) {
+            val cleanNum = tx.billNumber.trim().uppercase()
+            val hasBillRef = !tx.billGid.isNullOrBlank() || tx.billId != 0L || cleanNum.isNotBlank()
+            if (hasBillRef) {
+                val isDeletedAppBill = cleanNum.startsWith("MC-") ||
+                                       allBills.any { b -> (b.isVoided || b.paymentStatus == PaymentStatus.VOID) &&
+                                           ((!tx.billGid.isNullOrBlank() && b.gid == tx.billGid) ||
+                                            (cleanNum.isNotBlank() && b.billNumber.trim().equals(cleanNum, ignoreCase = true)) ||
+                                            (tx.billId != 0L && b.id == tx.billId)) } ||
+                                       (cust != null && cust.totalBills == 0 && custBills.isEmpty())
+
+                if (isDeletedAppBill) {
+                    orphanCreditTxs.add(tx)
+                } else {
+                    legacyCreditTxs.add(tx)
+                }
+            } else {
+                manualDebits.add(tx)
+            }
+        }
+
+        val unlinkedBillTxs = legacyCreditTxs.groupBy { if (it.billId != 0L) "id_${it.billId}" else "num_${it.billNumber}" }
+        var totalLegacyBillAmount = 0.0
         for ((_, group) in unlinkedBillTxs) {
             val firstTx = group.first()
             val totalBillAmount = group.sumOf { it.amount }
-            totalUnlinkedBillAmount += totalBillAmount
+            totalLegacyBillAmount += totalBillAmount
             val billId = firstTx.billId
             val billNumber = firstTx.billNumber
 
             val directTxsForBill = custTxs.filter {
                 it.type == UdhariTransactionType.PAYMENT &&
-                ((billId != 0L && it.billId == billId) || (billNumber.isNotBlank() && it.billNumber == billNumber))
+                ((billId != 0L && it.billId == billId) || (billNumber.isNotBlank() && it.billNumber.trim().equals(billNumber.trim(), ignoreCase = true)))
             }
             val directPaid = directTxsForBill.sumOf { it.amount }
             totalDirectBillPaid += directPaid
@@ -457,7 +484,6 @@ object UdhariLedger {
         }
 
         // 2. Add manual debits (PURCHASE_CREDIT with billId == 0L and billNumber.isBlank())
-        val manualDebits = unlinkedCreditTxs.filter { it.billId == 0L && it.billNumber.isBlank() }
         var totalManualDebits = manualDebits.sumOf { it.amount }
 
         for (m in manualDebits) {
@@ -510,7 +536,15 @@ object UdhariLedger {
 
         for (p in allPaymentTxs) {
             val cleanNum = p.billNumber.trim().uppercase()
-            val hasBillRef = !p.billGid.isNullOrBlank() || p.billId != 0L || cleanNum.isNotBlank()
+            val isGeneral = cleanNum.isBlank() ||
+                            cleanNum == "DIRECT-PAY" ||
+                            cleanNum.startsWith("MULTI-BILL") ||
+                            cleanNum == "GENERAL" ||
+                            cleanNum == "ADVANCE" ||
+                            cleanNum == "KHATA-PAY" ||
+                            p.note?.contains("DIRECT-PAY", ignoreCase = true) == true
+
+            val hasBillRef = !isGeneral && (!p.billGid.isNullOrBlank() || p.billId != 0L || cleanNum.isNotBlank())
             val matchesKnownBill = (!p.billGid.isNullOrBlank() && knownStateBillGids.contains(p.billGid)) ||
                                    (p.billId != 0L && knownStateBillIds.contains(p.billId)) ||
                                    (cleanNum.isNotBlank() && knownStateBillNumbers.contains(cleanNum))
@@ -606,7 +640,7 @@ object UdhariLedger {
         }
 
         // Lifetime metrics
-        val totalPurchases = custBills.sumOf { it.finalAmount } + totalUnlinkedBillAmount + totalManualDebits
+        val totalPurchases = custBills.sumOf { it.finalAmount } + totalLegacyBillAmount + totalManualDebits
         val nonCheckoutPaymentTxs = validPaymentTxs.filter {
             it.id !in allCheckoutTxIds && (it.gid.isBlank() || it.gid !in allCheckoutTxGids)
         }
@@ -620,14 +654,16 @@ object UdhariLedger {
 
         val lastPayment = allPaymentTxs.maxByOrNull { it.createdAt }
 
+        val allOrphanTxs = orphanCreditTxs + orphanTxs
         val calculationBreakdown = CustomerCalculationBreakdown(
-            totalBillAmount = custBills.sumOf { it.finalAmount } + totalUnlinkedBillAmount,
+            totalBillAmount = custBills.sumOf { it.finalAmount } + totalLegacyBillAmount,
             checkoutPaidAmount = totalCheckoutPaid,
             directSettlementAmount = totalDirectBillPaid,
             manualDebitAmount = totalManualDebits,
             manualPaidAmount = manualPaid,
             unallocatedPaidAmount = unallocatedPool,
-            orphanAmount = orphanTxs.sumOf { it.amount },
+            orphanAmount = allOrphanTxs.sumOf { it.amount },
+            orphanCount = allOrphanTxs.size,
             netDue = customerBalance
         )
 
@@ -646,6 +682,7 @@ object UdhariLedger {
             lastPaymentAmount = lastPayment?.amount,
             events = finalEvents,
             orphanPayments = orphanTxs,
+            orphanTransactions = allOrphanTxs,
             calculationBreakdown = calculationBreakdown
         )
     }
@@ -720,7 +757,8 @@ object UdhariLedger {
             overdueAmount = totalOverdue,
             pendingBillsCount = totalPendingBills,
             customerResults = customerResults,
-            allOrphanPayments = customerResults.values.flatMap { it.orphanPayments }
+            allOrphanPayments = customerResults.values.flatMap { it.orphanPayments },
+            allOrphanTransactions = customerResults.values.flatMap { it.orphanTransactions }
         )
     }
 }
