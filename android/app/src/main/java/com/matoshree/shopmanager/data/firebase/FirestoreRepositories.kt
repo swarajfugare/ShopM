@@ -44,8 +44,17 @@ fun DocumentSnapshot.toCustomerDomain(): Customer? {
         val tier = getString("tier") ?: "REGULAR"
         val tags = (get("listTags") as? List<*>)?.mapNotNull { it?.toString() } ?: emptyList()
 
+        val rawGid = getString("gid")
+        val (canonicalDocId, canonicalGid) = com.matoshree.shopmanager.domain.model.IdGenerator.canonicalCustomerDocIdAndGid(
+            mobile = mobile,
+            existingDocId = id,
+            existingGid = rawGid
+        )
+
         return Customer(
             id = calcId,
+            gid = canonicalGid,
+            docId = canonicalDocId,
             shopId = 1,
             name = name.ifBlank { "Customer" },
             mobile = mobile,
@@ -439,13 +448,13 @@ class FirestoreCustomerRepository {
 
     suspend fun saveCustomer(customer: Customer): String {
         val cleanMobile = com.matoshree.shopmanager.utils.PhoneUtils.clean10DigitMobileInput(customer.mobile)
-        var docId = if (cleanMobile.length == 10) {
-            "cust_m_$cleanMobile"
-        } else if (!customer.docId.isNullOrBlank() && customer.docId.length > 10) {
-            customer.docId
-        } else {
-            "cust_${System.currentTimeMillis()}_${UUID.randomUUID().toString().take(8)}"
-        }
+        val (canonicalDocId, canonicalGid) = com.matoshree.shopmanager.domain.model.IdGenerator.canonicalCustomerDocIdAndGid(
+            mobile = customer.mobile,
+            existingDocId = customer.docId,
+            existingGid = customer.gid
+        )
+        var docId = canonicalDocId
+        var finalGid = canonicalGid
 
         var existingLegacyId: Long? = null
         if (cleanMobile.length == 10) {
@@ -476,15 +485,15 @@ class FirestoreCustomerRepository {
                 val matchedMob = com.matoshree.shopmanager.utils.PhoneUtils.clean10DigitMobileInput(matchedDoc.getString("mobile") ?: "")
                 if (matchedMob.isBlank()) {
                     docId = matchedDoc.id
+                    finalGid = com.matoshree.shopmanager.domain.model.IdGenerator.customerGid(docId)
                     existingLegacyId = matchedDoc.getLong("legacyId")
                 }
             }
         }
 
-        val canonicalGid = com.matoshree.shopmanager.domain.model.IdGenerator.customerGid(docId)
         val dto = CustomerDto(
             id = docId,
-            gid = canonicalGid,
+            gid = finalGid.ifBlank { com.matoshree.shopmanager.domain.model.IdGenerator.customerGid(docId) },
             legacyId = customer.id.takeIf { it > 0 } ?: existingLegacyId ?: (docId.hashCode().toLong() and 0x7FFFFFFFFFFFFFFFL),
             name = customer.name.trim(),
             mobile = cleanMobile.ifBlank { customer.mobile.trim() },

@@ -20,6 +20,17 @@ data class BillLedgerBreakdown(
     val dueDate: String?
 )
 
+data class CustomerCalculationBreakdown(
+    val totalBillAmount: Double = 0.0,
+    val checkoutPaidAmount: Double = 0.0,
+    val directSettlementAmount: Double = 0.0,
+    val manualDebitAmount: Double = 0.0,
+    val manualPaidAmount: Double = 0.0,
+    val unallocatedPaidAmount: Double = 0.0,
+    val orphanAmount: Double = 0.0,
+    val netDue: Double = 0.0
+)
+
 data class CustomerLedgerResult(
     val customerKey: String,
     val customer: Customer?,
@@ -33,7 +44,9 @@ data class CustomerLedgerResult(
     val overdueAmount: Double,
     val lastPaymentDate: String?,
     val lastPaymentAmount: Double?,
-    val events: List<KhatavahiEntry>
+    val events: List<KhatavahiEntry>,
+    val orphanPayments: List<UdhariTransaction> = emptyList(),
+    val calculationBreakdown: CustomerCalculationBreakdown = CustomerCalculationBreakdown()
 )
 
 data class ShopUdhariSummary(
@@ -45,7 +58,8 @@ data class ShopUdhariSummary(
     val thisMonthCollections: Double,
     val overdueAmount: Double,
     val pendingBillsCount: Int,
-    val customerResults: Map<String, CustomerLedgerResult>
+    val customerResults: Map<String, CustomerLedgerResult>,
+    val allOrphanPayments: List<UdhariTransaction> = emptyList()
 )
 
 fun interface CustomerKeyResolver {
@@ -278,6 +292,8 @@ object UdhariLedger {
         }
 
         val billStates = mutableListOf<MutableBillState>()
+        val allCheckoutTxIds = mutableSetOf<String>()
+        val allCheckoutTxGids = mutableSetOf<String>()
 
         for (b in custBills) {
             val billMillis = parseBillMillis(b.billDate, b.id)
@@ -313,19 +329,25 @@ object UdhariLedger {
                 )
             }
 
-            val hasCheckoutTx = directTxsForBill.any {
-                it.note?.contains("checkout", ignoreCase = true) == true ||
-                it.note?.contains("initial", ignoreCase = true) == true
+            val checkoutTx = directTxsForBill.firstOrNull { tx ->
+                val noteMatch = tx.note?.contains("checkout", ignoreCase = true) == true ||
+                                tx.note?.contains("initial", ignoreCase = true) == true
+                val amountMatch = b.paidAmount > 0.01 && kotlin.math.abs(tx.amount - b.paidAmount) < 0.001
+                noteMatch || amountMatch
+            }
+            if (checkoutTx != null) {
+                if (checkoutTx.id.isNotBlank()) allCheckoutTxIds.add(checkoutTx.id)
+                if (checkoutTx.gid.isNotBlank()) allCheckoutTxGids.add(checkoutTx.gid)
             }
 
             val checkoutPaid = when {
-                hasCheckoutTx -> 0.0 // Checkout payment is already inside directTxsForBill
+                checkoutTx != null -> b.paidAmount
                 b.paymentStatus == PaymentStatus.PAID && directTxsForBill.isEmpty() -> b.finalAmount
                 b.paidAmount > 0.0 -> b.paidAmount
                 else -> 0.0
             }
 
-            if (checkoutPaid > 0.01) {
+            if (checkoutPaid > 0.01 && checkoutTx == null) {
                 totalCheckoutPaid += checkoutPaid
                 vahiEvents.add(
                     KhatavahiEntry(
@@ -341,9 +363,16 @@ object UdhariLedger {
                         paymentMethod = b.paymentMethod
                     )
                 )
+            } else if (checkoutTx != null) {
+                totalCheckoutPaid += checkoutPaid
             }
 
-            val directPaid = directTxsForBill.sumOf { it.amount }
+            val nonCheckoutDirectTxs = if (checkoutTx != null) {
+                directTxsForBill.filter { it.id != checkoutTx.id && it.gid != checkoutTx.gid }
+            } else {
+                directTxsForBill
+            }
+            val directPaid = nonCheckoutDirectTxs.sumOf { it.amount }
             totalDirectBillPaid += directPaid
 
             billStates.add(
@@ -469,9 +498,33 @@ object UdhariLedger {
             )
         }
 
-        // 3. Add all payment transactions to vahiEvents
+        // 3. Process payment transactions (separate genuine customer payments from foreign/orphan payments)
         val allPaymentTxs = custTxs.filter { it.type == UdhariTransactionType.PAYMENT }
+
+        val knownStateBillGids = custBills.map { it.gid }.filter { it.isNotBlank() }.toSet()
+        val knownStateBillIds = billStates.map { it.billId }.filter { it != 0L }.toSet()
+        val knownStateBillNumbers = billStates.map { it.billNumber.trim().uppercase() }.filter { it.isNotBlank() }.toSet()
+
+        val orphanTxs = mutableListOf<UdhariTransaction>()
+        val validPaymentTxs = mutableListOf<UdhariTransaction>()
+
         for (p in allPaymentTxs) {
+            val cleanNum = p.billNumber.trim().uppercase()
+            val hasBillRef = !p.billGid.isNullOrBlank() || p.billId != 0L || cleanNum.isNotBlank()
+            val matchesKnownBill = (!p.billGid.isNullOrBlank() && knownStateBillGids.contains(p.billGid)) ||
+                                   (p.billId != 0L && knownStateBillIds.contains(p.billId)) ||
+                                   (cleanNum.isNotBlank() && knownStateBillNumbers.contains(cleanNum))
+
+            if (hasBillRef && !matchesKnownBill) {
+                // Orphan payment: names a specific bill, but that bill does NOT exist in this customer's profile!
+                orphanTxs.add(p)
+            } else {
+                validPaymentTxs.add(p)
+            }
+        }
+
+        // Add ONLY valid payment transactions to vahiEvents
+        for (p in validPaymentTxs) {
             val payDesc = when {
                 !p.note.isNullOrBlank() -> "जमा (${p.note})"
                 p.billNumber.isNotBlank() -> "जमा (${p.billNumber} • ${p.paymentMethod.name})"
@@ -493,15 +546,11 @@ object UdhariLedger {
             )
         }
 
-        // 4. Unallocated payments (payments not directly allocated to any known bill)
-        val knownStateBillGids = custBills.map { it.gid }.filter { it.isNotBlank() }.toSet()
-        val knownStateBillIds = billStates.map { it.billId }.filter { it != 0L }.toSet()
-        val knownStateBillNumbers = billStates.map { it.billNumber }.filter { it.isNotBlank() }.toSet()
-
-        val unallocatedTxs = allPaymentTxs.filter {
+        // 4. Unallocated payments (valid payments that do NOT reference any bill)
+        val unallocatedTxs = validPaymentTxs.filter {
             (it.billGid.isNullOrBlank() || !knownStateBillGids.contains(it.billGid)) &&
             !knownStateBillIds.contains(it.billId) &&
-            (it.billNumber.isBlank() || !knownStateBillNumbers.contains(it.billNumber))
+            (it.billNumber.isBlank() || !knownStateBillNumbers.contains(it.billNumber.trim().uppercase()))
         }
         var unallocatedPool = unallocatedTxs.sumOf { it.amount }
 
@@ -558,7 +607,10 @@ object UdhariLedger {
 
         // Lifetime metrics
         val totalPurchases = custBills.sumOf { it.finalAmount } + totalUnlinkedBillAmount + totalManualDebits
-        val totalPaid = totalCheckoutPaid + allPaymentTxs.sumOf { it.amount }
+        val nonCheckoutPaymentTxs = validPaymentTxs.filter {
+            it.id !in allCheckoutTxIds && (it.gid.isBlank() || it.gid !in allCheckoutTxGids)
+        }
+        val totalPaid = totalCheckoutPaid + nonCheckoutPaymentTxs.sumOf { it.amount }
         val pendingBillsCount = billBreakdowns.count { it.remainingOutstanding > 0.01 } + (if (remainingManualDue > 0.01) 1 else 0)
 
         val overdueBills = billBreakdowns.filter { it.isOverdue }
@@ -567,6 +619,17 @@ object UdhariLedger {
         val isOverdue = overdueAmount > 0.01
 
         val lastPayment = allPaymentTxs.maxByOrNull { it.createdAt }
+
+        val calculationBreakdown = CustomerCalculationBreakdown(
+            totalBillAmount = custBills.sumOf { it.finalAmount } + totalUnlinkedBillAmount,
+            checkoutPaidAmount = totalCheckoutPaid,
+            directSettlementAmount = totalDirectBillPaid,
+            manualDebitAmount = totalManualDebits,
+            manualPaidAmount = manualPaid,
+            unallocatedPaidAmount = unallocatedPool,
+            orphanAmount = orphanTxs.sumOf { it.amount },
+            netDue = customerBalance
+        )
 
         return CustomerLedgerResult(
             customerKey = customerKey,
@@ -581,7 +644,9 @@ object UdhariLedger {
             overdueAmount = overdueAmount,
             lastPaymentDate = lastPayment?.date,
             lastPaymentAmount = lastPayment?.amount,
-            events = finalEvents
+            events = finalEvents,
+            orphanPayments = orphanTxs,
+            calculationBreakdown = calculationBreakdown
         )
     }
 
@@ -654,7 +719,8 @@ object UdhariLedger {
             thisMonthCollections = thisMonthCollections,
             overdueAmount = totalOverdue,
             pendingBillsCount = totalPendingBills,
-            customerResults = customerResults
+            customerResults = customerResults,
+            allOrphanPayments = customerResults.values.flatMap { it.orphanPayments }
         )
     }
 }

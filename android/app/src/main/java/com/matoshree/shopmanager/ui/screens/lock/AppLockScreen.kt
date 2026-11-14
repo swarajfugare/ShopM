@@ -202,6 +202,19 @@ fun AppLockScreen(
     val showGoogleResetDialog by viewModel.showGoogleResetDialog.collectAsState()
 
     val coroutineScope = rememberCoroutineScope()
+    val currentActivity = context as? Activity
+
+    DisposableEffect(Unit) {
+        // ALWAYS keep FLAG_SECURE on the Lock/PIN screen
+        currentActivity?.window?.setFlags(
+            android.view.WindowManager.LayoutParams.FLAG_SECURE,
+            android.view.WindowManager.LayoutParams.FLAG_SECURE
+        )
+        onDispose {
+            // Restore normal screen protection setting upon exiting lock screen
+            currentActivity?.let { com.matoshree.shopmanager.security.AppLockManager.applyScreenProtection(it) }
+        }
+    }
 
     val googleSignInLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.StartActivityForResult()

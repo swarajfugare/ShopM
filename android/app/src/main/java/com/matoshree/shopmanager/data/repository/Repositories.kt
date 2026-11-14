@@ -54,25 +54,21 @@ fun CustomerEntity.toDomain(): Customer {
 }
 
 fun Customer.toEntity(): CustomerEntity {
+    val (canonicalDocId, canonicalGid) = IdGenerator.canonicalCustomerDocIdAndGid(
+        mobile = mobile,
+        existingDocId = docId,
+        existingGid = gid
+    )
     val cleanMob = com.matoshree.shopmanager.utils.PhoneUtils.clean10DigitMobileInput(mobile)
-    val trueDocId = when {
-        cleanMob.length == 10 -> "cust_m_$cleanMob"
-        !docId.isNullOrBlank() -> docId
-        else -> null
-    }
-    val effectiveGid = when {
-        !trueDocId.isNullOrBlank() -> IdGenerator.customerGid(trueDocId)
-        gid.isNotBlank() && IdFormat.isValid(gid) -> gid
-        else -> IdGenerator.generate(IdType.CUSTOMER)
-    }
+    val finalMobile = if (cleanMob.length == 10) cleanMob else mobile
     return CustomerEntity(
         id = if (id > 0) id else 0,
-        gid = effectiveGid,
-        docId = trueDocId,
+        gid = canonicalGid,
+        docId = canonicalDocId,
         serverId = null,
         shopId = shopId,
         name = name,
-        mobile = mobile,
+        mobile = finalMobile,
         email = email,
         address = address,
         notes = notes,
@@ -656,20 +652,16 @@ class CustomerRepository(
         val cleanQuery = query.trim()
         if (cleanQuery.isBlank()) return emptyList()
 
-        // 1. Query local Room database FIRST (instant, reflects latest local edits immediately!)
-        val localList = database?.customerDao()?.searchCustomers(cleanQuery)?.map { it.toDomain() } ?: emptyList()
+        // Read from local Room database ONLY (single source of truth, avoids duplicate results)
+        val localList = database?.customerDao()?.searchCustomers(cleanQuery)?.map { it.toDomain() }
+            ?: firestoreRepo.searchCustomers(cleanQuery)
 
-        // 2. Query cloud as well
-        val cloudList = try {
-            firestoreRepo.searchCustomers(cleanQuery)
-        } catch (e: Exception) {
-            emptyList()
-        }
-
-        // 3. Merge: Local Room results take STRICT PRIORITY over any stale cloud duplicates!
-        return (localList + cloudList)
-            .distinctBy { it.canonicalKey() }
-            .sortedBy { it.name }
+        return localList
+            .filter { it.isActive && it.name.isNotBlank() && !it.name.equals("Walk-in", ignoreCase = true) }
+            .distinctBy { if (it.gid.isNotBlank()) it.gid else (it.docId ?: it.id.toString()) }
+            .sortedWith { c1, c2 ->
+                com.matoshree.shopmanager.utils.AlphabetUtils.compareAlphabetically(c1.name, c2.name)
+            }
     }
 
     suspend fun findCustomerByMobile(mobile: String): Customer? {
@@ -695,21 +687,33 @@ class CustomerRepository(
     }
 
     suspend fun saveCustomer(customer: Customer): Long {
-        var localId = customer.id
+        val (canonicalDocId, canonicalGid) = IdGenerator.canonicalCustomerDocIdAndGid(
+            mobile = customer.mobile,
+            existingDocId = customer.docId,
+            existingGid = customer.gid
+        )
+        val preparedCustomer = customer.copy(
+            docId = canonicalDocId,
+            gid = canonicalGid
+        )
+
+        var localId = preparedCustomer.id
         val isOnline = FirebaseManager.isNetworkAvailable()
         val initialStatus = if (isOnline) SyncStatus.SYNCED else SyncStatus.PENDING
 
         if (database != null) {
             try {
-                val cleanMob = com.matoshree.shopmanager.utils.PhoneUtils.clean10DigitMobileInput(customer.mobile)
-                val existing = (if (customer.id > 0) database.customerDao().getCustomerById(customer.id) else null)
-                    ?: (if (customer.id > 0) database.customerDao().getCustomerByServerId(customer.id) else null)
-                    ?: (if (cleanMob.length == 10) database.customerDao().getCustomerByMobileFuzzy(customer.mobile, cleanMob) else null)
+                val cleanMob = com.matoshree.shopmanager.utils.PhoneUtils.clean10DigitMobileInput(preparedCustomer.mobile)
+                val existing = (if (preparedCustomer.id > 0) database.customerDao().getCustomerById(preparedCustomer.id) else null)
+                    ?: (if (preparedCustomer.id > 0) database.customerDao().getCustomerByServerId(preparedCustomer.id) else null)
+                    ?: (if (cleanMob.length == 10) database.customerDao().getCustomerByMobileFuzzy(preparedCustomer.mobile, cleanMob) else null)
+                    ?: database.customerDao().getCustomerByGid(canonicalGid)
+                    ?: database.customerDao().getCustomerByDocId(canonicalDocId)
 
-                val targetLocalId = existing?.id ?: if (customer.id > 0 && customer.id < 1_000_000_000L) customer.id else 0L
-                val entity = customer.toEntity().copy(
+                val targetLocalId = existing?.id ?: if (preparedCustomer.id > 0 && preparedCustomer.id < 1_000_000_000L) preparedCustomer.id else 0L
+                val entity = preparedCustomer.toEntity().copy(
                     id = targetLocalId,
-                    serverId = existing?.serverId ?: if (customer.id >= 1_000_000_000L) customer.id else null,
+                    serverId = existing?.serverId ?: if (preparedCustomer.id >= 1_000_000_000L) preparedCustomer.id else null,
                     isActive = true,
                     syncStatus = initialStatus
                 )
@@ -719,7 +723,7 @@ class CustomerRepository(
             }
         }
         try {
-            val syncCust = if (customer.id > 0) customer else customer.copy(id = localId)
+            val syncCust = if (preparedCustomer.id > 0) preparedCustomer else preparedCustomer.copy(id = localId)
             val docId = firestoreRepo.saveCustomer(syncCust)
             val mappedId = (docId.hashCode().toLong() and 0x7FFFFFFFFFFFFFFFL)
             if (database != null && localId > 0) {

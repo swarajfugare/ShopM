@@ -328,12 +328,6 @@ object DataMigrationManager {
                 }
             }
 
-            // Deduplicate duplicate customer rows in Room
-            try {
-                db.customerDao().deduplicateCustomerRows()
-            } catch (e: Exception) {
-                Log.w(TAG, "Deduplicate in migration notice: ${e.message}")
-            }
 
             val bills = db.billDao().getAllBillsDirect(limit = 100000)
             for (b in bills) {

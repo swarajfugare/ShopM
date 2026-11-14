@@ -1341,6 +1341,34 @@ fun SettingsScreen(
                         color = OutlineVariantGrey.copy(alpha = 0.2f)
                     )
 
+                    var screenshotAllowed by remember { mutableStateOf(com.matoshree.shopmanager.security.AppLockManager.isScreenshotAllowed(context)) }
+                    val currentActivity = context as? android.app.Activity
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text("स्क्रीनशॉट परवानगी", fontWeight = FontWeight.SemiBold)
+                            Text("सामान्य स्क्रीनवर स्क्रीनशॉट काढण्याची अनुमती द्या (टीप: स्क्रीनशॉटमध्ये दुकानाचे आर्थिक आकडे दिसू शकतात)", style = MaterialTheme.typography.bodySmall.copy(color = MutedCharcoal))
+                        }
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Switch(
+                            checked = screenshotAllowed,
+                            onCheckedChange = {
+                                screenshotAllowed = it
+                                com.matoshree.shopmanager.security.AppLockManager.setScreenshotAllowed(context, it, currentActivity)
+                            },
+                            colors = SwitchDefaults.colors(checkedThumbColor = DeepEmerald, checkedTrackColor = DeepEmeraldContainer)
+                        )
+                    }
+
+                    HorizontalDivider(
+                        modifier = Modifier.padding(vertical = 12.dp),
+                        color = OutlineVariantGrey.copy(alpha = 0.2f)
+                    )
+
                     Surface(
                         shape = RoundedCornerShape(8.dp),
                         color = ChampagneGoldContainer.copy(alpha = 0.35f),
@@ -2254,9 +2282,20 @@ service cloud.firestore {
                         ) {
                             Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                                 Text("तपासणी अहवाल:", fontWeight = FontWeight.Bold, fontSize = 13.sp, color = DeepEmerald)
-                                Text("• ग्राहकांची यादी (Directory) / फोन सक्रिय ग्राहक: ${r.totalRoomActive}", fontSize = 12.sp)
+                                Text("• Directory: ${r.directoryCount} / Firestore: ${r.firestoreActiveCount} / Hidden: ${r.hiddenCount}", fontWeight = FontWeight.Bold, fontSize = 12.sp, color = DeepEmerald)
+                                if (r.hiddenReasonBreakdown.isNotEmpty()) {
+                                    r.hiddenReasonBreakdown.forEach { (reason, count) ->
+                                        Text("   - $reason: $count", fontSize = 11.sp, color = MutedCharcoal)
+                                    }
+                                }
                                 Text("• फोनमधील अर्काईव्ह ग्राहक: ${r.totalRoomArchived}", fontSize = 12.sp)
-                                Text("• क्लाउडवरील सक्रिय ग्राहक: ${r.totalFirestoreActive}", fontSize = 12.sp)
+
+                                if (r.orphanPaymentCount > 0) {
+                                    Text("⚠️ अनधिकृत/ऑर्फन भरणा नोंदी (Orphan payments): ${r.orphanPaymentCount}", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = BoutiqueError)
+                                    r.orphanPaymentDetails.take(5).forEach { od ->
+                                        Text("   • $od", fontSize = 11.sp, color = BoutiqueError)
+                                    }
+                                }
 
                                 if (r.erroneouslyArchivedCount > 0) {
                                     Text("⚠️ चुकून अर्काईव्ह झालेले ग्राहक: ${r.erroneouslyArchivedCount}", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = BoutiqueError)

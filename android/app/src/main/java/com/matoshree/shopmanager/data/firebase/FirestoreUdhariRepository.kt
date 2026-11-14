@@ -390,61 +390,78 @@ class FirestoreUdhariRepository {
             FirebaseManager.ensureAuthenticated()
             val isOnline = FirebaseManager.isNetworkAvailable()
 
-            val txSnap = try {
-                if (isOnline) {
-                    kotlinx.coroutines.withTimeoutOrNull(800) {
-                        FirebaseManager.udhariTransactionsCollection().document(transactionId).get().await()
-                    } ?: FirebaseManager.udhariTransactionsCollection().document(transactionId).get(com.google.firebase.firestore.Source.CACHE).await()
-                } else {
-                    FirebaseManager.udhariTransactionsCollection().document(transactionId).get(com.google.firebase.firestore.Source.CACHE).await()
+            val candidates = mutableListOf<String>()
+            candidates.add(transactionId)
+            if (transactionId.startsWith("pay_")) {
+                candidates.add(transactionId.removePrefix("pay_"))
+            }
+
+            var txDoc: com.google.firebase.firestore.DocumentSnapshot? = null
+            for (cand in candidates) {
+                val snap = try {
+                    if (isOnline) {
+                        kotlinx.coroutines.withTimeoutOrNull(1000) {
+                            FirebaseManager.udhariTransactionsCollection().document(cand).get().await()
+                        } ?: FirebaseManager.udhariTransactionsCollection().document(cand).get(com.google.firebase.firestore.Source.CACHE).await()
+                    } else {
+                        FirebaseManager.udhariTransactionsCollection().document(cand).get(com.google.firebase.firestore.Source.CACHE).await()
+                    }
+                } catch (_: Exception) { null }
+                if (snap != null && snap.exists()) {
+                    txDoc = snap
+                    break
                 }
-            } catch (e: Exception) {
-                FirebaseManager.udhariTransactionsCollection().document(transactionId).get(com.google.firebase.firestore.Source.CACHE).await()
             }
 
-            if (!txSnap.exists()) {
-                return Result.failure(IllegalStateException("Transaction not found"))
+            if (txDoc == null || !txDoc.exists()) {
+                val qSnap = try {
+                    FirebaseManager.udhariTransactionsCollection()
+                        .whereEqualTo("gid", transactionId)
+                        .limit(1)
+                        .get().await()
+                } catch (_: Exception) { null }
+                txDoc = qSnap?.documents?.firstOrNull()
             }
 
-            val originalTx = txSnap.toObject(UdhariTransactionDto::class.java)
+            if (txDoc == null || !txDoc.exists()) {
+                val qUuidSnap = try {
+                    FirebaseManager.udhariTransactionsCollection()
+                        .whereEqualTo("transactionUuid", transactionId)
+                        .limit(1)
+                        .get().await()
+                } catch (_: Exception) { null }
+                txDoc = qUuidSnap?.documents?.firstOrNull()
+            }
+
+            if (txDoc == null || !txDoc.exists()) {
+                return Result.failure(IllegalStateException("भरणा नोंद सापडली नाही (Transaction not found: $transactionId)"))
+            }
+
+            val originalTx = txDoc.toObject(UdhariTransactionDto::class.java)
                 ?: return Result.failure(IllegalStateException("Failed to parse transaction"))
 
             if (originalTx.isReversed) {
-                return Result.failure(IllegalStateException("Transaction is already reversed"))
+                return Result.failure(IllegalStateException("हा भरणा आधीच रद्द केलेला आहे (Already reversed)"))
             }
 
-            // Find bills if linked to a specific bill across both root and shop collections
-            val rootBillsSnap = try {
-                if (isOnline) {
-                    kotlinx.coroutines.withTimeoutOrNull(800) {
-                        FirebaseManager.billsCollection().get().await()
-                    } ?: FirebaseManager.billsCollection().get(com.google.firebase.firestore.Source.CACHE).await()
-                } else {
-                    FirebaseManager.billsCollection().get(com.google.firebase.firestore.Source.CACHE).await()
-                }
-            } catch (e: Exception) { null }
+            val targetDocId = txDoc.id
 
-            val shopBillsSnap = try {
-                if (isOnline) {
-                    kotlinx.coroutines.withTimeoutOrNull(800) {
-                        FirebaseManager.shopBillsCollection().get().await()
-                    } ?: FirebaseManager.shopBillsCollection().get(com.google.firebase.firestore.Source.CACHE).await()
-                } else {
-                    FirebaseManager.shopBillsCollection().get(com.google.firebase.firestore.Source.CACHE).await()
-                }
-            } catch (e: Exception) { null }
+            // Direct bill read by billGid or billNumber (no full collection download)
+            val matchedBillDoc = if (!originalTx.billGid.isNullOrBlank()) {
+                try {
+                    val bDoc = FirebaseManager.billsCollection().document(originalTx.billGid!!).get().await()
+                    if (bDoc.exists()) bDoc else null
+                } catch (_: Exception) { null }
+            } else if (originalTx.billNumber.isNotBlank()) {
+                try {
+                    FirebaseManager.billsCollection()
+                        .whereEqualTo("billNumber", originalTx.billNumber)
+                        .limit(1)
+                        .get().await().documents.firstOrNull()
+                } catch (_: Exception) { null }
+            } else null
 
-            val allBillDocs = (rootBillsSnap?.documents ?: emptyList()) + (shopBillsSnap?.documents ?: emptyList())
-
-            val matchedBillDocs = if (originalTx.billId != 0L || originalTx.billNumber.isNotBlank()) {
-                allBillDocs.filter { doc ->
-                    val b = doc.toObject(BillDto::class.java)
-                    (originalTx.billId != 0L && (b?.legacyId == originalTx.billId || (doc.id.hashCode().toLong() and 0x7FFFFFFFFFFFFFFFL) == originalTx.billId)) ||
-                    (originalTx.billNumber.isNotBlank() && b?.billNumber == originalTx.billNumber)
-                }
-            } else emptyList()
-
-            val currentBill = matchedBillDocs.firstOrNull()?.toObject(BillDto::class.java)
+            val currentBill = matchedBillDoc?.toObject(BillDto::class.java)
             val newPaid = if (currentBill != null) (currentBill.paidAmount - originalTx.amount).coerceAtLeast(0.0) else 0.0
             val newPending = if (currentBill != null) (currentBill.finalAmount - newPaid).coerceAtLeast(0.0) else 0.0
             val newStatus = if (newPaid <= 0.01) "PENDING" else if (newPending <= 0.01) "PAID" else "PARTIAL"
@@ -477,24 +494,22 @@ class FirestoreUdhariRepository {
 
             val batch = FirebaseManager.firestore.batch()
             val now = System.currentTimeMillis()
-            // Mark original as TRASH & reversed so it goes to Trash Bin!
+            // Mark original as reversed (audit trail - keeps status ACTIVE so visible as cancelled)
             batch.update(
-                FirebaseManager.udhariTransactionsCollection().document(transactionId),
+                FirebaseManager.udhariTransactionsCollection().document(targetDocId),
                 mapOf(
-                    "status" to "TRASH",
                     "isReversed" to true,
                     "reversalReason" to reason,
                     "reversedAt" to now,
-                    "deletedAt" to now,
                     "updatedAt" to now
                 )
             )
             // Add reversal transaction record
             batch.set(FirebaseManager.udhariTransactionsCollection().document(reversalDocId), reversalDto)
-            // Update bill status and balances across all matched bill references (root and shop)
-            for (doc in matchedBillDocs) {
+
+            if (matchedBillDoc != null) {
                 batch.update(
-                    doc.reference,
+                    matchedBillDoc.reference,
                     mapOf(
                         "paidAmount" to newPaid,
                         "pendingAmount" to newPending,
@@ -504,51 +519,24 @@ class FirestoreUdhariRepository {
                 )
             }
 
-            // Update customer cached outstanding amount across both root and shop collections
-            val rootCustSnap = try {
-                if (isOnline) {
-                    kotlinx.coroutines.withTimeoutOrNull(800) {
-                        FirebaseManager.customersCollection().get().await()
-                    } ?: FirebaseManager.customersCollection().get(com.google.firebase.firestore.Source.CACHE).await()
-                } else {
-                    FirebaseManager.customersCollection().get(com.google.firebase.firestore.Source.CACHE).await()
-                }
-            } catch (e: Exception) { null }
+            val targetCustDocId = if (!originalTx.customerGid.isNullOrBlank()) {
+                val cleanMob = PhoneUtils.clean10DigitMobileInput(originalTx.customerMobile)
+                if (cleanMob.length == 10) "cust_m_$cleanMob" else null
+            } else null
 
-            val shopCustSnap = try {
-                if (isOnline) {
-                    kotlinx.coroutines.withTimeoutOrNull(800) {
-                        FirebaseManager.shopCustomersCollection().get().await()
-                    } ?: FirebaseManager.shopCustomersCollection().get(com.google.firebase.firestore.Source.CACHE).await()
-                } else {
-                    FirebaseManager.shopCustomersCollection().get(com.google.firebase.firestore.Source.CACHE).await()
-                }
-            } catch (e: Exception) { null }
-
-            val cleanTxMobile = PhoneUtils.clean10DigitMobileInput(originalTx.customerMobile)
-            val allCustDocs = (rootCustSnap?.documents ?: emptyList()) + (shopCustSnap?.documents ?: emptyList())
-            val matchedCustDocs = allCustDocs.filter { doc ->
-                val c = doc.toObject(CustomerDto::class.java)
-                (originalTx.customerId > 0L && (c?.legacyId == originalTx.customerId || (doc.id.hashCode().toLong() and 0x7FFFFFFFFFFFFFFFL) == originalTx.customerId)) ||
-                (cleanTxMobile.length == 10 && c?.mobile?.isNotBlank() == true && PhoneUtils.clean10DigitMobileInput(c.mobile) == cleanTxMobile)
-            }
-            if (matchedCustDocs.isNotEmpty()) {
-                val currentCust = matchedCustDocs.firstOrNull()?.toObject(CustomerDto::class.java)
-                val newCustDue = (currentCust?.outstandingAmount ?: 0.0) + originalTx.amount
-                for (doc in matchedCustDocs) {
-                    batch.update(
-                        doc.reference,
-                        mapOf(
-                            "outstandingAmount" to newCustDue,
-                            "updatedAt" to now
-                        )
-                    )
-                }
+            if (targetCustDocId != null) {
+                try {
+                    val cDoc = FirebaseManager.customersCollection().document(targetCustDocId).get().await()
+                    if (cDoc.exists()) {
+                        val prev = cDoc.getDouble("outstandingAmount") ?: 0.0
+                        batch.update(cDoc.reference, mapOf("outstandingAmount" to prev + originalTx.amount, "updatedAt" to now))
+                    }
+                } catch (_: Exception) {}
             }
 
             val commitTask = batch.commit()
             FirebaseManager.awaitWriteTask(commitTask)
-            Log.d(TAG, "Payment reversed successfully: $transactionId, reason: $reason")
+            Log.d(TAG, "Payment reversed successfully: $targetDocId, reason: $reason")
             Result.success(Unit)
         } catch (e: Exception) {
             Log.e(TAG, "Error reversing payment: ${e.message}", e)

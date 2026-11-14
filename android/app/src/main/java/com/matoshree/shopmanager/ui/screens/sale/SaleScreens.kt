@@ -357,6 +357,62 @@ fun NewSaleScreen(
     var showAddCustomerDialog by remember { mutableStateOf(false) }
     var showContinuousBarcodeScanner by remember { mutableStateOf(false) }
     var showDirectAmountDialog by remember { mutableStateOf(false) }
+    var showDiscardDraftDialog by remember { mutableStateOf(false) }
+
+    val hasDraft = cartItems.isNotEmpty() || selectedCustomer != null
+
+    androidx.activity.compose.BackHandler(enabled = hasDraft) {
+        showDiscardDraftDialog = true
+    }
+
+    val handleBack: () -> Unit = {
+        if (hasDraft) {
+            showDiscardDraftDialog = true
+        } else {
+            onBackClick()
+        }
+    }
+
+    if (showDiscardDraftDialog) {
+        AlertDialog(
+            onDismissRequest = { showDiscardDraftDialog = false },
+            title = {
+                Text(
+                    text = "बिल रद्द करायचे?",
+                    style = MaterialTheme.typography.titleLarge.copy(
+                        fontFamily = PlayfairFontFamily,
+                        color = DeepEmerald,
+                        fontWeight = FontWeight.Bold
+                    )
+                )
+            },
+            text = {
+                Text(
+                    text = "तयार केलेले बिल रद्द करून मागे जायचे आहे का?",
+                    style = MaterialTheme.typography.bodyMedium.copy(color = MutedCharcoal)
+                )
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        showDiscardDraftDialog = false
+                        viewModel.reset()
+                        onBackClick()
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = BoutiqueError),
+                    shape = RoundedCornerShape(8.dp)
+                ) {
+                    Text("रद्द करा", fontWeight = FontWeight.Bold)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showDiscardDraftDialog = false }) {
+                    Text("चालू ठेवा", color = DeepEmerald, fontWeight = FontWeight.SemiBold)
+                }
+            },
+            containerColor = WarmWhite
+        )
+    }
 
     if (showContinuousBarcodeScanner) {
         val totalQty = cartItems.sumOf { it.quantity }
@@ -464,7 +520,7 @@ fun NewSaleScreen(
             MatoshreeTopAppBar(
                 title = "नवीन बिल",
                 showBackButton = true,
-                onBackClick = onBackClick,
+                onBackClick = handleBack,
                 actions = {
                     IconButton(onClick = { showContinuousBarcodeScanner = true }) {
                         Icon(Icons.Outlined.QrCodeScanner, contentDescription = "बारकोड स्कॅन करा", tint = DeepEmerald)

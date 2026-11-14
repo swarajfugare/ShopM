@@ -18,6 +18,13 @@ import org.json.JSONObject
 import java.io.File
 
 data class CustomerDiagnosticReport(
+    val directoryCount: Int = 0,
+    val firestoreActiveCount: Int = 0,
+    val hiddenCount: Int = 0,
+    val hiddenReasonBreakdown: Map<String, Int> = emptyMap(),
+    val missingCustomerNames: List<String> = emptyList(),
+    val orphanPaymentCount: Int = 0,
+    val orphanPaymentDetails: List<String> = emptyList(),
     val totalRoomActive: Int,
     val totalRoomArchived: Int,
     val totalFirestoreActive: Int,
@@ -50,12 +57,31 @@ object CustomerDiagnosticManager {
         val roomActive = allRoom.filter { it.isActive && it.name.isNotBlank() && !it.name.equals("Walk-in", ignoreCase = true) }
         val roomArchived = allRoom.filter { !it.isActive }
 
+        val directoryList = allRoom
+            .filter { it.isActive && it.name.isNotBlank() && !it.name.equals("Walk-in", ignoreCase = true) }
+            .distinctBy { it.gid }
+        val directoryCount = directoryList.size
+
+        val hiddenReasons = mutableMapOf<String, Int>()
+        val archivedCount = allRoom.count { !it.isActive }
+        val blankNameCount = allRoom.count { it.isActive && it.name.isBlank() }
+        val walkInCount = allRoom.count { it.isActive && it.name.equals("Walk-in", ignoreCase = true) }
+        val duplicateGidCount = (allRoom.count { it.isActive && it.name.isNotBlank() && !it.name.equals("Walk-in", ignoreCase = true) } - directoryCount).coerceAtLeast(0)
+
+        if (archivedCount > 0) hiddenReasons["अर्काईव्ह (Archived)"] = archivedCount
+        if (blankNameCount > 0) hiddenReasons["नाव रिकामे (Blank name)"] = blankNameCount
+        if (walkInCount > 0) hiddenReasons["वॉक-इन (Walk-in)"] = walkInCount
+        if (duplicateGidCount > 0) hiddenReasons["डुप्लिकेट खाते (Duplicate GID)"] = duplicateGidCount
+
+        val totalHidden = hiddenReasons.values.sum()
+
         val roomMobileSet = roomActive.map { PhoneUtils.clean10DigitMobileInput(it.mobile) }.filter { it.length == 10 }.toSet()
         val roomArchivedMobileSet = roomArchived.map { PhoneUtils.clean10DigitMobileInput(it.mobile) }.filter { it.length == 10 }.toSet()
 
         var firestoreActiveCount = 0
         var erroneouslyArchivedCount = 0
         var missingFromRoomCount = 0
+        val missingCustNames = mutableListOf<String>()
         val details = mutableListOf<String>()
 
         try {
@@ -73,10 +99,19 @@ object CustomerDiagnosticManager {
                     if (clean.length == 10) {
                         if (roomArchivedMobileSet.contains(clean) && !roomMobileSet.contains(clean)) {
                             erroneouslyArchivedCount++
+                            missingCustNames.add("${cust.name} ($clean) [Archived in Room]")
                             details.add("चुकून अर्काईव्ह: ${cust.name} ($clean)")
                         } else if (!roomMobileSet.contains(clean) && !roomArchivedMobileSet.contains(clean)) {
                             missingFromRoomCount++
+                            missingCustNames.add("${cust.name} ($clean) [Missing in Room]")
                             details.add("फोनमध्ये नसलेला: ${cust.name} ($clean)")
+                        }
+                    } else if (cust.name.isNotBlank()) {
+                        val matchesRoom = roomActive.any { it.name.trim().equals(cust.name.trim(), ignoreCase = true) }
+                        if (!matchesRoom) {
+                            missingFromRoomCount++
+                            missingCustNames.add("${cust.name} (मोबाईल नाही) [Missing in Room]")
+                            details.add("फोनमध्ये नसलेला (मोबाईल नाही): ${cust.name}")
                         }
                     }
                 }
@@ -150,7 +185,21 @@ object CustomerDiagnosticManager {
                 }
             }
 
+            val orphanTxs = shopLedger.allOrphanPayments
+            val orphanCount = orphanTxs.size
+            val orphanDetails = orphanTxs.map { "${it.customerName} - बिल #${it.billNumber.ifBlank { it.billId.toString() }} • ₹${it.amount} (${it.date})" }
+            if (orphanCount > 0) {
+                details.add("⚠️ अनधिकृत/ऑर्फन भरणा नोंदी: $orphanCount")
+            }
+
             return@withContext CustomerDiagnosticReport(
+                directoryCount = directoryCount,
+                firestoreActiveCount = firestoreActiveCount,
+                hiddenCount = totalHidden,
+                hiddenReasonBreakdown = hiddenReasons,
+                missingCustomerNames = missingCustNames,
+                orphanPaymentCount = orphanCount,
+                orphanPaymentDetails = orphanDetails,
                 totalRoomActive = roomActive.size,
                 totalRoomArchived = roomArchived.size,
                 totalFirestoreActive = firestoreActiveCount,
@@ -161,7 +210,7 @@ object CustomerDiagnosticManager {
                 duplicateEventsCount = duplicateEventsCount,
                 needsReviewCount = needsReviewCount,
                 overpaidCustomersCount = overpaidCount,
-                details = details.take(20)
+                details = details.take(30)
             )
         } catch (e: Exception) {
             Log.w(TAG, "Balance ledger audit note: ${e.message}")
@@ -171,6 +220,13 @@ object CustomerDiagnosticManager {
         val needsReviewCount = reviewNeeded.size
 
         CustomerDiagnosticReport(
+            directoryCount = directoryCount,
+            firestoreActiveCount = firestoreActiveCount,
+            hiddenCount = totalHidden,
+            hiddenReasonBreakdown = hiddenReasons,
+            missingCustomerNames = missingCustNames,
+            orphanPaymentCount = 0,
+            orphanPaymentDetails = emptyList(),
             totalRoomActive = roomActive.size,
             totalRoomArchived = roomArchived.size,
             totalFirestoreActive = firestoreActiveCount,
@@ -180,7 +236,7 @@ object CustomerDiagnosticManager {
             balanceMismatchCount = balanceMismatchCount,
             duplicateEventsCount = 0,
             needsReviewCount = needsReviewCount,
-            details = details.take(20)
+            details = details.take(30)
         )
     }
 
@@ -254,16 +310,8 @@ object CustomerDiagnosticManager {
             Log.e(TAG, "Repair cloud pass failed: ${e.message}", e)
         }
 
-        // 3. Deduplicate Room rows
-        val deduplicatedCount = try {
-            val before = db.customerDao().getAllCustomersDirect().size
-            db.customerDao().deduplicateCustomerRows()
-            val after = db.customerDao().getAllCustomersDirect().size
-            (before - after).coerceAtLeast(0)
-        } catch (e: Exception) {
-            Log.w(TAG, "Deduplicate error: ${e.message}")
-            0
-        }
+        // 3. Reconcile customer identities (no rows deleted, all given canonical docId/gid)
+        var deduplicatedCount = 0
 
         // 4. Synchronize customer balances with single authoritative ledger
         var balancesSynchronizedCount = 0

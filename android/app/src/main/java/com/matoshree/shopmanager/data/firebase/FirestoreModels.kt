@@ -46,23 +46,15 @@ data class CustomerDto(
     var updatedAt: Long = System.currentTimeMillis()
 ) {
     fun toDomain(): Customer {
-        val cleanMob = com.matoshree.shopmanager.utils.PhoneUtils.clean10DigitMobileInput(mobile)
-        val trueDocId = when {
-            id.isNotBlank() -> id
-            cleanMob.length == 10 -> "cust_m_$cleanMob"
-            else -> null
-        }
-        val effectiveGid = if (!trueDocId.isNullOrBlank()) {
-            IdGenerator.customerGid(trueDocId)
-        } else if (gid.isNotBlank() && !IdFormat.isLegacy(gid)) {
-            gid
-        } else {
-            IdGenerator.generate(IdType.CUSTOMER)
-        }
+        val (canonicalDocId, canonicalGid) = IdGenerator.canonicalCustomerDocIdAndGid(
+            mobile = mobile,
+            existingDocId = id.ifBlank { null },
+            existingGid = gid.ifBlank { null }
+        )
         return Customer(
             id = legacyId ?: (id.hashCode().toLong() and 0x7FFFFFFFFFFFFFFFL),
-            gid = effectiveGid,
-            docId = trueDocId,
+            gid = canonicalGid,
+            docId = canonicalDocId,
             shopId = 1,
             name = name,
             mobile = mobile,

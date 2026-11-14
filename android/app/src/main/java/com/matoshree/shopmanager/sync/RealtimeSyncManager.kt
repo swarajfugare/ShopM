@@ -25,6 +25,7 @@ import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.tasks.await
 import java.util.concurrent.atomic.AtomicBoolean
 
 /**
@@ -84,6 +85,10 @@ class RealtimeSyncManager private constructor(
             return
         }
         Log.i(TAG, "Starting hardened RealtimeSyncManager...")
+
+        syncScope.launch {
+            reconcileCustomersFromCloud()
+        }
 
         if (authStateListener == null) {
             authStateListener = FirebaseAuth.AuthStateListener { auth ->
@@ -307,6 +312,23 @@ class RealtimeSyncManager private constructor(
         }
     }
 
+    suspend fun reconcileCustomersFromCloud() = withContext(Dispatchers.IO) {
+        try {
+            if (!FirebaseManager.isNetworkAvailable()) return@withContext
+            FirebaseManager.ensureAuthenticated()
+            val snap = FirebaseManager.customersCollection().get().await()
+            val activeDocs = snap.documents.mapNotNull { it.toCustomerDomain() }.filter { it.isActive }
+            val entities = activeDocs.map { it.toEntity().copy(serverId = if (it.id > 0) it.id else null) }
+            if (entities.isNotEmpty()) {
+                database.withTransaction {
+                    database.customerDao().upsertServerCustomers(entities)
+                }
+            }
+        } catch (e: Exception) {
+            Log.w(TAG, "Reconcile customers notice: ${e.message}")
+        }
+    }
+
     private fun handleCustomersSnapshot(snapshot: com.google.firebase.firestore.QuerySnapshot, sourceTag: String) {
         _syncState.value = AppSyncState.SYNCED
 
@@ -332,6 +354,15 @@ class RealtimeSyncManager private constructor(
                     DocumentChange.Type.REMOVED -> {
                         toArchive.add(Triple(if (cust.id > 0) cust.id else null, cleanMob, cust.name))
                     }
+                }
+            }
+
+            // Also ensure all documents in this snapshot that are active exist in Room
+            for (doc in snapshot.documents) {
+                if (doc.metadata.hasPendingWrites()) continue
+                val cust = doc.toCustomerDomain() ?: continue
+                if (cust.isActive) {
+                    toUpsert.add(cust.toEntity().copy(serverId = if (cust.id > 0) cust.id else null))
                 }
             }
 

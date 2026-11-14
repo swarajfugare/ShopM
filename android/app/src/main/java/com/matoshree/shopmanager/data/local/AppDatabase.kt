@@ -561,6 +561,19 @@ abstract class AppDatabase : RoomDatabase() {
 
         fun getInstance(context: Context): AppDatabase {
             return INSTANCE ?: synchronized(this) {
+                // Pre-migration safety backup: snapshot database file BEFORE Room opens or touches it
+                try {
+                    val dbFile = context.applicationContext.getDatabasePath("matoshree_shop_manager.db")
+                    if (dbFile != null && dbFile.exists() && dbFile.length() > 0) {
+                        val backupDir = java.io.File(context.applicationContext.filesDir, "db_pre_migration_backups").apply { mkdirs() }
+                        val backupFile = java.io.File(backupDir, "matoshree_shop_manager_backup_${System.currentTimeMillis()}.db")
+                        dbFile.copyTo(backupFile, overwrite = true)
+                        android.util.Log.i("AppDatabase", "Pre-migration database backup safely created: ${backupFile.absolutePath}")
+                    }
+                } catch (e: Exception) {
+                    android.util.Log.w("AppDatabase", "Pre-migration backup notice: ${e.message}")
+                }
+
                 val instance = Room.databaseBuilder(
                     context.applicationContext,
                     AppDatabase::class.java,

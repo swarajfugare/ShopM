@@ -152,6 +152,34 @@ object IdGenerator {
 
     fun newCustomerGid(): String = generate(IdType.CUSTOMER)
 
+    /**
+     * Canonical customer docId and gid computation (P0-B).
+     * Single function used before Room and Firestore writes.
+     * - With 10-digit mobile: docId = cust_m_<mobile>, gid = customerGid(docId)
+     * - Without mobile:
+     *   - If existing docId or gid exists, preserve it.
+     *   - Otherwise, generate new ULID: gid = generate(IdType.CUSTOMER), docId = gid.
+     */
+    fun canonicalCustomerDocIdAndGid(
+        mobile: String?,
+        existingDocId: String? = null,
+        existingGid: String? = null
+    ): Pair<String, String> {
+        val cleanMob = com.matoshree.shopmanager.utils.PhoneUtils.clean10DigitMobileInput(mobile ?: "")
+        return if (cleanMob.length == 10) {
+            val docId = "cust_m_$cleanMob"
+            Pair(docId, customerGid(docId))
+        } else if (!existingDocId.isNullOrBlank()) {
+            val gid = if (!existingGid.isNullOrBlank() && IdFormat.isValid(existingGid)) existingGid else customerGid(existingDocId)
+            Pair(existingDocId, gid)
+        } else if (!existingGid.isNullOrBlank() && IdFormat.isValid(existingGid)) {
+            Pair(existingGid, existingGid)
+        } else {
+            val newGid = generate(IdType.CUSTOMER)
+            Pair(newGid, newGid)
+        }
+    }
+
     fun billGid(docId: String?): String =
         if (!docId.isNullOrBlank()) legacyGid(IdType.BILL, docId) else generate(IdType.BILL)
 

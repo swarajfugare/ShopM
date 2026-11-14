@@ -282,9 +282,6 @@ interface CustomerDao {
     @Query("SELECT * FROM customers WHERE (mobile = :mobile OR mobile LIKE '%' || :cleanMobile) AND isActive = 1 LIMIT 1")
     suspend fun getCustomerByMobileFuzzy(mobile: String, cleanMobile: String): CustomerEntity?
 
-    @Query("DELETE FROM customers WHERE id NOT IN (SELECT MIN(id) FROM customers WHERE isActive = 1 GROUP BY CASE WHEN mobile IS NOT NULL AND LENGTH(TRIM(mobile)) >= 10 THEN SUBSTR(TRIM(mobile), -10) ELSE LOWER(TRIM(name)) END)")
-    suspend fun deduplicateCustomerRows()
-
     @Query("SELECT * FROM customers WHERE mobile = :mobile AND isActive = 1 LIMIT 1")
     suspend fun getCustomerByMobile(mobile: String): CustomerEntity?
 
@@ -357,20 +354,13 @@ interface CustomerDao {
     @Transaction
     suspend fun upsertServerCustomer(customer: CustomerEntity) {
         val cleanMob = com.matoshree.shopmanager.utils.PhoneUtils.clean10DigitMobileInput(customer.mobile)
-        val trueDocId = when {
-            cleanMob.length == 10 -> "cust_m_$cleanMob"
-            !customer.docId.isNullOrBlank() -> customer.docId
-            else -> null
-        }
-        val canonicalGid = if (!trueDocId.isNullOrBlank()) {
-            com.matoshree.shopmanager.domain.model.IdGenerator.customerGid(trueDocId)
-        } else if (customer.gid.isNotBlank()) {
-            customer.gid
-        } else {
-            com.matoshree.shopmanager.domain.model.IdGenerator.generate(com.matoshree.shopmanager.domain.model.IdType.CUSTOMER)
-        }
+        val (canonicalDocId, canonicalGid) = com.matoshree.shopmanager.domain.model.IdGenerator.canonicalCustomerDocIdAndGid(
+            mobile = customer.mobile,
+            existingDocId = customer.docId,
+            existingGid = customer.gid
+        )
 
-        val existingByDocId = if (!trueDocId.isNullOrBlank()) getCustomerByDocId(trueDocId) else null
+        val existingByDocId = if (canonicalDocId.isNotBlank()) getCustomerByDocId(canonicalDocId) else null
         val existingByGid = if (existingByDocId == null && canonicalGid.isNotBlank()) getCustomerByGid(canonicalGid) else null
         val existingByMobile = if (existingByDocId == null && existingByGid == null && cleanMob.length == 10) getCustomerByMobileFuzzy(customer.mobile, cleanMob) else null
         val existingByServer = if (existingByDocId == null && existingByGid == null && existingByMobile == null && customer.serverId != null && customer.serverId > 0) getCustomerByServerId(customer.serverId) else null
@@ -380,7 +370,7 @@ interface CustomerDao {
             val updated = customer.copy(
                 id = existing.id,
                 gid = canonicalGid,
-                docId = trueDocId ?: existing.docId,
+                docId = canonicalDocId,
                 serverId = existing.serverId ?: customer.serverId,
                 mobile = if (cleanMob.length == 10) cleanMob else existing.mobile
             )
@@ -389,7 +379,7 @@ interface CustomerDao {
             val normalized = customer.copy(
                 id = 0,
                 gid = canonicalGid,
-                docId = trueDocId,
+                docId = canonicalDocId,
                 mobile = if (cleanMob.length == 10) cleanMob else customer.mobile
             )
             insertCustomer(normalized)

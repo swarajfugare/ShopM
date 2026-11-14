@@ -21,6 +21,7 @@ object AppLockManager : DefaultLifecycleObserver {
     private const val PREFS_NAME = "matoshree_lock_prefs"
     private const val KEY_TIMEOUT_SECONDS = "lock_timeout_seconds"
     private const val KEY_SCREEN_PROTECTION = "screen_protection_enabled"
+    private const val KEY_SCREEN_PROTECTION_MIGRATED_V353 = "screen_protection_migrated_v353"
 
     // Default timeout: 30 seconds
     const val DEFAULT_TIMEOUT_SECONDS = 30L
@@ -32,10 +33,22 @@ object AppLockManager : DefaultLifecycleObserver {
     private var isInitialized = false
     private var appContext: Context? = null
 
+    private fun migrateIfNeeded(context: Context) {
+        val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+        if (!prefs.getBoolean(KEY_SCREEN_PROTECTION_MIGRATED_V353, false)) {
+            // Owner requested screenshots allowed by default for normal screens
+            prefs.edit()
+                .putBoolean(KEY_SCREEN_PROTECTION, false)
+                .putBoolean(KEY_SCREEN_PROTECTION_MIGRATED_V353, true)
+                .apply()
+        }
+    }
+
     fun init(context: Context) {
         if (isInitialized) return
         isInitialized = true
         appContext = context.applicationContext
+        migrateIfNeeded(context)
         ProcessLifecycleOwner.get().lifecycle.addObserver(this)
     }
 
@@ -74,8 +87,20 @@ object AppLockManager : DefaultLifecycleObserver {
     }
 
     fun isScreenProtectionEnabled(context: Context): Boolean {
+        migrateIfNeeded(context)
         val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
-        return prefs.getBoolean(KEY_SCREEN_PROTECTION, true) // Enabled by default
+        return prefs.getBoolean(KEY_SCREEN_PROTECTION, false) // Default false (screenshots allowed)
+    }
+
+    fun isScreenshotAllowed(context: Context): Boolean {
+        return !isScreenProtectionEnabled(context)
+    }
+
+    fun setScreenshotAllowed(context: Context, allowed: Boolean, activity: Activity? = null) {
+        setScreenProtectionEnabled(context, !allowed)
+        if (activity != null) {
+            applyScreenProtection(activity)
+        }
     }
 
     fun setScreenProtectionEnabled(context: Context, enabled: Boolean) {
