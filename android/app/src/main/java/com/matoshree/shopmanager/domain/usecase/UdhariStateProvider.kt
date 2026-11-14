@@ -6,16 +6,18 @@ import com.matoshree.shopmanager.data.repository.UdhariRepository
 import com.matoshree.shopmanager.domain.model.Bill
 import com.matoshree.shopmanager.domain.model.Customer
 import com.matoshree.shopmanager.domain.model.PaymentMethod
+import com.matoshree.shopmanager.domain.model.PaymentStatus
 import com.matoshree.shopmanager.domain.model.UdhariTransaction
 import com.matoshree.shopmanager.domain.model.UdhariTransactionType
 import com.matoshree.shopmanager.utils.DateUtils
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.*
 
 data class UdhariLedgerState(
-    val isLoading: Boolean = false,
+    val isLoading: Boolean = true,
     val totalOutstanding: Double = 0.0,
     val pendingCustomersCount: Int = 0,
     val customerBalances: Map<String, Double> = emptyMap(),
@@ -27,7 +29,8 @@ data class UdhariLedgerState(
     val todayUpiCollections: Double = 0.0,
     val thisMonthCollections: Double = 0.0,
     val overdueAmount: Double = 0.0,
-    val pendingBillsCount: Int = 0
+    val pendingBillsCount: Int = 0,
+    val errorMessage: String? = null
 )
 
 class UdhariStateProvider(
@@ -38,55 +41,43 @@ class UdhariStateProvider(
 ) {
     val state: StateFlow<UdhariLedgerState> = combine(
         customerRepository.getAllCustomers().distinctUntilChanged(),
-        billRepository.getAllBills(limit = 10000).distinctUntilChanged(),
+        billRepository.getAllBills(limit = 100000).distinctUntilChanged(),
         udhariRepository.getAllTransactions().distinctUntilChanged()
     ) { customers, bills, transactions ->
         Triple(customers, bills, transactions)
     }.debounce(150).map { (customers, bills, transactions) ->
-        val activeBills = bills.filter { !it.isVoided }
+        val activeBills = bills.filter { !it.isVoided && it.paymentStatus != PaymentStatus.VOID }
             .distinctBy { if (it.transactionUuid.isNotBlank()) it.transactionUuid else it.billNumber }
-        val validTxs = transactions.filter { !it.isReversed }
+        val validTxs = transactions.filter { !it.isReversed && it.status != "TRASH" }
             .distinctBy { if (it.transactionUuid.isNotBlank()) it.transactionUuid else "${it.id}_${it.billId}" }
         val uniqueCustomers = customers.distinctBy { it.canonicalKey() }
 
-        val balances = ShopMetricsCalculator.calculateCustomerLedgerBalances(activeBills, validTxs, uniqueCustomers)
-        val totalOutstanding = balances.values.sum()
-        val pendingCustomersCount = balances.count { it.value > 0.01 }
-        val pendingBills = activeBills.filter { it.pendingAmount > 0.01 }
-
-        val todayIso = DateUtils.todayDate()
-        val currentMonthIso = todayIso.take(7)
-
-        val todayPayments = validTxs.filter { it.type == UdhariTransactionType.PAYMENT && it.date == todayIso }
-        val todayCollections = todayPayments.sumOf { it.amount }
-        val todayCashCollections = todayPayments.filter { it.paymentMethod == PaymentMethod.CASH }.sumOf { it.amount }
-        val todayUpiCollections = todayPayments.filter { it.paymentMethod == PaymentMethod.UPI }.sumOf { it.amount }
-
-        val monthPayments = validTxs.filter { it.type == UdhariTransactionType.PAYMENT && it.date.startsWith(currentMonthIso) }
-        val monthCollections = monthPayments.sumOf { it.amount }
-
-        val overdueAmount = pendingBills.filter { it.dueDate != null && DateUtils.isDatePassed(it.dueDate) }.sumOf { it.pendingAmount }
+        val summary = UdhariLedger.computeShopLedger(activeBills, validTxs, uniqueCustomers)
+        val balances = summary.customerResults.mapValues { it.value.balance }
 
         UdhariLedgerState(
             isLoading = false,
-            totalOutstanding = totalOutstanding,
-            pendingCustomersCount = pendingCustomersCount,
+            totalOutstanding = summary.totalOutstanding,
+            pendingCustomersCount = summary.pendingCustomersCount,
             customerBalances = balances,
             customers = uniqueCustomers,
             activeBills = activeBills,
             validTransactions = validTxs,
-            todayCollections = todayCollections,
-            todayCashCollections = todayCashCollections,
-            todayUpiCollections = todayUpiCollections,
-            thisMonthCollections = monthCollections,
-            overdueAmount = overdueAmount,
-            pendingBillsCount = pendingBills.size
+            todayCollections = summary.todayCollections,
+            todayCashCollections = summary.todayCashCollections,
+            todayUpiCollections = summary.todayUpiCollections,
+            thisMonthCollections = summary.thisMonthCollections,
+            overdueAmount = summary.overdueAmount,
+            pendingBillsCount = summary.pendingBillsCount,
+            errorMessage = null
         )
-    }.catch { e ->
-        android.util.Log.e("UdhariStateProvider", "Error computing state: ${e.message}", e)
+    }.retryWhen { cause, attempt ->
+        android.util.Log.e("UdhariStateProvider", "Error in state flow (attempt $attempt): ${cause.message}", cause)
+        delay(minOf(1000L * (attempt + 1), 5000L))
+        true
     }.stateIn(
         scope,
         SharingStarted.Eagerly,
-        UdhariLedgerState(isLoading = false)
+        UdhariLedgerState(isLoading = true)
     )
 }

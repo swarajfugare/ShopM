@@ -103,15 +103,28 @@ class UdhariDueReminderWorker(
                             }
                         }
                     }
-
-                    // Check if overdue by more than 15 days
-                    val isOld = (nowMs - tx.createdAt) > fifteenDaysMs
-                    if (isOld && tx.remainingOutstanding > 0.0) {
-                        overdueCount++
-                        totalOverdueAmount += tx.remainingOutstanding
-                    }
                 }
             }
+
+            // Unified Shop Ledger calculation for rock-solid overdue & reminder amounts
+            val db = AppDatabase.getInstance(context)
+            val localBills = db.billDao().getAllBillsDirect(50000).map { it.toDomain() }
+            val localCustomers = db.customerDao().getAllCustomersDirect().map { it.toDomain() }
+            val mergedCustomers = (localCustomers + cloudCustomers).distinctBy { it.canonicalKey() }
+
+            val shopSummary = com.matoshree.shopmanager.domain.usecase.UdhariLedger.computeShopLedger(
+                allBills = localBills,
+                allTransactions = allTxsDomain,
+                allCustomers = mergedCustomers
+            )
+            val keyResolver = com.matoshree.shopmanager.domain.usecase.UdhariLedger.buildCustomerKeyResolver(
+                customers = mergedCustomers,
+                bills = localBills,
+                transactions = allTxsDomain
+            )
+
+            overdueCount = shopSummary.customerResults.values.count { it.isOverdue }
+            totalOverdueAmount = shopSummary.overdueAmount
 
             // Automated WhatsApp Due Reminders (Grouped by customer with current true balance)
             val isAutoThisDevice = WhatsAppWebhookManager.isAutoRemindersFromThisDeviceEnabled(context)
@@ -120,26 +133,10 @@ class UdhariDueReminderWorker(
 
             if (isAutoThisDevice && isReminderEnabled && webhookConfigured && dueCustomersMap.isNotEmpty()) {
                 try {
-                    val db = AppDatabase.getInstance(context)
-                    val localBills = db.billDao().getAllBillsDirect(10000).map { it.toDomain() }
-                    val localCustomers = db.customerDao().getAllCustomersDirect().map { it.toDomain() }
-                    val mergedCustomers = (localCustomers + cloudCustomers).distinctBy { it.canonicalKey() }
-
-                    val ledgerBalances = ShopMetricsCalculator.calculateCustomerLedgerBalances(
-                        activeBills = localBills,
-                        transactions = allTxsDomain,
-                        customers = mergedCustomers
-                    )
-                    val keyResolver = ShopMetricsCalculator.buildCustomerKeyResolver(
-                        customers = mergedCustomers,
-                        bills = localBills,
-                        transactions = allTxsDomain
-                    )
-
                     // Cap safety at 200 per run
                     for ((cleanMobile, info) in dueCustomersMap.entries.take(200)) {
                         val custKey = keyResolver(info.mobile, info.name, info.customerId) ?: "mob_$cleanMobile"
-                        val trueBalance = ledgerBalances[custKey] ?: 0.0
+                        val trueBalance = shopSummary.customerResults[custKey]?.balance ?: 0.0
 
                         // Rule: If balance <= 0.01, do not send reminder
                         if (trueBalance <= 0.01) {

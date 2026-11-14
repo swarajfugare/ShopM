@@ -37,6 +37,7 @@ import com.matoshree.shopmanager.data.repository.CustomerRepository
 import com.matoshree.shopmanager.data.repository.UdhariRepository
 import com.matoshree.shopmanager.domain.model.*
 import com.matoshree.shopmanager.domain.usecase.ShopMetricsCalculator
+import com.matoshree.shopmanager.domain.usecase.UdhariLedger
 import com.matoshree.shopmanager.ui.components.MatoshreeCard
 import com.matoshree.shopmanager.ui.components.MatoshreeTopAppBar
 import com.matoshree.shopmanager.ui.components.PaymentMethodPill
@@ -68,104 +69,41 @@ class UdhariViewModel(
     val billsFlow = billRepository.getAllBills(limit = 10000).distinctUntilChanged()
     val transactionsFlow = udhariRepository.getAllTransactions().distinctUntilChanged()
 
-    private val baseSummariesFlow = if (udhariStateProvider != null) {
-        udhariStateProvider.state.map { s ->
-            val activeBills = s.activeBills
-            val validTxs = s.validTransactions
-            val uniqueCustomers = s.customers
-            val ledgerBalances = s.customerBalances
-            val keyResolver = ShopMetricsCalculator.buildCustomerKeyResolver(uniqueCustomers, activeBills, validTxs)
+    private val baseSummariesFlow = combine(
+        customersFlow,
+        billsFlow,
+        transactionsFlow
+    ) { customers, bills, transactions ->
+        val activeBills = bills.filter { !it.isVoided && it.paymentStatus != PaymentStatus.VOID }
+            .distinctBy { if (it.transactionUuid.isNotBlank()) it.transactionUuid else it.billNumber }
+        val validTxs = transactions.filter { !it.isReversed && it.status != "TRASH" }
+            .distinctBy { if (it.transactionUuid.isNotBlank()) it.transactionUuid else "${it.id}_${it.billId}" }
+        val uniqueCustomers = customers.distinctBy { it.canonicalKey() }
 
-            uniqueCustomers.map { customer ->
-                val customerKey = keyResolver(customer.mobile, customer.name, customer.id) ?: customer.canonicalKey()
-                val totalPendingFromBills = ledgerBalances[customerKey] ?: 0.0
+        val summary = UdhariLedger.computeShopLedger(activeBills, validTxs, uniqueCustomers)
+        val keyResolver = UdhariLedger.buildCustomerKeyResolver(uniqueCustomers, activeBills, validTxs)
 
-                val custBills = activeBills.filter { b ->
-                    keyResolver(b.customerMobile, b.customerName, b.customerId) == customerKey
-                }
-                val custTxs = validTxs.filter { tx ->
-                    keyResolver(tx.customerMobile, tx.customerName, tx.customerId) == customerKey
-                }
+        uniqueCustomers.map { customer ->
+            val customerKey = keyResolver(customer.mobile, customer.name, customer.id) ?: customer.canonicalKey()
+            val ledgerRes = summary.customerResults[customerKey] ?: UdhariLedger.computeCustomerLedger(customerKey, activeBills, validTxs, uniqueCustomers)
 
-                val totalPurchases = custBills.sumOf { it.finalAmount } + custTxs.filter { it.type == UdhariTransactionType.PURCHASE_CREDIT && it.billId == 0L }.sumOf { it.amount }
-                val totalPaid = (totalPurchases - totalPendingFromBills).coerceAtLeast(0.0)
+            val availableCredit = customer.creditLimit?.let { (it - ledgerRes.balance).coerceAtLeast(0.0) }
 
-                val pendingBills = custBills.filter { it.paymentStatus != PaymentStatus.PAID && it.pendingAmount > 0.01 }
-                val lastPayment = custTxs.filter { it.type == UdhariTransactionType.PAYMENT }.maxByOrNull { it.createdAt }
-
-                val oldestDueDate = pendingBills.mapNotNull { it.dueDate }.minOrNull()
-                val isOverdue = pendingBills.any { it.dueDate != null && DateUtils.isDatePassed(it.dueDate) }
-
-                val availableCredit = customer.creditLimit?.let { (it - totalPendingFromBills).coerceAtLeast(0.0) }
-
-                CustomerUdhariSummary(
-                    customer = customer.copy(outstandingBalance = totalPendingFromBills),
-                    totalOutstanding = totalPendingFromBills,
-                    totalPurchases = totalPurchases,
-                    totalPaid = totalPaid,
-                    pendingBillsCount = pendingBills.size + (if (custTxs.any { it.type == UdhariTransactionType.PURCHASE_CREDIT && it.billId == 0L }) 1 else 0),
-                    lastPaymentDate = lastPayment?.date,
-                    lastPaymentAmount = lastPayment?.amount,
-                    oldestDueDate = oldestDueDate,
-                    isOverdue = isOverdue,
-                    creditLimit = customer.creditLimit,
-                    availableCredit = availableCredit
-                )
-            }
-        }.distinctUntilChanged()
-    } else {
-        combine(
-            customersFlow,
-            billsFlow,
-            transactionsFlow
-        ) { customers, bills, transactions ->
-            Triple(customers, bills, transactions)
-        }.debounce(200).map { (customers, bills, transactions) ->
-            val activeBills = bills.filter { !it.isVoided }.distinctBy { if (it.transactionUuid.isNotBlank()) it.transactionUuid else it.billNumber }
-            val validTxs = transactions.filter { !it.isReversed }.distinctBy { if (it.transactionUuid.isNotBlank()) it.transactionUuid else "${it.id}_${it.billId}" }
-            val uniqueCustomers = customers.distinctBy { it.canonicalKey() }
-
-            val keyResolver = ShopMetricsCalculator.buildCustomerKeyResolver(uniqueCustomers, activeBills, validTxs)
-            val ledgerBalances = ShopMetricsCalculator.calculateCustomerLedgerBalances(activeBills, validTxs, uniqueCustomers)
-
-            uniqueCustomers.map { customer ->
-                val customerKey = keyResolver(customer.mobile, customer.name, customer.id) ?: customer.canonicalKey()
-                val totalPendingFromBills = ledgerBalances[customerKey] ?: 0.0
-
-                val custBills = activeBills.filter { b ->
-                    keyResolver(b.customerMobile, b.customerName, b.customerId) == customerKey
-                }
-                val custTxs = validTxs.filter { tx ->
-                    keyResolver(tx.customerMobile, tx.customerName, tx.customerId) == customerKey
-                }
-
-                val totalPurchases = custBills.sumOf { it.finalAmount } + custTxs.filter { it.type == UdhariTransactionType.PURCHASE_CREDIT && it.billId == 0L }.sumOf { it.amount }
-                val totalPaid = (totalPurchases - totalPendingFromBills).coerceAtLeast(0.0)
-
-                val pendingBills = custBills.filter { it.paymentStatus != PaymentStatus.PAID && it.pendingAmount > 0.01 }
-                val lastPayment = custTxs.filter { it.type == UdhariTransactionType.PAYMENT }.maxByOrNull { it.createdAt }
-
-                val oldestDueDate = pendingBills.mapNotNull { it.dueDate }.minOrNull()
-                val isOverdue = pendingBills.any { it.dueDate != null && DateUtils.isDatePassed(it.dueDate) }
-
-                val availableCredit = customer.creditLimit?.let { (it - totalPendingFromBills).coerceAtLeast(0.0) }
-
-                CustomerUdhariSummary(
-                    customer = customer.copy(outstandingBalance = totalPendingFromBills),
-                    totalOutstanding = totalPendingFromBills,
-                    totalPurchases = totalPurchases,
-                    totalPaid = totalPaid,
-                    pendingBillsCount = pendingBills.size + (if (custTxs.any { it.type == UdhariTransactionType.PURCHASE_CREDIT && it.billId == 0L }) 1 else 0),
-                    lastPaymentDate = lastPayment?.date,
-                    lastPaymentAmount = lastPayment?.amount,
-                    oldestDueDate = oldestDueDate,
-                    isOverdue = isOverdue,
-                    creditLimit = customer.creditLimit,
-                    availableCredit = availableCredit
-                )
-            }
-        }.distinctUntilChanged()
-    }
+            CustomerUdhariSummary(
+                customer = customer.copy(outstandingBalance = ledgerRes.balance),
+                totalOutstanding = ledgerRes.balance,
+                totalPurchases = ledgerRes.totalPurchases,
+                totalPaid = ledgerRes.totalPaid,
+                pendingBillsCount = ledgerRes.pendingBillsCount,
+                lastPaymentDate = ledgerRes.lastPaymentDate,
+                lastPaymentAmount = ledgerRes.lastPaymentAmount,
+                oldestDueDate = ledgerRes.oldestDueDate,
+                isOverdue = ledgerRes.isOverdue,
+                creditLimit = customer.creditLimit,
+                availableCredit = availableCredit
+            )
+        }
+    }.distinctUntilChanged()
 
     // Combined Udhari customer summaries with query, filter, sort
     val customerSummaries: StateFlow<List<CustomerUdhariSummary>> = combine(
@@ -770,29 +708,48 @@ fun UdhariCustomerCard(
                 }
             }
 
+            // Lifetime Credit & Real Payment Summary
+            Spacer(modifier = Modifier.height(6.dp))
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .background(WarmIvory, RoundedCornerShape(6.dp))
+                    .padding(horizontal = 8.dp, vertical = 5.dp),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    text = "एकूण खरेदी: ${CurrencyFormatter.format(summary.totalPurchases)} • जमा: ${CurrencyFormatter.format(summary.totalPaid)}",
+                    style = MaterialTheme.typography.bodySmall.copy(color = MutedCharcoal, fontSize = 11.sp),
+                    modifier = Modifier.weight(1f),
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+                if (summary.pendingBillsCount > 0) {
+                    Spacer(modifier = Modifier.width(4.dp))
+                    Text(
+                        text = "${summary.pendingBillsCount} बिले बाकी",
+                        style = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.SemiBold, color = DeepEmerald, fontSize = 11.sp),
+                        maxLines = 1
+                    )
+                }
+            }
+
             // Payment / Activity Details
             if (summary.lastPaymentAmount != null && summary.lastPaymentDate != null) {
-                Spacer(modifier = Modifier.height(8.dp))
+                Spacer(modifier = Modifier.height(4.dp))
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .background(WarmIvory, RoundedCornerShape(6.dp))
-                        .padding(horizontal = 8.dp, vertical = 6.dp),
+                        .padding(horizontal = 4.dp),
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Text(
                         text = "शेवटचे जमा: ${CurrencyFormatter.format(summary.lastPaymentAmount)} (${summary.lastPaymentDate})",
-                        style = MaterialTheme.typography.bodySmall.copy(color = MutedCharcoal),
-                        modifier = Modifier.weight(1f),
+                        style = MaterialTheme.typography.labelSmall.copy(color = MutedCharcoal),
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis
-                    )
-                    Spacer(modifier = Modifier.width(6.dp))
-                    Text(
-                        text = "${summary.pendingBillsCount} बिले बाकी",
-                        style = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.SemiBold, color = DeepEmerald),
-                        maxLines = 1
                     )
                 }
             }

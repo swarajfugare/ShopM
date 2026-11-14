@@ -52,15 +52,8 @@ object ShopMetricsCalculator {
             .sumOf { it.paidAmount }
     }
 
-    fun resolveCustomerKey(mobile: String?, name: String?, localId: Long?): String? {
-        val clean = com.matoshree.shopmanager.utils.PhoneUtils.clean10DigitMobileInput(mobile ?: "")
-        return when {
-            clean.length == 10 -> "mob_$clean"
-            !name.isNullOrBlank() -> "name_${name.trim().lowercase()}"
-            localId != null && localId > 0L -> "cust_$localId"
-            else -> null
-        }
-    }
+    fun resolveCustomerKey(mobile: String?, name: String?, localId: Long?): String? =
+        UdhariLedger.resolveCustomerKey(mobile, name, localId)
 
     /**
      * Builds a unified resolver that links customer entities, bills, and transactions
@@ -71,36 +64,8 @@ object ShopMetricsCalculator {
         customers: List<Customer> = emptyList(),
         bills: List<Bill> = emptyList(),
         transactions: List<UdhariTransaction> = emptyList()
-    ): (mobile: String?, name: String?, localId: Long?) -> String? {
-        val aliasToCanonical = mutableMapOf<String, String>()
-
-        // 1. Seed from known customer entities (only map name if it is unique among customers)
-        val nameCount = customers.map { it.name.trim().lowercase() }.filter { it.isNotBlank() }.groupingBy { it }.eachCount()
-        for (c in customers) {
-            val cleanMob = com.matoshree.shopmanager.utils.PhoneUtils.clean10DigitMobileInput(c.mobile)
-            val cleanName = c.name.trim().lowercase()
-            if (cleanMob.length == 10) {
-                if (cleanName.isNotBlank() && (nameCount[cleanName] ?: 0) == 1) {
-                    aliasToCanonical["name_$cleanName"] = "mob_$cleanMob"
-                }
-                if (c.id > 0L) {
-                    aliasToCanonical["id_${c.id}"] = "mob_$cleanMob"
-                }
-            }
-        }
-
-        return { mobile, name, localId ->
-            val cleanMob = com.matoshree.shopmanager.utils.PhoneUtils.clean10DigitMobileInput(mobile ?: "")
-            if (cleanMob.length == 10) {
-                "mob_$cleanMob"
-            } else {
-                val cleanName = name?.trim()?.lowercase() ?: ""
-                (if (cleanName.isNotBlank()) aliasToCanonical["name_$cleanName"] else null)
-                    ?: (if (localId != null && localId > 0L) aliasToCanonical["id_$localId"] else null)
-                    ?: resolveCustomerKey(mobile, name, localId)
-            }
-        }
-    }
+    ): (mobile: String?, name: String?, localId: Long?) -> String? =
+        UdhariLedger.buildCustomerKeyResolver(customers, bills, transactions)
 
     /**
      * Calculates customer ledger balances keyed by canonical customer identifier.
@@ -111,82 +76,8 @@ object ShopMetricsCalculator {
         transactions: List<UdhariTransaction>,
         customers: List<Customer> = emptyList()
     ): Map<String, Double> {
-        val nonVoidBills = activeBills.filter { !it.isVoided }
-        val validTxs = transactions.filter { !it.isReversed }
-
-        val keyResolver = buildCustomerKeyResolver(customers, nonVoidBills, validTxs)
-
-        val txBillIds = validTxs.filter { it.type == UdhariTransactionType.PAYMENT && it.billId != 0L }.map { it.billId }.toSet()
-        val txBillNumbers = validTxs.filter { it.type == UdhariTransactionType.PAYMENT && it.billNumber.isNotBlank() }.map { it.billNumber }.toSet()
-
-        val allCustomerKeys = mutableSetOf<String>()
-        customers.forEach { c ->
-            keyResolver(c.mobile, c.name, c.id)?.let { allCustomerKeys.add(it) }
-        }
-        nonVoidBills.forEach { b ->
-            keyResolver(b.customerMobile, b.customerName, b.customerId)?.let { allCustomerKeys.add(it) }
-        }
-        validTxs.forEach { tx ->
-            keyResolver(tx.customerMobile, tx.customerName, tx.customerId)?.let { allCustomerKeys.add(it) }
-        }
-
-        val customerByKey = mutableMapOf<String, Customer>()
-        for (c in customers) {
-            val k = keyResolver(c.mobile, c.name, c.id)
-            if (k != null && (!customerByKey.containsKey(k) || c.outstandingBalance > (customerByKey[k]?.outstandingBalance ?: 0.0))) {
-                customerByKey[k] = c
-            }
-        }
-
-        val balances = mutableMapOf<String, Double>()
-        for (key in allCustomerKeys) {
-            val custBills = nonVoidBills.filter { b ->
-                keyResolver(b.customerMobile, b.customerName, b.customerId) == key
-            }
-            val custTxs = validTxs.filter { tx ->
-                keyResolver(tx.customerMobile, tx.customerName, tx.customerId) == key
-            }
-            val matchingCust = customerByKey[key]
-
-            // 1. Transaction-based Udhari Ledger
-            val txCredits = custTxs.filter { it.type == UdhariTransactionType.PURCHASE_CREDIT }.sumOf { it.amount }
-            val txPayments = custTxs.filter { it.type == UdhariTransactionType.PAYMENT }.sumOf { it.amount }
-            val txReversals = custTxs.filter { it.type == UdhariTransactionType.REVERSAL }.sumOf { it.amount }
-            val totalCredits = (txPayments - txReversals).coerceAtLeast(0.0)
-
-            // 2. Unrepresented Pending Bills (Bills that do not have a matching PURCHASE_CREDIT in custTxs)
-            val creditTxBillIds = custTxs.filter { it.type == UdhariTransactionType.PURCHASE_CREDIT }.mapNotNull { if (it.billId != 0L) it.billId else null }.toSet()
-            val creditTxBillNumbers = custTxs.filter { it.type == UdhariTransactionType.PURCHASE_CREDIT }.map { it.billNumber }.filter { it.isNotBlank() }.toSet()
-
-            val txPaymentBillIds = custTxs.filter { it.type == UdhariTransactionType.PAYMENT }.mapNotNull { if (it.billId != 0L) it.billId else null }.toSet()
-            val txPaymentBillNumbers = custTxs.filter { it.type == UdhariTransactionType.PAYMENT }.map { it.billNumber }.filter { it.isNotBlank() }.toSet()
-
-            val unrepresentedDebits = custBills.filter { b ->
-                b.paymentStatus != PaymentStatus.PAID &&
-                !creditTxBillIds.contains(b.id) &&
-                !creditTxBillNumbers.contains(b.billNumber)
-            }.sumOf { b ->
-                val hasPaymentInTxs = txPaymentBillIds.contains(b.id) || txPaymentBillNumbers.contains(b.billNumber)
-                if (hasPaymentInTxs) {
-                    b.finalAmount
-                } else {
-                    if (b.pendingAmount > 0.0) b.pendingAmount else (b.finalAmount - b.paidAmount).coerceAtLeast(0.0)
-                }
-            }
-
-            val totalDebits = txCredits + unrepresentedDebits
-
-            // 3. Fallback to customer's recorded outstandingBalance if no transactions or bills exist
-            val recordedBalance = if (custTxs.isEmpty() && custBills.isEmpty() && matchingCust != null) {
-                matchingCust.outstandingBalance.coerceAtLeast(0.0)
-            } else {
-                0.0
-            }
-
-            val totalDue = ((totalDebits - totalCredits) + recordedBalance).coerceAtLeast(0.0)
-            balances[key] = totalDue
-        }
-        return balances
+        val summary = UdhariLedger.computeShopLedger(activeBills, transactions, customers)
+        return summary.customerResults.mapValues { it.value.balance }
     }
 
     /**
@@ -197,8 +88,7 @@ object ShopMetricsCalculator {
         transactions: List<UdhariTransaction>,
         customers: List<Customer> = emptyList()
     ): Double {
-        val balances = calculateCustomerLedgerBalances(activeBills, transactions, customers)
-        return balances.values.sum()
+        return UdhariLedger.computeShopLedger(activeBills, transactions, customers).totalOutstanding
     }
 
     /**
@@ -209,7 +99,6 @@ object ShopMetricsCalculator {
         transactions: List<UdhariTransaction>,
         customers: List<Customer> = emptyList()
     ): Int {
-        val balances = calculateCustomerLedgerBalances(activeBills, transactions, customers)
-        return balances.count { it.value > 0.01 }
+        return UdhariLedger.computeShopLedger(activeBills, transactions, customers).pendingCustomersCount
     }
 }

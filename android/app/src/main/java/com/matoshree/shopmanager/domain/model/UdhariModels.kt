@@ -65,3 +65,17 @@ data class UdhariLedgerEntry(
     val isReversed: Boolean = false,
     val transaction: UdhariTransaction? = null
 )
+
+@Serializable
+data class KhatavahiEntry(
+    val id: String,
+    val date: String,
+    val timeMillis: Long,
+    val description: String,
+    val isCredit: Boolean, // false = खरेदी / उधारी (+), true = जमा (-)
+    val amount: Double,
+    val runningBalance: Double,
+    val billId: Long? = null,
+    val billNumber: String? = null,
+    val paymentMethod: PaymentMethod? = null
+)

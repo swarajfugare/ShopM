@@ -44,6 +44,7 @@ import com.matoshree.shopmanager.data.repository.BillRepository
 import com.matoshree.shopmanager.data.repository.CustomerRepository
 import com.matoshree.shopmanager.data.repository.UdhariRepository
 import com.matoshree.shopmanager.domain.model.*
+import com.matoshree.shopmanager.domain.usecase.UdhariLedger
 import com.matoshree.shopmanager.utils.PhoneUtils
 import com.matoshree.shopmanager.ui.components.MatoshreeCard
 import com.matoshree.shopmanager.ui.components.MatoshreeDatePickerField
@@ -61,19 +62,6 @@ import com.matoshree.shopmanager.utils.PrintShareHelper
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
 import java.util.UUID
-
-data class KhatavahiEntry(
-    val id: String,
-    val date: String,
-    val timeMillis: Long,
-    val description: String,
-    val isCredit: Boolean, // false = खरेदी / उधारी (+), true = जमा (-)
-    val amount: Double,
-    val runningBalance: Double,
-    val billId: Long? = null,
-    val billNumber: String? = null,
-    val paymentMethod: PaymentMethod? = null
-)
 
 data class CustomerPaymentRecord(
     val id: String,
@@ -167,42 +155,32 @@ class CustomerViewModel(
             }
 
             combine(
-                billRepository.getAllBills(limit = 10000),
+                billRepository.getAllBills(limit = 100000),
                 udhariRepository.getAllTransactions()
             ) { allBills, txs ->
+                val allCustomers = _customers.value
                 val cleanTargetPhone = PhoneUtils.clean10DigitMobileInput(targetMobile)
-                val currentCust = _customers.value.find { 
+                val currentCust = allCustomers.find { 
                     it.id == customerId || (cleanTargetPhone.length == 10 && PhoneUtils.clean10DigitMobileInput(it.mobile) == cleanTargetPhone) 
                 } ?: cust
-                val custCleanMobile = PhoneUtils.clean10DigitMobileInput(currentCust?.mobile ?: targetMobile)
-                val custName = currentCust?.name?.trim() ?: ""
+                val keyResolver = UdhariLedger.buildCustomerKeyResolver(allCustomers, allBills, txs)
+                val targetKey = keyResolver(currentCust?.mobile ?: targetMobile, currentCust?.name, currentCust?.id ?: customerId) ?: "cust_$customerId"
+
+                val ledgerResult = UdhariLedger.computeCustomerLedger(
+                    customerKey = targetKey,
+                    allBills = allBills,
+                    allTransactions = txs,
+                    allCustomers = allCustomers
+                )
 
                 val customerSpecificBills = allBills.filter { b ->
-                    if (b.isVoided) return@filter false
-                    val bCleanMob = PhoneUtils.clean10DigitMobileInput(b.customerMobile ?: "")
-                    if (custCleanMobile.length == 10) {
-                        custCleanMobile == bCleanMob
-                    } else {
-                        (custName.isNotBlank() && b.customerName != null && b.customerName.trim().equals(custName, ignoreCase = true)) ||
-                        (b.customerId != null && b.customerId > 0 && (b.customerId == customerId || b.customerId == currentCust?.id))
-                    }
+                    !b.isVoided && b.paymentStatus != PaymentStatus.VOID &&
+                    keyResolver(b.customerMobile, b.customerName, b.customerId) == targetKey
                 }.distinctBy { if (it.transactionUuid.isNotBlank()) it.transactionUuid else it.billNumber }
-                
-                val voidedBillIds = allBills.filter { it.isVoided }.map { it.id }.toSet()
-                val voidedBillNumbers = allBills.filter { it.isVoided && it.billNumber.isNotBlank() }.map { it.billNumber }.toSet()
 
                 val validTxs = txs.filter { tx ->
-                    if (tx.isReversed || tx.status == "TRASH") return@filter false
-                    if (voidedBillIds.contains(tx.billId)) return@filter false
-                    if (tx.billNumber.isNotBlank() && voidedBillNumbers.contains(tx.billNumber)) return@filter false
-
-                    val txCleanMob = PhoneUtils.clean10DigitMobileInput(tx.customerMobile)
-                    if (custCleanMobile.length == 10) {
-                        custCleanMobile == txCleanMob
-                    } else {
-                        (custName.isNotBlank() && tx.customerName.trim().equals(custName, ignoreCase = true)) ||
-                        (tx.customerId == customerId || tx.customerId == currentCust?.id)
-                    }
+                    !tx.isReversed && tx.status != "TRASH" &&
+                    keyResolver(tx.customerMobile, tx.customerName, tx.customerId) == targetKey
                 }.distinctBy { if (it.transactionUuid.isNotBlank()) it.transactionUuid else "${it.id}_${it.billId}" }
 
                 if (customerBills.value != customerSpecificBills) {
@@ -212,78 +190,30 @@ class CustomerViewModel(
                     customerTransactions.value = validTxs
                 }
 
-                val txBillIds = validTxs.filter { it.type == UdhariTransactionType.PAYMENT && it.billId != 0L }.map { it.billId }.toSet()
-                val txBillNumbers = validTxs.filter { it.type == UdhariTransactionType.PAYMENT && it.billNumber.isNotBlank() }.map { it.billNumber }.toSet()
-
-                // 2. Tab 2: Created Udhari Records (ONLY created debt charges; NO payment entries)
+                // 2. Tab 2: Created Udhari Records (per-bill breakdown with remaining outstanding + manual debits)
                 val createdUdhariEntries = mutableListOf<UdhariLedgerEntry>()
-
-                // A. Credit Bills created for this customer (unpaid / partial)
-                customerSpecificBills.forEach { b ->
-                    val paymentsForThisBill = validTxs.filter {
-                        it.type == UdhariTransactionType.PAYMENT &&
-                        (it.billId == b.id || (it.billNumber.isNotBlank() && it.billNumber == b.billNumber))
-                    }.sumOf { it.amount }
-                    val currentPaid = if (b.paymentStatus == PaymentStatus.PAID && paymentsForThisBill == 0.0) b.finalAmount
-                                      else maxOf(b.paidAmount, paymentsForThisBill)
-                    val currentPending = (b.finalAmount - currentPaid).coerceAtLeast(0.0)
-
-                    if (currentPending > 0.01) {
-                        val billTimeMillis = try {
-                            val sdf = java.text.SimpleDateFormat("yyyy-MM-dd HH:mm:ss", java.util.Locale.ENGLISH).apply {
-                                timeZone = java.util.TimeZone.getTimeZone("Asia/Kolkata")
-                            }
-                            sdf.parse(b.billDate)?.time ?: (b.id * 1000L)
-                        } catch (_: Exception) {
-                            b.id * 1000L
-                        }
-
-                        val billSubtitle = if (currentPaid > 0.0) {
-                            "एकूण: ₹${String.format(java.util.Locale.US, "%.0f", b.finalAmount)} | जमा: ₹${String.format(java.util.Locale.US, "%.0f", currentPaid)} | बाकी: ₹${String.format(java.util.Locale.US, "%.0f", currentPending)}"
-                        } else if (!b.note.isNullOrBlank()) {
-                            b.note!!
-                        } else {
-                            "बिल खरेदी उधारी"
-                        }
-
-                        createdUdhariEntries.add(
-                            UdhariLedgerEntry(
-                                id = "bill_${b.id}",
-                                date = b.billDate,
-                                timeMillis = billTimeMillis,
-                                title = "उधारी बिल #${b.billNumber}",
-                                subtitle = billSubtitle,
-                                billNumber = b.billNumber,
-                                type = UdhariTransactionType.PURCHASE_CREDIT,
-                                debitAmount = currentPending,
-                                creditAmount = 0.0,
-                                runningBalance = 0.0,
-                                paymentMethod = b.paymentMethod,
-                                note = b.note,
-                                transaction = UdhariTransaction(
-                                    id = "bill_tx_${b.id}",
-                                    customerId = customerId,
-                                    customerName = currentCust?.name ?: "ग्राहक",
-                                    customerMobile = currentCust?.mobile ?: "",
-                                    customerVillage = currentCust?.address,
-                                    billId = b.id,
-                                    billNumber = b.billNumber,
-                                    type = UdhariTransactionType.PURCHASE_CREDIT,
-                                    amount = b.finalAmount,
-                                    paymentMethod = b.paymentMethod,
-                                    previousOutstanding = 0.0,
-                                    remainingOutstanding = currentPending,
-                                    transactionUuid = b.transactionUuid.ifBlank { "bill_tx_${b.id}" },
-                                    date = b.billDate,
-                                    dueDate = b.dueDate,
-                                    note = b.note
-                                )
-                            )
+                for (bDown in ledgerResult.billBreakdowns.filter { it.remainingOutstanding > 0.01 }) {
+                    val matchingBill = customerSpecificBills.find { it.id == bDown.billId }
+                    val billSubtitle = "एकूण: ₹${String.format(java.util.Locale.US, "%.0f", bDown.finalAmount)} | जमा: ₹${String.format(java.util.Locale.US, "%.0f", bDown.checkoutPaid + bDown.directPayments + bDown.fifoPayments)} | बाकी: ₹${String.format(java.util.Locale.US, "%.0f", bDown.remainingOutstanding)}"
+                    createdUdhariEntries.add(
+                        UdhariLedgerEntry(
+                            id = "bill_${bDown.billId}",
+                            date = bDown.billDate,
+                            timeMillis = bDown.billId * 1000L,
+                            title = "उधारी बिल #${bDown.billNumber}",
+                            subtitle = billSubtitle,
+                            billNumber = bDown.billNumber,
+                            type = UdhariTransactionType.PURCHASE_CREDIT,
+                            debitAmount = bDown.remainingOutstanding,
+                            creditAmount = 0.0,
+                            runningBalance = 0.0,
+                            paymentMethod = matchingBill?.paymentMethod,
+                            note = matchingBill?.note,
+                            transaction = null
                         )
-                    }
+                    )
                 }
 
-                // B. Manual Udhari Debits (+)
                 validTxs.filter { it.type == UdhariTransactionType.PURCHASE_CREDIT && it.billId == 0L }.forEach { t ->
                     createdUdhariEntries.add(
                         UdhariLedgerEntry(
@@ -310,57 +240,22 @@ class CustomerViewModel(
                     customerLedger.value = sortedLedger
                 }
 
-                // 3. Tab 3: Payments History (ONLY customer paid transactions)
+                // 3. Tab 3: Payments History (Real customer payments)
                 val allPaymentsList = mutableListOf<CustomerPaymentRecord>()
-
-                // A. Checkout payments ONLY from pure cash bills that have NO transaction in validTxs
-                customerSpecificBills.filter { b ->
-                    b.paymentStatus == PaymentStatus.PAID &&
-                    !txBillIds.contains(b.id) &&
-                    !txBillNumbers.contains(b.billNumber)
-                }.forEach { b ->
-                    val billTimeMillis = try {
-                        val sdf = java.text.SimpleDateFormat("yyyy-MM-dd HH:mm:ss", java.util.Locale.ENGLISH).apply {
-                            timeZone = java.util.TimeZone.getTimeZone("Asia/Kolkata")
-                        }
-                        sdf.parse(b.billDate)?.time ?: (b.id * 1000L)
-                    } catch (_: Exception) {
-                        b.id * 1000L
-                    }
-
+                for (ev in ledgerResult.events.filter { it.isCredit }) {
                     allPaymentsList.add(
                         CustomerPaymentRecord(
-                            id = "bill_pay_${b.id}",
-                            title = "बिल भरणा (#${b.billNumber})",
-                            subtitle = "पूर्ण भरणा (${b.paymentMethod.name})",
-                            date = b.billDate,
-                            timeMillis = billTimeMillis,
-                            amount = b.finalAmount,
-                            paymentMethod = b.paymentMethod,
-                            billId = b.id,
-                            billNumber = b.billNumber,
-                            isUdhariSettlement = false,
-                            isReversed = false
-                        )
-                    )
-                }
-
-                // B. All Udhari repayment transactions (जमा उधारी)
-                validTxs.filter { it.type == UdhariTransactionType.PAYMENT }.forEach { t ->
-                    allPaymentsList.add(
-                        CustomerPaymentRecord(
-                            id = "udhari_pay_${t.id}",
-                            title = "उधारी जमा (${t.paymentMethod.name})",
-                            subtitle = if (t.billNumber.isNotBlank()) "बिल: ${t.billNumber}" else (t.note ?: "थेट उधारी जमा"),
-                            date = t.date,
-                            timeMillis = t.createdAt,
-                            amount = t.amount,
-                            paymentMethod = t.paymentMethod,
-                            billId = if (t.billId != 0L) t.billId else null,
-                            billNumber = t.billNumber,
+                            id = ev.id,
+                            title = ev.description,
+                            subtitle = if (!ev.billNumber.isNullOrBlank()) "बिल: ${ev.billNumber}" else "जमा रक्कम",
+                            date = ev.date,
+                            timeMillis = ev.timeMillis,
+                            amount = ev.amount,
+                            paymentMethod = ev.paymentMethod ?: PaymentMethod.CASH,
+                            billId = ev.billId,
+                            billNumber = ev.billNumber,
                             isUdhariSettlement = true,
-                            isReversed = t.isReversed,
-                            udhariTx = t
+                            isReversed = false
                         )
                     )
                 }
@@ -370,143 +265,18 @@ class CustomerViewModel(
                     customerAllPayments.value = sortedPayments
                 }
 
-                // 4. Tab 4: Khatavahi (पारंपारिक उधारी वही - Running Chronological Ledger)
-                val vahiEvents = mutableListOf<KhatavahiEntry>()
-
-                // A. All Valid Bills
-                customerSpecificBills.forEach { b ->
-                    val billTimeMillis = try {
-                        val sdf = java.text.SimpleDateFormat("yyyy-MM-dd HH:mm:ss", java.util.Locale.ENGLISH).apply {
-                            timeZone = java.util.TimeZone.getTimeZone("Asia/Kolkata")
-                        }
-                        sdf.parse(b.billDate)?.time ?: (b.id * 1000L)
-                    } catch (_: Exception) {
-                        b.id * 1000L
-                    }
-
-                    val itemsDesc = if (b.items.isNotEmpty()) {
-                        b.items.joinToString(", ") { "${it.productName}${if (it.quantity > 1) " (${it.quantity})" else ""}" }
-                    } else {
-                        if (!b.note.isNullOrBlank()) b.note!! else "बिल खरेदी (#${b.billNumber})"
-                    }
-
-                    // Charge event (+)
-                    vahiEvents.add(
-                        KhatavahiEntry(
-                            id = "bill_${b.id}",
-                            date = b.billDate,
-                            timeMillis = billTimeMillis,
-                            description = itemsDesc,
-                            isCredit = false,
-                            amount = b.finalAmount,
-                            runningBalance = 0.0,
-                            billId = b.id,
-                            billNumber = b.billNumber,
-                            paymentMethod = b.paymentMethod
-                        )
-                    )
-
-                    // If bill had an upfront payment (PAID or PARTIAL) and no duplicate transaction exists in validTxs
-                    val hasCheckoutPayInTxs = validTxs.any {
-                        it.type == UdhariTransactionType.PAYMENT &&
-                        ((it.billId != 0L && it.billId == b.id) ||
-                         (it.billNumber.isNotBlank() && it.billNumber == b.billNumber))
-                    }
-                    if (!hasCheckoutPayInTxs) {
-                        val upfrontPay = if (b.paymentStatus == PaymentStatus.PAID) b.finalAmount else b.paidAmount
-                        if (upfrontPay > 0.01) {
-                            vahiEvents.add(
-                                KhatavahiEntry(
-                                    id = "bill_pay_${b.id}",
-                                    date = b.billDate,
-                                    timeMillis = billTimeMillis + 200L,
-                                    description = "बिल भरणा (${b.paymentMethod.name})",
-                                    isCredit = true,
-                                    amount = upfrontPay,
-                                    runningBalance = 0.0,
-                                    billId = b.id,
-                                    billNumber = b.billNumber,
-                                    paymentMethod = b.paymentMethod
-                                )
-                            )
-                        }
-                    }
+                // 4. Tab 4: Khatavahi (Exact chronological events with verified running balance)
+                if (customerKhatavahi.value != ledgerResult.events) {
+                    customerKhatavahi.value = ledgerResult.events
                 }
 
-                // B. Manual Udhari Debits (+)
-                validTxs.filter { it.type == UdhariTransactionType.PURCHASE_CREDIT && it.billId == 0L }.forEach { t ->
-                    vahiEvents.add(
-                        KhatavahiEntry(
-                            id = "manual_${t.id}",
-                            date = t.date,
-                            timeMillis = t.createdAt,
-                            description = t.note?.ifBlank { "उधारी नोंद" } ?: "उधारी नोंद",
-                            isCredit = false,
-                            amount = t.amount,
-                            runningBalance = 0.0,
-                            billId = null,
-                            billNumber = t.billNumber,
-                            paymentMethod = t.paymentMethod
-                        )
-                    )
-                }
-
-                // C. All Payments / Repayments (-)
-                validTxs.filter { it.type == UdhariTransactionType.PAYMENT }.forEach { t ->
-                    val payDesc = when {
-                        !t.note.isNullOrBlank() -> "जमा (${t.note})"
-                        t.billNumber.isNotBlank() -> "जमा (${t.billNumber} • ${t.paymentMethod.name})"
-                        else -> "जमा (${t.paymentMethod.name})"
-                    }
-                    vahiEvents.add(
-                        KhatavahiEntry(
-                            id = "pay_${t.id}",
-                            date = t.date,
-                            timeMillis = t.createdAt,
-                            description = payDesc,
-                            isCredit = true,
-                            amount = t.amount,
-                            runningBalance = 0.0,
-                            billId = if (t.billId != 0L) t.billId else null,
-                            billNumber = t.billNumber,
-                            paymentMethod = t.paymentMethod
-                        )
-                    )
-                }
-
-                // D. Sort chronologically (oldest to newest) & compute continuous running balance
-                val sortedVahiEvents = vahiEvents.sortedBy { it.timeMillis }
-                var vahiRunningBal = 0.0
-                val finalVahiList = sortedVahiEvents.map { ev ->
-                    if (ev.isCredit) {
-                        vahiRunningBal = (vahiRunningBal - ev.amount).coerceAtLeast(0.0)
-                    } else {
-                        vahiRunningBal += ev.amount
-                    }
-                    ev.copy(runningBalance = vahiRunningBal)
-                }
-
-                if (customerKhatavahi.value != finalVahiList) {
-                    customerKhatavahi.value = finalVahiList
-                }
-
-                val finalDue = vahiRunningBal
-                if (Math.abs(customerOutstandingDue.value - finalDue) > 0.001) {
+                val finalDue = ledgerResult.balance
+                if (kotlin.math.abs(customerOutstandingDue.value - finalDue) > 0.001) {
                     customerOutstandingDue.value = finalDue
                 }
                 val newProfile = currentCust?.copy(outstandingBalance = finalDue)
                 if (newProfile != null && (selectedCustomerProfile.value?.outstandingBalance != finalDue || selectedCustomerProfile.value?.id != newProfile.id || selectedCustomerProfile.value?.name != newProfile.name)) {
                     selectedCustomerProfile.value = newProfile
-                }
-
-                // Auto-sync customer cached Firestore balance ONCE per session to prevent infinite snapshot loops
-                if (currentCust != null && !syncedCustomerIds.contains(customerId) && Math.abs(currentCust.outstandingBalance - finalDue) > 0.5) {
-                    syncedCustomerIds.add(customerId)
-                    viewModelScope.launch(kotlinx.coroutines.Dispatchers.IO) {
-                        try {
-                            customerRepository.saveCustomer(currentCust.copy(outstandingBalance = finalDue))
-                        } catch (_: Exception) {}
-                    }
                 }
             }.collect()
         }
@@ -1873,8 +1643,17 @@ fun CustomerProfileScreen(
                         onValueChange = { pAmountText = it },
                         label = { Text("Payment Amount (₹) *") },
                         modifier = Modifier.fillMaxWidth(),
-                        shape = RoundedCornerShape(8.dp)
+                        shape = RoundedCornerShape(8.dp),
+                        isError = entered > outstandingDue && outstandingDue > 0.0
                     )
+                    if (entered > outstandingDue && outstandingDue > 0.0) {
+                        Text(
+                            text = "पेमेंट बाकी रकमेपेक्षा जास्त असू शकत नाही (कमाल: ${CurrencyFormatter.format(outstandingDue)})",
+                            color = BoutiqueError,
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.SemiBold
+                        )
+                    }
 
                     Text("Payment Method *", style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold))
                     Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {

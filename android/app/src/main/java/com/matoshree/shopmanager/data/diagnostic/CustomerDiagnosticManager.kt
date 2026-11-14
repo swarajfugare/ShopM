@@ -24,6 +24,7 @@ data class CustomerDiagnosticReport(
     val erroneouslyArchivedCount: Int,
     val missingFromRoomCount: Int,
     val duplicateMobileCount: Int,
+    val balanceMismatchCount: Int = 0,
     val details: List<String> = emptyList()
 )
 
@@ -31,6 +32,7 @@ data class CustomerRepairResult(
     val reactivatedCount: Int,
     val importedCount: Int,
     val deduplicatedCount: Int,
+    val balancesSynchronizedCount: Int = 0,
     val backupPath: String,
     val message: String
 )
@@ -86,6 +88,33 @@ object CustomerDiagnosticManager {
             .filter { it.key.length == 10 && it.value.size > 1 }
         val duplicateCount = mobileGroups.size
 
+        // Compare Ledger vs Stored balances using single authoritative UdhariLedger
+        var balanceMismatchCount = 0
+        try {
+            val allBills = db.billDao().getAllBillsDirect(50000).map { it.toDomain() }
+            val txs = mutableListOf<com.matoshree.shopmanager.domain.model.UdhariTransaction>()
+            if (FirebaseManager.isNetworkAvailable()) {
+                val txSnap = FirebaseManager.udhariTransactionsCollection().limit(2000).get().await()
+                txSnap.documents.mapNotNullTo(txs) { doc ->
+                    doc.toObject(com.matoshree.shopmanager.data.firebase.UdhariTransactionDto::class.java)?.apply { id = doc.id }?.toDomain()
+                }
+            }
+            val domainCusts = allRoom.map { it.toDomain() }
+            val shopLedger = com.matoshree.shopmanager.domain.usecase.UdhariLedger.computeShopLedger(allBills, txs, domainCusts)
+            val keyResolver = com.matoshree.shopmanager.domain.usecase.UdhariLedger.buildCustomerKeyResolver(domainCusts, allBills, txs)
+
+            for (c in roomActive) {
+                val key = keyResolver(c.mobile, c.name, c.id) ?: "cust_${c.id}"
+                val verifiedBalance = shopLedger.customerResults[key]?.balance ?: 0.0
+                if (Math.abs(c.outstandingBalance - verifiedBalance) > 0.5) {
+                    balanceMismatchCount++
+                    details.add("उधारी तफावत: ${c.name} (नोंद: ₹${String.format(java.util.Locale.US, "%.0f", c.outstandingBalance)} -> खरी बाकी: ₹${String.format(java.util.Locale.US, "%.0f", verifiedBalance)})")
+                }
+            }
+        } catch (e: Exception) {
+            Log.w(TAG, "Balance ledger audit note: ${e.message}")
+        }
+
         CustomerDiagnosticReport(
             totalRoomActive = roomActive.size,
             totalRoomArchived = roomArchived.size,
@@ -93,6 +122,7 @@ object CustomerDiagnosticManager {
             erroneouslyArchivedCount = erroneouslyArchivedCount,
             missingFromRoomCount = missingFromRoomCount,
             duplicateMobileCount = duplicateCount,
+            balanceMismatchCount = balanceMismatchCount,
             details = details.take(20)
         )
     }
@@ -178,12 +208,41 @@ object CustomerDiagnosticManager {
             0
         }
 
+        // 4. Synchronize customer balances with single authoritative ledger
+        var balancesSynchronizedCount = 0
+        try {
+            val allBills = db.billDao().getAllBillsDirect(50000).map { it.toDomain() }
+            val txs = mutableListOf<com.matoshree.shopmanager.domain.model.UdhariTransaction>()
+            if (FirebaseManager.isNetworkAvailable()) {
+                val txSnap = FirebaseManager.udhariTransactionsCollection().limit(2000).get().await()
+                txSnap.documents.mapNotNullTo(txs) { doc ->
+                    doc.toObject(com.matoshree.shopmanager.data.firebase.UdhariTransactionDto::class.java)?.apply { id = doc.id }?.toDomain()
+                }
+            }
+            val currentRoomCusts = db.customerDao().getAllCustomersDirect().map { it.toDomain() }
+            val shopLedger = com.matoshree.shopmanager.domain.usecase.UdhariLedger.computeShopLedger(allBills, txs, currentRoomCusts)
+            val keyResolver = com.matoshree.shopmanager.domain.usecase.UdhariLedger.buildCustomerKeyResolver(currentRoomCusts, allBills, txs)
+
+            for (c in currentRoomCusts) {
+                val key = keyResolver(c.mobile, c.name, c.id) ?: "cust_${c.id}"
+                val verifiedBal = shopLedger.customerResults[key]?.balance ?: 0.0
+                if (Math.abs(c.outstandingBalance - verifiedBal) > 0.5) {
+                    val entity = c.copy(outstandingBalance = verifiedBal).toEntity()
+                    db.customerDao().upsertServerCustomer(entity)
+                    balancesSynchronizedCount++
+                }
+            }
+        } catch (e: Exception) {
+            Log.w(TAG, "Balance repair note: ${e.message}")
+        }
+
         CustomerRepairResult(
             reactivatedCount = reactivatedCount,
             importedCount = importedCount,
             deduplicatedCount = deduplicatedCount,
+            balancesSynchronizedCount = balancesSynchronizedCount,
             backupPath = backupFile.absolutePath,
-            message = "दुरुस्ती यशस्वी: $reactivatedCount ग्राहक पुन्हा सक्रिय केले, $importedCount ग्राहक क्लाउडवरून आणले, $deduplicatedCount डुप्लिकेट नोंदी हटवल्या."
+            message = "दुरुस्ती यशस्वी: $reactivatedCount ग्राहक पुन्हा सक्रिय केले, $importedCount ग्राहक क्लाउडवरून आणले, $deduplicatedCount डुप्लिकेट नोंदी हटवल्या, $balancesSynchronizedCount खाती अचूक ताळमेळ केली."
         )
     }
 }
