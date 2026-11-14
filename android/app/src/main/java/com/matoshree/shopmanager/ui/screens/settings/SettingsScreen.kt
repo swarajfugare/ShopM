@@ -1390,7 +1390,55 @@ fun SettingsScreen(
                     }
                 }
         }
-        val renderAppControlsCard: @Composable () -> Unit = {}
+        val renderAppControlsCard: @Composable () -> Unit = {
+            var currentLang by remember { mutableStateOf(com.matoshree.shopmanager.utils.LocaleHelper.getLanguage(context)) }
+            MatoshreeCard(hasGoldTopBorder = true) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Icon(Icons.Default.Language, contentDescription = "Language", tint = DeepEmerald, modifier = Modifier.size(22.dp))
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text("भाषा (Language)", style = MaterialTheme.typography.titleMedium.copy(color = DeepEmerald, fontWeight = FontWeight.Bold))
+                    }
+                }
+                Spacer(modifier = Modifier.height(6.dp))
+                Text(
+                    text = "ॲपची भाषा निवडा (मराठी किंवा English):",
+                    style = MaterialTheme.typography.bodySmall.copy(color = MutedCharcoal)
+                )
+                Spacer(modifier = Modifier.height(10.dp))
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    FilterChip(
+                        selected = currentLang == com.matoshree.shopmanager.utils.LocaleHelper.LANG_MARATHI,
+                        onClick = {
+                            if (currentLang != com.matoshree.shopmanager.utils.LocaleHelper.LANG_MARATHI) {
+                                currentLang = com.matoshree.shopmanager.utils.LocaleHelper.LANG_MARATHI
+                                com.matoshree.shopmanager.utils.LocaleHelper.setLocale(context, com.matoshree.shopmanager.utils.LocaleHelper.LANG_MARATHI)
+                                Toast.makeText(context, "मराठी भाषा लागू केली", Toast.LENGTH_SHORT).show()
+                            }
+                        },
+                        label = { Text("मराठी (Default)") }
+                    )
+                    FilterChip(
+                        selected = currentLang == com.matoshree.shopmanager.utils.LocaleHelper.LANG_ENGLISH,
+                        onClick = {
+                            if (currentLang != com.matoshree.shopmanager.utils.LocaleHelper.LANG_ENGLISH) {
+                                currentLang = com.matoshree.shopmanager.utils.LocaleHelper.LANG_ENGLISH
+                                com.matoshree.shopmanager.utils.LocaleHelper.setLocale(context, com.matoshree.shopmanager.utils.LocaleHelper.LANG_ENGLISH)
+                                Toast.makeText(context, "English applied", Toast.LENGTH_SHORT).show()
+                            }
+                        },
+                        label = { Text("English") }
+                    )
+                }
+            }
+        }
         val renderCustomerDiagnosticCard: @Composable () -> Unit = {
             MatoshreeCard(hasGoldTopBorder = true) {
                 Row(
@@ -1402,7 +1450,7 @@ fun SettingsScreen(
                         Icon(Icons.Default.ManageAccounts, contentDescription = null, tint = DeepEmerald, modifier = Modifier.size(22.dp))
                         Spacer(modifier = Modifier.width(10.dp))
                         Column {
-                            Text("ग्राहक डेटा तपासणी व दुरुस्ती", style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold, color = DeepEmerald))
+                            Text("ग्राहक डेटा तपासणी", style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold, color = DeepEmerald))
                             Text("फोन आणि क्लाउड यादी तपासा, हरवलेले ग्राहक सुरक्षितपणे पूर्ववत करा", style = MaterialTheme.typography.bodySmall.copy(color = MutedCharcoal))
                         }
                     }
@@ -1420,7 +1468,7 @@ fun SettingsScreen(
                 ) {
                     Icon(Icons.Default.Build, contentDescription = null, modifier = Modifier.size(16.dp))
                     Spacer(modifier = Modifier.width(6.dp))
-                    Text("ग्राहक डेटा तपासणी व दुरुस्ती सुरू करा", fontWeight = FontWeight.Bold)
+                    Text("डेटा तपासा", fontWeight = FontWeight.Bold)
                 }
             }
         }

@@ -1,101 +1,165 @@
 <resources>
+    <!-- App Details -->
     <string name="app_name">मातोश्री कलेक्शन</string>
-    <string name="tagline">Smart Shop Manager</string>
+    <string name="tagline">स्मार्ट शॉप मॅनेजर</string>
     <string name="currency_symbol">₹</string>
 
-    <!-- Navigation -->
-    <string name="nav_home">Home</string>
-    <string name="nav_bills">Bills</string>
-    <string name="nav_customers">Customers</string>
-    <string name="nav_analytics">Analytics</string>
-    <string name="nav_settings">Settings</string>
+    <!-- Navigation (1-2 words) -->
+    <string name="nav_home">होम</string>
+    <string name="nav_bills">बिले</string>
+    <string name="nav_customers">कस्टमर</string>
+    <string name="nav_udhari">खातेवही</string>
+    <string name="nav_analytics">रिपोर्ट</string>
+    <string name="nav_settings">सेटिंग्ज</string>
+    <string name="nav_inventory">स्टॉक</string>
+
+    <!-- Standard Button Actions (1-2 words) -->
+    <string name="btn_save">सेव्ह</string>
+    <string name="btn_cancel">रद्द</string>
+    <string name="btn_delete">हटवा</string>
+    <string name="btn_edit">बदला</string>
+    <string name="btn_view_bill">बिल पहा</string>
+    <string name="btn_record_payment">पेमेंट घ्या</string>
+    <string name="btn_share">शेअर</string>
+    <string name="btn_print">प्रिंट</string>
+    <string name="btn_receipt">पावती</string>
+    <string name="btn_search">शोधा</string>
+    <string name="btn_send">पाठवा</string>
+    <string name="btn_confirm">नक्की करा</string>
+    <string name="btn_continue">चालू ठेवा</string>
+    <string name="btn_back">मागे</string>
+    <string name="btn_add">जोडा</string>
+    <string name="btn_add_customer">नवीन कस्टमर</string>
+    <string name="btn_add_bill">नवीन बिल</string>
+    <string name="btn_add_item">वस्तू जोडा</string>
+    <string name="btn_checkout">बिल बनवा</string>
+    <string name="btn_refresh">रिफ्रेश</string>
+    <string name="btn_retry">पुन्हा करा</string>
+    <string name="btn_close">बंद करा</string>
+    <string name="btn_ok">ठीक आहे</string>
+    <string name="btn_select">निवडा</string>
+    <string name="btn_clear">साफ करा</string>
+    <string name="btn_sync">सिंक करा</string>
+    <string name="btn_backup">बॅकअप</string>
+    <string name="btn_restore">रिस्टोअर</string>
+    <string name="btn_export">एक्स्पोर्ट</string>
+    <string name="btn_import">इम्पोर्ट</string>
+    <string name="btn_details">तपशील</string>
+    <string name="btn_call">कॉल करा</string>
+    <string name="btn_whatsapp">व्हॉट्सॲप</string>
+    <string name="btn_remind">आठवण करा</string>
+    <string name="btn_void">बिल रद्द</string>
+    <string name="btn_view_all">सर्व पहा</string>
+    <string name="view_all">सर्व पहा</string>
+    <string name="btn_all_bills">सर्व बिले</string>
+    <string name="btn_ignore">दुर्लक्ष</string>
+    <string name="btn_general_pay">सामान्य भरणा</string>
+    <string name="btn_delete_all">सर्व हटवा</string>
+
+    <!-- Filter Chips & Tabs (1-2 words) -->
+    <string name="filter_all">सर्व</string>
+    <string name="filter_pending">बाकी</string>
+    <string name="filter_paid">पूर्ण भरणा</string>
+    <string name="filter_cancelled">रद्द</string>
+    <string name="tab_bills">बिले</string>
+    <string name="tab_udhari">उधारी</string>
+    <string name="tab_payments">पेमेंट</string>
+    <string name="tab_khatavahi">खातेवही</string>
 
     <!-- Dashboard -->
-    <string name="dashboard_title">Dashboard</string>
-    <string name="dashboard_subtitle">Welcome back. Here is your boutique\'s performance today.</string>
-    <string name="today_sales">Today\'s Sales</string>
-    <string name="estimated_profit">Estimated Profit</string>
-    <string name="actual_profit">Actual Profit</string>
-    <string name="bills_generated">Bills Generated</string>
-    <string name="average_order">Average Order</string>
-    <string name="monthly_sales_progress">Monthly Sales Progress</string>
-    <string name="payment_breakdown">Payment Breakdown</string>
-    <string name="recent_bills">Recent Bills</string>
-    <string name="view_all">View All</string>
+    <string name="dashboard_title">दुकान डॅशबोर्ड</string>
+    <string name="dashboard_subtitle">मातोश्री कलेक्शन मध्ये आपले स्वागत आहे.</string>
+    <string name="today_sales">आजची विक्री</string>
+    <string name="today_profit">आजचा नफा</string>
+    <string name="estimated_profit">अंदाजे नफा</string>
+    <string name="actual_profit">निव्वळ नफा</string>
+    <string name="bills_generated">एकूण बिले</string>
+    <string name="average_order">सरासरी बिल</string>
+    <string name="monthly_sales_progress">महिना प्रगती</string>
+    <string name="payment_breakdown">पेमेंट प्रकार</string>
+    <string name="recent_bills">नुकतीच बिले</string>
+    <string name="total_udhari_due">एकूण बाकी उधारी</string>
 
     <!-- Sales & Billing -->
-    <string name="new_sale">New Sale</string>
-    <string name="quick_sale">Quick Sale</string>
-    <string name="add_product">Add Product</string>
-    <string name="add_to_bill">Add to Bill</string>
-    <string name="cart_empty">Cart is Empty</string>
-    <string name="cart_empty_desc">Select a customer or add products to start building this sale.</string>
-    <string name="customer_search_hint">Search by name or phone…</string>
-    <string name="add_new_customer">Add New Customer</string>
-    <string name="item_details">Item Details</string>
-    <string name="product_name">Product Name</string>
-    <string name="quantity">Quantity</string>
-    <string name="rate">Rate</string>
-    <string name="price">Price</string>
-    <string name="amount">Amount</string>
-    <string name="subtotal">Subtotal</string>
-    <string name="discount">Discount</string>
-    <string name="discount_amount">Discount Amount</string>
-    <string name="percentage">Percentage</string>
-    <string name="you_saved">You Saved</string>
-    <string name="total">Total</string>
-    <string name="grand_total">Grand Total</string>
-    <string name="final_amount">Final Amount</string>
-    <string name="checkout">Checkout</string>
-    <string name="sale_summary">Sale Summary</string>
-    <string name="complete_sale">Complete Sale</string>
-    <string name="scan_to_pay">Scan to Pay via UPI</string>
-    <string name="payable">Payable</string>
-    <string name="thank_you">Thank You!</string>
-    <string name="visit_again">Visit Again!</string>
+    <string name="new_sale">नवीन बिल</string>
+    <string name="quick_sale">थेट विक्री</string>
+    <string name="add_product">प्रॉडक्ट जोडा</string>
+    <string name="add_to_bill">बिलात जोडा</string>
+    <string name="cart_empty">बिल रिकामे आहे</string>
+    <string name="cart_empty_desc">कस्टमर निवडा किंवा प्रॉडक्ट जोडून बिल सुरू करा.</string>
+    <string name="customer_search_hint">नाव किंवा मोबाईल नंबर शोधा…</string>
+    <string name="add_new_customer">नवीन कस्टमर</string>
+    <string name="item_details">वस्तू तपशील</string>
+    <string name="product_name">प्रॉडक्ट नाव</string>
+    <string name="quantity">नग (संख्या)</string>
+    <string name="rate">दर</string>
+    <string name="price">किंमत</string>
+    <string name="amount">रक्कम</string>
+    <string name="subtotal">एकूण किंमत</string>
+    <string name="discount">सवलत (Discount)</string>
+    <string name="discount_amount">सवलत रक्कम</string>
+    <string name="percentage">टक्के (%)</string>
+    <string name="you_saved">सवलत मिळाली</string>
+    <string name="total">एकूण</string>
+    <string name="grand_total">एकूण रक्कम</string>
+    <string name="final_amount">अंतिम रक्कम</string>
+    <string name="checkout">बिल बनवा</string>
+    <string name="sale_summary">बिल सारांश</string>
+    <string name="complete_sale">बिल पूर्ण करा</string>
+    <string name="scan_to_pay">UPI स्कॅन करून पैसे घ्या</string>
+    <string name="payable">देय रक्कम</string>
+    <string name="thank_you">धन्यवाद!</string>
+    <string name="visit_again">पुन्हा भेट द्या!</string>
 
     <!-- Payments -->
-    <string name="payment">Payment</string>
-    <string name="payment_method">Payment Method</string>
-    <string name="pay_cash">Cash</string>
+    <string name="payment">पेमेंट</string>
+    <string name="payment_method">पेमेंट पद्धत</string>
+    <string name="pay_cash">कॅश (Cash)</string>
     <string name="pay_upi">UPI</string>
-    <string name="pay_udhari">Udhari</string>
-    <string name="pay_paid">Paid</string>
-    <string name="pay_pending">Pending</string>
-    <string name="balance_due">Balance Due</string>
-    <string name="paid_amount">Paid Amount</string>
-    <string name="pay_card">Card</string>
-    <string name="pay_other">Other</string>
+    <string name="pay_udhari">उधारी</string>
+    <string name="pay_paid">जमा</string>
+    <string name="pay_pending">बाकी</string>
+    <string name="balance_due">बाकी रक्कम</string>
+    <string name="paid_amount">भरलेली रक्कम</string>
+    <string name="pay_card">कार्ड</string>
+    <string name="pay_other">इतर</string>
 
     <!-- Customer -->
-    <string name="customer">Customer</string>
-    <string name="customer_name">Customer Name</string>
-    <string name="customer_mobile">Mobile</string>
-    <string name="customer_village">Village</string>
-    <string name="invoice">Bill</string>
-    <string name="invoice_no">Bill No.</string>
-    <string name="date">Date</string>
-    <string name="time">Time</string>
+    <string name="customer">कस्टमर</string>
+    <string name="customer_name">कस्टमर नाव</string>
+    <string name="customer_mobile">मोबाईल नंबर</string>
+    <string name="customer_village">गाव / पत्ता</string>
+    <string name="invoice">बिल</string>
+    <string name="invoice_no">बिल क्र.</string>
+    <string name="date">तारीख</string>
+    <string name="time">वेळ</string>
+    <string name="old_udhari">जुनी उधारी</string>
+    <string name="orphan_records">बिलाशिवाय नोंदी</string>
 
-    <!-- App Lock -->
-    <string name="enter_pin">Enter your PIN to access the boutique</string>
-    <string name="unlock_with_biometric">Unlock with Biometrics</string>
-    <string name="forgot_pin">Forgot PIN?</string>
+    <!-- App Lock & Security -->
+    <string name="enter_pin">दुकान उघडण्यासाठी PIN टाका</string>
+    <string name="unlock_with_biometric">फिंगरप्रिंटने उघडा</string>
+    <string name="forgot_pin">PIN विसरलात?</string>
 
     <!-- Daily Closing -->
-    <string name="daily_closing">Daily Closing</string>
-    <string name="expected_cash">Expected Cash</string>
-    <string name="actual_cash">Actual Cash in Drawer</string>
-    <string name="cash_difference">Cash Difference</string>
-    <string name="close_day">Close &amp; Seal Day</string>
+    <string name="daily_closing">दैनिक ताळेबंद</string>
+    <string name="expected_cash">अपेक्षित कॅश</string>
+    <string name="actual_cash">गल्ल्यातील प्रत्यक्ष कॅश</string>
+    <string name="cash_difference">कॅश फरक</string>
+    <string name="close_day">दिवस बंद करा</string>
 
-    <!-- Common -->
-    <string name="sync_status_synced">Synced</string>
-    <string name="sync_status_pending">Offline / Pending Sync</string>
-    <string name="sync_status_failed">Sync Failed - Tap to Retry</string>
-    <string name="btn_save">Save</string>
-    <string name="btn_cancel">Cancel</string>
-    <string name="btn_share">Share Bill</string>
-    <string name="btn_print">Print Bill</string>
-    <string name="btn_void">Void Bill</string>
+    <!-- Sync & Status -->
+    <string name="sync_status_synced">सिंक झाले</string>
+    <string name="sync_status_pending">ऑफलाईन / सिंक बाकी</string>
+    <string name="sync_status_failed">सिंक झाले नाही - पुन्हा दाबा</string>
+
+    <!-- Settings & Language -->
+    <string name="settings_title">सेटिंग्ज</string>
+    <string name="language_setting">भाषा / Language</string>
+    <string name="lang_marathi">मराठी (Default)</string>
+    <string name="lang_english">English</string>
+    <string name="trash_title">कचरा पेटी (Trash)</string>
+    <string name="data_check_title">डेटा तपासणी</string>
+    <string name="safe_repair_title">सुरक्षित दुरुस्ती</string>
+    <string name="backup_restore_title">बॅकअप आणि रिस्टोअर</string>
 </resources>

@@ -12,6 +12,10 @@ import kotlinx.coroutines.launch
 
 class MatoshreeApp : Application() {
 
+    override fun attachBaseContext(base: android.content.Context) {
+        super.attachBaseContext(com.matoshree.shopmanager.utils.LocaleHelper.applyLocale(base))
+    }
+
     override fun onCreate() {
         super.onCreate()
 
