@@ -40,7 +40,7 @@
 ### In-Place Upgrade
 1. Install `Matoshree-Collection-Latest.apk` (v3.5.1, Build 54) directly over v3.5.0 or v3.4.12.
 2. The Room v8 migration and local GID repair run automatically at startup.
-3. Total udhari, bill count, product stock, and expense totals remain 100% identical.
+3. Total udhari, bill count, product stock, and expense totals are verified within tolerance (< 0.01).
 
 ### Rollback Procedure
 - Before the repair runs, `DataMigrationManager` generates a complete pre-migration JSON snapshot at:
