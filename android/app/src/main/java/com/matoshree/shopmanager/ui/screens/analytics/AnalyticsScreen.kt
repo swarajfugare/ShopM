@@ -94,7 +94,6 @@ class AnalyticsViewModel(
     val periodPreset = MutableStateFlow(com.matoshree.shopmanager.domain.usecase.AnalyticsPeriodPreset.TODAY)
     val customStartDate = MutableStateFlow("")
     val customEndDate = MutableStateFlow("")
-    val isCompareMode = MutableStateFlow(false)
 
     val villageFilter = MutableStateFlow<String?>(null)
     val categoryFilter = MutableStateFlow<String?>(null)
@@ -207,10 +206,6 @@ class AnalyticsViewModel(
         }
     }
 
-    fun toggleCompare() {
-        isCompareMode.value = !isCompareMode.value
-    }
-
     fun toggleSection(key: String) {
         val curr = enabledSections.value
         enabledSections.value = if (curr.contains(key)) curr - key else curr + key
@@ -242,7 +237,6 @@ fun AnalyticsScreen(
     val context = LocalContext.current
     val period by viewModel.selectedPeriod.collectAsState()
     val preset by viewModel.periodPreset.collectAsState()
-    val isCompare by viewModel.isCompareMode.collectAsState()
     val villageFilter by viewModel.villageFilter.collectAsState()
     val categoryFilter by viewModel.categoryFilter.collectAsState()
     val customerFilter by viewModel.customerFilter.collectAsState()
@@ -273,21 +267,7 @@ fun AnalyticsScreen(
         }
     }
 
-    val analyticsResult = remember(allBills, allCustomers, allProducts, allExpenses, allUdhariTxs, dateRange, isCompare, villageFilter, customerFilter) {
-        val compareRange = if (isCompare) {
-            val cal = Calendar.getInstance(DateUtils.kolkataTimeZone)
-            val sdf = SimpleDateFormat("yyyy-MM-dd", Locale.ENGLISH).apply { timeZone = DateUtils.kolkataTimeZone }
-            val curStart = try { sdf.parse(dateRange.startDate.take(10)) ?: Date() } catch (e: Exception) { Date() }
-            val curEnd = try { sdf.parse(dateRange.endDate.take(10)) ?: Date() } catch (e: Exception) { Date() }
-            val durationDays = (((curEnd.time - curStart.time) / (1000 * 60 * 60 * 24)).toInt() + 1).coerceAtLeast(1)
-            cal.time = curStart
-            cal.add(Calendar.DAY_OF_YEAR, -durationDays)
-            val prevStart = sdf.format(cal.time)
-            cal.add(Calendar.DAY_OF_YEAR, durationDays - 1)
-            val prevEnd = sdf.format(cal.time)
-            com.matoshree.shopmanager.domain.usecase.AnalyticsDateRange("$prevStart 00:00:00", "$prevEnd 23:59:59", dateRange.preset)
-        } else null
-
+    val analyticsResult = remember(allBills, allCustomers, allProducts, allExpenses, allUdhariTxs, dateRange, villageFilter, customerFilter) {
         com.matoshree.shopmanager.domain.usecase.AnalyticsAggregator.compute(
             bills = allBills,
             transactions = allUdhariTxs,
@@ -295,7 +275,7 @@ fun AnalyticsScreen(
             products = allProducts,
             customers = allCustomers,
             dateRange = dateRange,
-            compareRange = compareRange,
+            compareRange = null,
             filters = com.matoshree.shopmanager.domain.usecase.AnalyticsFilters(
                 village = villageFilter,
                 customerGid = customerFilter
@@ -698,72 +678,7 @@ fun AnalyticsScreen(
                         }
                     }
 
-                    // Comparison Toggle & Export Actions
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        FilterChip(
-                            selected = isCompare,
-                            onClick = { viewModel.toggleCompare() },
-                            leadingIcon = {
-                                Icon(
-                                    if (isCompare) Icons.Default.Check else Icons.Default.CompareArrows,
-                                    contentDescription = null,
-                                    modifier = Modifier.size(16.dp)
-                                )
-                            },
-                            label = { Text("मागील कालावधीशी तुलना", fontSize = 11.sp) }
-                        )
 
-                        Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                            OutlinedButton(
-                                onClick = {
-                                    val csv = analyticsResult.generateCsvReport()
-                                    val sendIntent = android.content.Intent(android.content.Intent.ACTION_SEND).apply {
-                                        type = "text/plain"
-                                        putExtra(android.content.Intent.EXTRA_TEXT, csv)
-                                        putExtra(android.content.Intent.EXTRA_SUBJECT, "Shop Analytics - ${analyticsResult.dateRange.preset.label}")
-                                    }
-                                    context.startActivity(android.content.Intent.createChooser(sendIntent, "CSV शेअर करा"))
-                                },
-                                contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp),
-                                shape = RoundedCornerShape(8.dp)
-                            ) {
-                                Icon(Icons.Default.Download, contentDescription = null, modifier = Modifier.size(14.dp), tint = DeepEmerald)
-                                Spacer(modifier = Modifier.width(4.dp))
-                                Text("CSV", fontSize = 11.sp, color = DeepEmerald)
-                            }
-
-                            Button(
-                                onClick = {
-                                    val summary = analyticsResult.generateWhatsAppSummary()
-                                    val waIntent = android.content.Intent(android.content.Intent.ACTION_SEND).apply {
-                                        type = "text/plain"
-                                        `package` = "com.whatsapp"
-                                        putExtra(android.content.Intent.EXTRA_TEXT, summary)
-                                    }
-                                    try {
-                                        context.startActivity(waIntent)
-                                    } catch (e: Exception) {
-                                        val fallback = android.content.Intent(android.content.Intent.ACTION_SEND).apply {
-                                            type = "text/plain"
-                                            putExtra(android.content.Intent.EXTRA_TEXT, summary)
-                                        }
-                                        context.startActivity(android.content.Intent.createChooser(fallback, "सारांश पाठवा"))
-                                    }
-                                },
-                                colors = ButtonDefaults.buttonColors(containerColor = BoutiqueSuccess),
-                                contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp),
-                                shape = RoundedCornerShape(8.dp)
-                            ) {
-                                Icon(Icons.Default.Share, contentDescription = null, modifier = Modifier.size(14.dp), tint = WarmWhite)
-                                Spacer(modifier = Modifier.width(4.dp))
-                                Text("WhatsApp", fontSize = 11.sp)
-                            }
-                        }
-                    }
 
                     Row(
                         modifier = Modifier.fillMaxWidth(),
