@@ -25,6 +25,7 @@ data class CustomerDiagnosticReport(
     val missingFromRoomCount: Int,
     val duplicateMobileCount: Int,
     val balanceMismatchCount: Int = 0,
+    val duplicateEventsCount: Int = 0,
     val details: List<String> = emptyList()
 )
 
@@ -33,6 +34,7 @@ data class CustomerRepairResult(
     val importedCount: Int,
     val deduplicatedCount: Int,
     val balancesSynchronizedCount: Int = 0,
+    val duplicateTransactionsMarkedCount: Int = 0,
     val backupPath: String,
     val message: String
 )
@@ -111,6 +113,32 @@ object CustomerDiagnosticManager {
                     details.add("उधारी तफावत: ${c.name} (नोंद: ₹${String.format(java.util.Locale.US, "%.0f", c.outstandingBalance)} -> खरी बाकी: ₹${String.format(java.util.Locale.US, "%.0f", verifiedBalance)})")
                 }
             }
+
+            // Check for duplicate transactions / orphan credits
+            var duplicateEventsCount = 0
+            val activeTxs = txs.filter { !it.isReversed && it.status != "TRASH" && it.status != "DUPLICATE" }
+            val seenSignatures = mutableSetOf<String>()
+            for (t in activeTxs) {
+                val sig = "${t.customerId}_${t.type}_${String.format(java.util.Locale.US, "%.2f", t.amount)}_${t.billNumber}_${t.date}"
+                if (seenSignatures.contains(sig)) {
+                    duplicateEventsCount++
+                    details.add("संभाव्य डुप्लिकेट ट्रॅन्झॅक्शन: ${t.customerName} - ${t.type} ₹${t.amount} (${t.billNumber.ifBlank { "मॅन्युअल" }})")
+                } else {
+                    seenSignatures.add(sig)
+                }
+            }
+
+            return@withContext CustomerDiagnosticReport(
+                totalRoomActive = roomActive.size,
+                totalRoomArchived = roomArchived.size,
+                totalFirestoreActive = firestoreActiveCount,
+                erroneouslyArchivedCount = erroneouslyArchivedCount,
+                missingFromRoomCount = missingFromRoomCount,
+                duplicateMobileCount = duplicateCount,
+                balanceMismatchCount = balanceMismatchCount,
+                duplicateEventsCount = duplicateEventsCount,
+                details = details.take(20)
+            )
         } catch (e: Exception) {
             Log.w(TAG, "Balance ledger audit note: ${e.message}")
         }
@@ -123,6 +151,7 @@ object CustomerDiagnosticManager {
             missingFromRoomCount = missingFromRoomCount,
             duplicateMobileCount = duplicateCount,
             balanceMismatchCount = balanceMismatchCount,
+            duplicateEventsCount = 0,
             details = details.take(20)
         )
     }
@@ -236,13 +265,39 @@ object CustomerDiagnosticManager {
             Log.w(TAG, "Balance repair note: ${e.message}")
         }
 
+        // 5. Mark duplicate transactions in Firestore with status = DUPLICATE (restorable, excluded from ledger)
+        var duplicateTransactionsMarkedCount = 0
+        try {
+            if (FirebaseManager.isNetworkAvailable()) {
+                val seenSignatures = mutableSetOf<String>()
+                val rawTxs = FirebaseManager.udhariTransactionsCollection().limit(2000).get().await()
+                for (doc in rawTxs.documents) {
+                    val dto = doc.toObject(com.matoshree.shopmanager.data.firebase.UdhariTransactionDto::class.java) ?: continue
+                    if (dto.isReversed || dto.status == "TRASH" || dto.status == "DUPLICATE") continue
+
+                    val sig = "${dto.customerId}_${dto.type}_${String.format(java.util.Locale.US, "%.2f", dto.amount)}_${dto.billNumber}_${dto.date}"
+                    if (seenSignatures.contains(sig)) {
+                        FirebaseManager.udhariTransactionsCollection().document(doc.id)
+                            .update("status", "DUPLICATE")
+                            .await()
+                        duplicateTransactionsMarkedCount++
+                    } else {
+                        seenSignatures.add(sig)
+                    }
+                }
+            }
+        } catch (e: Exception) {
+            Log.w(TAG, "Duplicate transaction mark note: ${e.message}")
+        }
+
         CustomerRepairResult(
             reactivatedCount = reactivatedCount,
             importedCount = importedCount,
             deduplicatedCount = deduplicatedCount,
             balancesSynchronizedCount = balancesSynchronizedCount,
+            duplicateTransactionsMarkedCount = duplicateTransactionsMarkedCount,
             backupPath = backupFile.absolutePath,
-            message = "दुरुस्ती यशस्वी: $reactivatedCount ग्राहक पुन्हा सक्रिय केले, $importedCount ग्राहक क्लाउडवरून आणले, $deduplicatedCount डुप्लिकेट नोंदी हटवल्या, $balancesSynchronizedCount खाती अचूक ताळमेळ केली."
+            message = "दुरुस्ती यशस्वी: $reactivatedCount ग्राहक पुन्हा सक्रिय केले, $importedCount ग्राहक क्लाउडवरून आणले, $deduplicatedCount डुप्लिकेट नोंदी हटवल्या, $duplicateTransactionsMarkedCount डुप्लिकेट ट्रॅन्झॅक्शन्स मार्क केले, $balancesSynchronizedCount खाती अचूक ताळमेळ केली."
         )
     }
 }

@@ -190,16 +190,16 @@ class CustomerViewModel(
                     customerTransactions.value = validTxs
                 }
 
-                // 2. Tab 2: Created Udhari Records (per-bill breakdown with remaining outstanding + manual debits)
+                // 2. Tab 2: Created Udhari Records (Authoritative per-bill breakdown with remaining outstanding + verified manual debits)
                 val createdUdhariEntries = mutableListOf<UdhariLedgerEntry>()
                 for (bDown in ledgerResult.billBreakdowns.filter { it.remainingOutstanding > 0.01 }) {
-                    val matchingBill = customerSpecificBills.find { it.id == bDown.billId }
+                    val matchingBill = customerSpecificBills.find { it.id == bDown.billId || (it.billNumber.isNotBlank() && it.billNumber == bDown.billNumber) }
                     val billSubtitle = "एकूण: ₹${String.format(java.util.Locale.US, "%.0f", bDown.finalAmount)} | जमा: ₹${String.format(java.util.Locale.US, "%.0f", bDown.checkoutPaid + bDown.directPayments + bDown.fifoPayments)} | बाकी: ₹${String.format(java.util.Locale.US, "%.0f", bDown.remainingOutstanding)}"
                     createdUdhariEntries.add(
                         UdhariLedgerEntry(
-                            id = "bill_${bDown.billId}",
+                            id = "bill_${bDown.billId}_${bDown.billNumber}",
                             date = bDown.billDate,
-                            timeMillis = bDown.billId * 1000L,
+                            timeMillis = com.matoshree.shopmanager.utils.DateUtils.parseDateToMillis(bDown.billDate).takeIf { it > 0 } ?: (bDown.billId * 1000L),
                             title = "उधारी बिल #${bDown.billNumber}",
                             subtitle = billSubtitle,
                             billNumber = bDown.billNumber,
@@ -214,23 +214,25 @@ class CustomerViewModel(
                     )
                 }
 
-                validTxs.filter { it.type == UdhariTransactionType.PURCHASE_CREDIT && it.billId == 0L }.forEach { t ->
+                // Add only genuine manual debits from authoritative ledger events (never duplicate credit transactions already bound to bills)
+                for (ev in ledgerResult.events.filter { !it.isCredit && it.billId == null && it.billNumber.isNullOrBlank() }) {
+                    val matchingTx = validTxs.find { it.id == ev.id || (kotlin.math.abs(it.amount - ev.amount) < 0.001 && it.createdAt == ev.timeMillis) }
                     createdUdhariEntries.add(
                         UdhariLedgerEntry(
-                            id = t.id,
-                            date = t.date,
-                            timeMillis = t.createdAt,
+                            id = "manual_${ev.id}_${ev.timeMillis}",
+                            date = ev.date,
+                            timeMillis = ev.timeMillis,
                             title = "मॅन्युअल उधारी नोंद (+)",
-                            subtitle = t.note ?: "मॅन्युअल उधारी नोंद",
-                            billNumber = t.billNumber,
+                            subtitle = ev.description,
+                            billNumber = null,
                             type = UdhariTransactionType.PURCHASE_CREDIT,
-                            debitAmount = t.amount,
+                            debitAmount = ev.amount,
                             creditAmount = 0.0,
-                            runningBalance = 0.0,
-                            paymentMethod = t.paymentMethod,
-                            note = t.note,
-                            isReversed = t.isReversed,
-                            transaction = t
+                            runningBalance = ev.runningBalance,
+                            paymentMethod = ev.paymentMethod,
+                            note = ev.description,
+                            isReversed = false,
+                            transaction = matchingTx
                         )
                     )
                 }
@@ -1296,6 +1298,39 @@ fun CustomerProfileScreen(
                 verticalArrangement = Arrangement.spacedBy(14.dp),
                 contentPadding = PaddingValues(top = 12.dp, bottom = 48.dp)
             ) {
+                // Banner for customer without valid 10-digit mobile
+                if (customer != null && PhoneUtils.clean10DigitMobileInput(customer?.mobile ?: "").length != 10) {
+                    item {
+                        Card(
+                            modifier = Modifier.fillMaxWidth().clickable { showEditDialog = true },
+                            colors = CardDefaults.cardColors(containerColor = Color(0xFFFFF3CD)),
+                            border = BorderStroke(1.dp, Color(0xFFFFEEBA)),
+                            shape = RoundedCornerShape(8.dp)
+                        ) {
+                            Row(
+                                modifier = Modifier.padding(12.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(10.dp)
+                            ) {
+                                Icon(Icons.Default.WarningAmber, contentDescription = null, tint = Color(0xFF856404))
+                                Column(modifier = Modifier.weight(1f)) {
+                                    Text(
+                                        text = "या ग्राहकाचा मोबाईल नाही",
+                                        fontWeight = FontWeight.Bold,
+                                        fontSize = 13.sp,
+                                        color = Color(0xFF856404)
+                                    )
+                                    Text(
+                                        text = "नोंदी ओळखण्यासाठी व अचूक सिंक होण्यासाठी कृपया ग्राहकाचा १०-अंकी मोबाईल नंबर टाका (येथे स्पर्श करा).",
+                                        fontSize = 12.sp,
+                                        color = Color(0xFF856404)
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+
                 // TOP SECTION: RESPONSIVE FOR TABLET & PHONE
                 item {
                     val onCallCustomer: () -> Unit = {

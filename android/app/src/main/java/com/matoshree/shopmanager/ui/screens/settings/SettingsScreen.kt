@@ -2267,7 +2267,10 @@ service cloud.firestore {
                                 if (r.duplicateMobileCount > 0) {
                                     Text("⚠️ डुप्लिकेट मोबाईल नोंदी: ${r.duplicateMobileCount}", fontSize = 12.sp, color = ChampagneGold)
                                 }
-                                if (r.erroneouslyArchivedCount == 0 && r.missingFromRoomCount == 0 && r.duplicateMobileCount == 0) {
+                                if (r.duplicateEventsCount > 0) {
+                                    Text("⚠️ संभाव्य डुप्लिकेट उधारी/पेमेंट नोंदी: ${r.duplicateEventsCount}", fontSize = 12.sp, color = BoutiqueError, fontWeight = FontWeight.Bold)
+                                }
+                                if (r.erroneouslyArchivedCount == 0 && r.missingFromRoomCount == 0 && r.duplicateMobileCount == 0 && r.duplicateEventsCount == 0) {
                                     Text("✅ सर्व ग्राहक डेटा परिपूर्ण आणि सुसंगत आहे!", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = BoutiqueSuccess)
                                 }
                             }

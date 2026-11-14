@@ -63,8 +63,8 @@ object UdhariLedger {
         val clean = PhoneUtils.clean10DigitMobileInput(mobile ?: "")
         return when {
             clean.length == 10 -> "mob_$clean"
-            !name.isNullOrBlank() -> "name_${name.trim().lowercase()}"
             localId != null && localId > 0L -> "cust_$localId"
+            !name.isNullOrBlank() -> "name_${name.trim().lowercase()}"
             else -> null
         }
     }
@@ -72,7 +72,8 @@ object UdhariLedger {
     /**
      * Builds a unified resolver that links customer entities, bills, and transactions
      * so that records sharing mobile, name, or customer ID resolve accurately to the canonical key,
-     * while guaranteeing that distinct 10-digit mobile numbers are NEVER merged.
+     * while guaranteeing that distinct 10-digit mobile numbers are NEVER merged,
+     * and customers without mobile are NEVER conflated by name alone if their IDs differ.
      */
     fun buildCustomerKeyResolver(
         customers: List<Customer> = emptyList(),
@@ -101,10 +102,15 @@ object UdhariLedger {
                 }
             } else if (cleanName.isNotBlank() && (nameCount[cleanName] ?: 0) == 1) {
                 val canonical = "name_$cleanName"
+                aliasToCanonical["name_$cleanName"] = canonical
                 if (c.id > 0L) {
                     aliasToCanonical["id_${c.id}"] = canonical
                     aliasToCanonical["cust_${c.id}"] = canonical
                 }
+            } else if (c.id > 0L) {
+                val canonical = "cust_${c.id}"
+                aliasToCanonical["id_${c.id}"] = canonical
+                aliasToCanonical["cust_${c.id}"] = canonical
             }
         }
 
@@ -114,8 +120,8 @@ object UdhariLedger {
                 "mob_$cleanMob"
             } else {
                 val cleanName = name?.trim()?.lowercase() ?: ""
-                (if (cleanName.isNotBlank()) aliasToCanonical["name_$cleanName"] else null)
-                    ?: (if (localId != null && localId > 0L) (aliasToCanonical["id_$localId"] ?: aliasToCanonical["cust_$localId"]) else null)
+                (if (localId != null && localId > 0L) (aliasToCanonical["id_$localId"] ?: aliasToCanonical["cust_$localId"]) else null)
+                    ?: (if (cleanName.isNotBlank() && (nameCount[cleanName] ?: 0) == 1) aliasToCanonical["name_$cleanName"] else null)
                     ?: resolveCustomerKey(mobile, name, localId)
             }
         }
@@ -163,12 +169,53 @@ object UdhariLedger {
 
         val cust = allCustomers.find { keyResolver(it.mobile, it.name, it.id) == customerKey }
 
-        val custBills = nonVoidBills.filter { b ->
+        val rawCustBills = nonVoidBills.filter { b ->
             keyResolver(b.customerMobile, b.customerName, b.customerId) == customerKey
         }.sortedWith(compareBy({ it.billDate }, { it.id }))
 
-        val custTxs = validTxs.filter { tx ->
+        // Deduplicate bills within customer (e.g. local room bill + cloud bill with same billNumber or transactionUuid)
+        val seenBillNumbers = mutableSetOf<String>()
+        val seenBillUuids = mutableSetOf<String>()
+        val custBills = mutableListOf<Bill>()
+
+        for (b in rawCustBills) {
+            val cleanNum = b.billNumber.trim().uppercase()
+            val uuid = b.transactionUuid.trim()
+            if (uuid.isNotBlank() && seenBillUuids.contains(uuid)) continue
+            if (cleanNum.isNotBlank() && seenBillNumbers.contains(cleanNum)) continue
+
+            if (uuid.isNotBlank()) seenBillUuids.add(uuid)
+            if (cleanNum.isNotBlank()) seenBillNumbers.add(cleanNum)
+            custBills.add(b)
+        }
+
+        val rawCustTxs = validTxs.filter { tx ->
             keyResolver(tx.customerMobile, tx.customerName, tx.customerId) == customerKey
+        }
+
+        // Deduplicate transactions within customer (prevent duplicate payment/credit events from sync retries)
+        val seenTxIds = mutableSetOf<String>()
+        val seenTxUuids = mutableSetOf<String>()
+        val custTxs = mutableListOf<UdhariTransaction>()
+
+        for (tx in rawCustTxs) {
+            if (tx.id.isNotBlank() && seenTxIds.contains(tx.id)) continue
+            if (tx.transactionUuid.isNotBlank() && seenTxUuids.contains(tx.transactionUuid)) continue
+
+            // Semantic duplicate check: same type, amount, bill, date, and close timestamp (< 2 min)
+            val isSemanticDup = custTxs.any { existing ->
+                existing.type == tx.type &&
+                kotlin.math.abs(existing.amount - tx.amount) < 0.001 &&
+                ((existing.billId != 0L && existing.billId == tx.billId) ||
+                 (existing.billNumber.isNotBlank() && existing.billNumber.trim().equals(tx.billNumber.trim(), ignoreCase = true))) &&
+                existing.date == tx.date &&
+                kotlin.math.abs(existing.createdAt - tx.createdAt) < 120_000L
+            }
+            if (isSemanticDup) continue
+
+            if (tx.id.isNotBlank()) seenTxIds.add(tx.id)
+            if (tx.transactionUuid.isNotBlank()) seenTxUuids.add(tx.transactionUuid)
+            custTxs.add(tx)
         }
 
         // 1. Process each bill's direct checkout payment & direct payment transactions
@@ -272,12 +319,25 @@ object UdhariLedger {
 
         // 1b. Process unlinked credit transactions (PURCHASE_CREDIT transactions for bills absent from allBills)
         val knownCustBillIds = custBills.map { it.id }.filter { it != 0L }.toSet()
-        val knownCustBillNumbers = custBills.map { it.billNumber }.filter { it.isNotBlank() }.toSet()
+        val knownCustBillNumbers = custBills.map { it.billNumber.trim().uppercase() }.filter { it.isNotBlank() }.toSet()
+        val knownCustBillUuids = custBills.map { it.transactionUuid.trim() }.filter { it.isNotBlank() }.toSet()
 
-        val unlinkedCreditTxs = custTxs.filter {
-            it.type == UdhariTransactionType.PURCHASE_CREDIT &&
-            !knownCustBillIds.contains(it.billId) &&
-            (it.billNumber.isBlank() || !knownCustBillNumbers.contains(it.billNumber))
+        val unlinkedCreditTxs = custTxs.filter { tx ->
+            val cleanNum = tx.billNumber.trim().uppercase()
+            val uuid = tx.transactionUuid.trim()
+            val note = tx.note?.trim()?.uppercase() ?: ""
+
+            val matchesKnownBill =
+                (tx.billId != 0L && knownCustBillIds.contains(tx.billId)) ||
+                (cleanNum.isNotBlank() && knownCustBillNumbers.contains(cleanNum)) ||
+                (uuid.isNotBlank() && knownCustBillUuids.contains(uuid)) ||
+                custBills.any { b ->
+                    (cleanNum.isNotBlank() && b.billNumber.trim().equals(cleanNum, ignoreCase = true)) ||
+                    (note.isNotBlank() && b.billNumber.isNotBlank() && note.contains(b.billNumber.trim().uppercase())) ||
+                    (tx.billId == 0L && cleanNum.isBlank() && kotlin.math.abs(b.finalAmount - tx.amount) < 0.001 && b.billDate.startsWith(tx.date))
+                }
+
+            tx.type == UdhariTransactionType.PURCHASE_CREDIT && !matchesKnownBill
         }
 
         val unlinkedBillTxs = unlinkedCreditTxs.filter { it.billId != 0L || it.billNumber.isNotBlank() }
