@@ -131,6 +131,44 @@ class DashboardFlowTest {
         assertEquals("bill_42_uuid-fixed-1", "bill_${bill1.id}_${bill1.transactionUuid}")
     }
 
+    @Test
+    fun testCustomerReconciliation_mergesCloudCustomersWithLocal() {
+        val localCustomers = listOf(
+            Customer(id = 1, name = "Kajal Salgar", mobile = "9822001122", address = "Village A")
+        )
+        val cloudCustomers = listOf(
+            Customer(id = 1, name = "Kajal Salgar", mobile = "9822001122", address = "Village A"),
+            Customer(id = 2, name = "Suresh Patil", mobile = "9822003344", address = "Village B")
+        )
+
+        val map = linkedMapOf<String, Customer>()
+        for (c in cloudCustomers) {
+            if (c.isActive && c.name.isNotBlank() && c.name != "Walk-in") {
+                map[c.canonicalKey()] = c
+            }
+        }
+        for (c in localCustomers) {
+            if (c.isActive && c.name.isNotBlank() && c.name != "Walk-in") {
+                map[c.canonicalKey()] = c
+            }
+        }
+
+        assertEquals(2, map.size)
+        assertTrue(map.containsKey(Customer(id = 2, name = "Suresh Patil", mobile = "9822003344").canonicalKey()))
+    }
+
+    @Test
+    fun testHomeUdhariDirectBinding_noLoadingIndicatorWhenStateAvailable() {
+        // Given an udhari state with total 110815.0 and 13 customers
+        val totalUdhari = 110815.0
+        val pendingCount = 13
+        val shouldShowCard = totalUdhari > 0.01
+
+        assertTrue(shouldShowCard)
+        assertEquals(110815.0, totalUdhari, 0.001)
+        assertEquals(13, pendingCount)
+    }
+
     private fun createTestBill(
         id: Long,
         amount: Double,

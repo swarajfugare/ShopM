@@ -15,7 +15,7 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.*
 
 data class UdhariLedgerState(
-    val isLoading: Boolean = true,
+    val isLoading: Boolean = false,
     val totalOutstanding: Double = 0.0,
     val pendingCustomersCount: Int = 0,
     val customerBalances: Map<String, Double> = emptyMap(),
@@ -82,9 +82,11 @@ class UdhariStateProvider(
             overdueAmount = overdueAmount,
             pendingBillsCount = pendingBills.size
         )
+    }.catch { e ->
+        android.util.Log.e("UdhariStateProvider", "Error computing state: ${e.message}", e)
     }.stateIn(
         scope,
         SharingStarted.Eagerly,
-        UdhariLedgerState(isLoading = true)
+        UdhariLedgerState(isLoading = false)
     )
 }

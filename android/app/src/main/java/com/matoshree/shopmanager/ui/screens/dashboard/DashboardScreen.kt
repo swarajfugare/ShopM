@@ -80,12 +80,10 @@ class DashboardViewModel(
         if (udhariStateProvider != null) {
             viewModelScope.launch(errorHandler) {
                 udhariStateProvider.state.collectLatest { s ->
-                    isUdhariLoaded.value = !s.isLoading
-                    if (!s.isLoading) {
-                        udhariOutstanding.value = s.totalOutstanding
-                        udhariPendingCount.value = s.pendingCustomersCount
-                        todayCollectedCredit.value = s.todayCollections
-                    }
+                    isUdhariLoaded.value = true
+                    udhariOutstanding.value = s.totalOutstanding
+                    udhariPendingCount.value = s.pendingCustomersCount
+                    todayCollectedCredit.value = s.todayCollections
                 }
             }
         }
@@ -215,17 +213,17 @@ class DashboardViewModel(
             val target = 500000.0
             val progress = ((allMonthSales / target) * 100).coerceAtMost(100.0)
 
-            val totalPending = if (udhariStateProvider != null && !udhariStateProvider.state.value.isLoading) {
+            val totalPending = if (udhariStateProvider != null) {
                 udhariStateProvider.state.value.totalOutstanding
             } else {
                 ShopMetricsCalculator.calculateTotalPendingUdhari(allBills, transactions, allCustomersState.value)
             }
-            val pendingCustCount = if (udhariStateProvider != null && !udhariStateProvider.state.value.isLoading) {
+            val pendingCustCount = if (udhariStateProvider != null) {
                 udhariStateProvider.state.value.pendingCustomersCount
             } else {
                 ShopMetricsCalculator.calculatePendingCustomersCount(allBills, transactions, allCustomersState.value)
             }
-            val todayCollected = if (udhariStateProvider != null && !udhariStateProvider.state.value.isLoading) {
+            val todayCollected = if (udhariStateProvider != null) {
                 udhariStateProvider.state.value.todayCollections
             } else {
                 ShopMetricsCalculator.calculateTodayCollectedCredit(transactions, today)
@@ -249,17 +247,19 @@ class DashboardViewModel(
                 businessInsight = if (todayBillsCount > 0) "Today: $todayBillsCount bills generated with avg ₹${String.format(java.util.Locale.US, "%.0f", avgOrder)}" else "Ready for today's sales at Matoshree Collection."
             )
 
-            if (todayCollectedCredit.value != todayCollected) {
-                todayCollectedCredit.value = todayCollected
+            if (udhariStateProvider == null) {
+                if (todayCollectedCredit.value != todayCollected) {
+                    todayCollectedCredit.value = todayCollected
+                }
+                if (udhariOutstanding.value != totalPending) {
+                    udhariOutstanding.value = totalPending
+                }
+                if (udhariPendingCount.value != pendingCustCount) {
+                    udhariPendingCount.value = pendingCustCount
+                }
             }
             if (todayProfitEstimate.value != estProfit) {
                 todayProfitEstimate.value = estProfit
-            }
-            if (udhariOutstanding.value != totalPending) {
-                udhariOutstanding.value = totalPending
-            }
-            if (udhariPendingCount.value != pendingCustCount) {
-                udhariPendingCount.value = pendingCustCount
             }
             if (_summary.value != newSummary) {
                 _summary.value = newSummary
@@ -483,24 +483,8 @@ fun DashboardScreen(
                 }
             }
 
-            // UDHARI / CREDIT OUTSTANDING CARD
-            if (!isUdhariLoaded) {
-                item {
-                    MatoshreeCard(hasGoldTopBorder = true) {
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(vertical = 4.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.Center
-                        ) {
-                            CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp, color = DeepEmerald)
-                            Spacer(modifier = Modifier.width(8.dp))
-                            Text("उधारी हिशोब लोड होत आहे...", fontSize = 12.sp, color = MutedCharcoal)
-                        }
-                    }
-                }
-            } else if (totalUdhari > 0) {
+            // UDHARI / CREDIT OUTSTANDING CARD (Direct from Udhari state - no loading spinner)
+            if (totalUdhari > 0.01) {
                 item {
                     MatoshreeCard(
                         hasGoldTopBorder = true,

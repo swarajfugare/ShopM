@@ -266,6 +266,7 @@ class FirestoreCustomerRepository {
     private val TAG = "FirestoreCustRepo"
 
     fun getAllCustomers(): Flow<List<Customer>> = callbackFlow {
+        trySend(emptyList())
         val rootMap = mutableMapOf<String, Customer>()
         val shopMap = mutableMapOf<String, Customer>()
 

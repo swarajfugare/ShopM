@@ -334,6 +334,12 @@ class RealtimeSyncManager private constructor(
                 database.withTransaction {
                     if (toUpsert.isNotEmpty()) {
                         database.customerDao().upsertServerCustomers(toUpsert)
+                        for (entity in toUpsert) {
+                            val clean = PhoneUtils.clean10DigitMobileInput(entity.mobile)
+                            if (clean.length == 10) {
+                                database.customerDao().unarchiveCustomerByMobile(entity.mobile, clean)
+                            }
+                        }
                     }
                     for (target in toArchive) {
                         database.customerDao().archiveCustomerComprehensive(

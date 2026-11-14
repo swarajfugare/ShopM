@@ -8,6 +8,7 @@ import com.matoshree.shopmanager.data.local.entity.*
 import com.matoshree.shopmanager.domain.model.*
 import com.matoshree.shopmanager.utils.DateUtils
 import androidx.room.withTransaction
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.callbackFlow
@@ -515,10 +516,52 @@ class CustomerRepository(
     private val database: AppDatabase? = null,
     private val firestoreRepo: FirestoreCustomerRepository = FirestoreCustomerRepository()
 ) {
+    private val reconciledKeys = java.util.concurrent.ConcurrentHashMap.newKeySet<String>()
+    private val repoScope = kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.IO + kotlinx.coroutines.SupervisorJob())
+
     fun getAllCustomers(): Flow<List<Customer>> {
         if (database == null) return firestoreRepo.getAllCustomers()
-        return database.customerDao().getAllCustomers().map { entities ->
-            entities.map { it.toDomain() }.distinctBy { it.canonicalKey() }
+        return combine(
+            database.customerDao().getAllCustomers().map { entities ->
+                entities.map { it.toDomain() }
+            },
+            firestoreRepo.getAllCustomers()
+        ) { local, cloud ->
+            // Reconcile any missing or inactive customers into Room in the background (at most once per customer)
+            val newCloudToReconcile = cloud.filter {
+                it.isActive && it.name.isNotBlank() && it.name != "Walk-in" && !reconciledKeys.contains(it.canonicalKey())
+            }
+            if (newCloudToReconcile.isNotEmpty() && database != null) {
+                newCloudToReconcile.forEach { reconciledKeys.add(it.canonicalKey()) }
+                repoScope.launch {
+                    try {
+                        for (c in newCloudToReconcile) {
+                            val clean = com.matoshree.shopmanager.utils.PhoneUtils.clean10DigitMobileInput(c.mobile)
+                            if (clean.length == 10) {
+                                database.customerDao().unarchiveCustomerByMobile(c.mobile, clean)
+                            }
+                            database.customerDao().upsertServerCustomer(c.toEntity())
+                        }
+                    } catch (e: Exception) {
+                        Log.w("CustomerRepo", "Reconciliation error: ${e.message}")
+                    }
+                }
+            }
+
+            val map = linkedMapOf<String, Customer>()
+            for (c in cloud) {
+                if (c.isActive && c.name.isNotBlank() && c.name != "Walk-in") {
+                    map[c.canonicalKey()] = c
+                }
+            }
+            for (c in local) {
+                if (c.isActive && c.name.isNotBlank() && c.name != "Walk-in") {
+                    map[c.canonicalKey()] = c
+                }
+            }
+            map.values.sortedWith { c1, c2 ->
+                com.matoshree.shopmanager.utils.AlphabetUtils.compareAlphabetically(c1.name, c2.name)
+            }
         }.distinctUntilChanged()
     }
 
