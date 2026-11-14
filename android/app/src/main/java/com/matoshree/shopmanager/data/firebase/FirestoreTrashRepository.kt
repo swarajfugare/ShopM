@@ -204,14 +204,13 @@ class FirestoreTrashRepository {
                 try {
                     val billDoc = FirebaseManager.billsCollection().document(item.docId).get().await()
                     val bDto = billDoc.toObject(BillDto::class.java)
-                    val bNum = bDto?.billNumber ?: ""
+                    val bGid = bDto?.gid?.ifBlank { null } ?: item.docId
                     val txDocs = mutableListOf<com.google.firebase.firestore.DocumentSnapshot>()
-                    val txsByLinked = FirebaseManager.udhariTransactionsCollection().whereEqualTo("linkedBillGid", item.docId).get().await().documents
+                    val txsByLinked = FirebaseManager.udhariTransactionsCollection()
+                        .whereEqualTo("linkedBillGid", bGid)
+                        .whereEqualTo("cascadedBy", "BILL_DELETE")
+                        .get().await().documents
                     txDocs.addAll(txsByLinked)
-                    if (bNum.isNotBlank()) {
-                        val txsByNum = FirebaseManager.udhariTransactionsCollection().whereEqualTo("billNumber", bNum).get().await().documents
-                        txDocs.addAll(txsByNum)
-                    }
                     val distinctTxs = txDocs.distinctBy { it.id }
                     if (distinctTxs.isNotEmpty()) {
                         val batch = FirebaseManager.firestore.batch()
@@ -220,6 +219,7 @@ class FirestoreTrashRepository {
                                 "status" to "ACTIVE",
                                 "isDeleted" to false,
                                 "deletedAt" to null,
+                                "cascadedBy" to null,
                                 "updatedAt" to System.currentTimeMillis()
                             ))
                         }

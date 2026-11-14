@@ -1809,6 +1809,7 @@ class FirestoreBillRepository {
                             "isDeleted" to true,
                             "deletedAt" to System.currentTimeMillis(),
                             "linkedBillGid" to bGid,
+                            "cascadedBy" to "BILL_DELETE",
                             "updatedAt" to System.currentTimeMillis()
                         )
                     )
