@@ -864,7 +864,9 @@ fun UdhariPaymentDialog(
                     isError = enteredAmount > outstanding,
                     supportingText = {
                         if (enteredAmount > outstanding) {
-                            Text("रक्कम बाकीपेक्षा जास्त आहे (${CurrencyFormatter.format(outstanding)})", color = BoutiqueError)
+                            Text("भरणा रक्कम बाकीपेक्षा जास्त आहे. बाकी: ${CurrencyFormatter.format(outstanding)} (Payment exceeds due)", color = BoutiqueError)
+                        } else if (enteredAmount <= 0.0 && amountText.isNotBlank()) {
+                            Text("भरणा रक्कम ० पेक्षा जास्त असावी (Payment must be > 0)", color = BoutiqueError)
                         } else if (enteredAmount > 0) {
                             val remaining = (outstanding - enteredAmount).coerceAtLeast(0.0)
                             Text("शिल्लक बाकी: ${CurrencyFormatter.format(remaining)}", color = DeepEmerald, fontWeight = FontWeight.SemiBold)

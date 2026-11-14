@@ -1683,7 +1683,14 @@ fun CustomerProfileScreen(
                     )
                     if (entered > outstandingDue && outstandingDue > 0.0) {
                         Text(
-                            text = "पेमेंट बाकी रकमेपेक्षा जास्त असू शकत नाही (कमाल: ${CurrencyFormatter.format(outstandingDue)})",
+                            text = "भरणा रक्कम बाकीपेक्षा जास्त आहे. बाकी: ${CurrencyFormatter.format(outstandingDue)} (Payment exceeds due)",
+                            color = BoutiqueError,
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.SemiBold
+                        )
+                    } else if (entered <= 0.0 && pAmountText.isNotBlank()) {
+                        Text(
+                            text = "भरणा रक्कम ० पेक्षा जास्त असावी (Payment must be > 0)",
                             color = BoutiqueError,
                             fontSize = 12.sp,
                             fontWeight = FontWeight.SemiBold

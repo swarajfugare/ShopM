@@ -103,6 +103,12 @@ class FirestoreUdhariRepository {
         return try {
             FirebaseManager.ensureAuthenticated()
 
+            if (payment.amount <= 0.0) {
+                return Result.failure(
+                    IllegalArgumentException("भरणा रक्कम ० पेक्षा जास्त असावी (Payment amount must be greater than 0)")
+                )
+            }
+
             // Check if transactionUuid already exists (Idempotency protection)
             if (payment.transactionUuid.isNotBlank()) {
                 val existingQuery = FirebaseManager.udhariTransactionsCollection()
@@ -235,7 +241,35 @@ class FirestoreUdhariRepository {
 
             val totalBillsPending = pendingBillsList.sumOf { getBillPending(it.first) }
             val maxPayable = maxOf(totalBillsPending, currentCustDue)
-            val safePaymentAmount = if (maxPayable > 0.01) payment.amount.coerceIn(0.01, maxPayable) else payment.amount.coerceAtLeast(0.01)
+
+            // F4: Enforce overpayment rejection: amount cannot exceed currentDue or specific bill outstanding
+            if (payment.billId != 0L || !payment.billGid.isNullOrBlank() || payment.billNumber.isNotBlank()) {
+                val targetBill = pendingBillsList.firstOrNull { (b, _) ->
+                    (!payment.billGid.isNullOrBlank() && (b.gid == payment.billGid || b.id == payment.billGid)) ||
+                    (payment.billId != 0L && (b.legacyId == payment.billId || (b.id.hashCode().toLong() and 0x7FFFFFFFFFFFFFFFL) == payment.billId)) ||
+                    (payment.billNumber.isNotBlank() && b.billNumber.trim().equals(payment.billNumber.trim(), ignoreCase = true))
+                }
+                if (targetBill != null) {
+                    val billPending = getBillPending(targetBill.first)
+                    if (payment.amount > billPending + 0.01) {
+                        return Result.failure(
+                            IllegalArgumentException("भरणा रक्कम बिलाच्या बाकीपेक्षा जास्त आहे. बाकी: ₹${com.matoshree.shopmanager.utils.CurrencyFormatter.format(billPending)} (Payment exceeds bill pending)")
+                        )
+                    }
+                }
+            }
+
+            if (maxPayable > 0.01 && payment.amount > maxPayable + 0.01) {
+                return Result.failure(
+                    IllegalArgumentException("भरणा रक्कम बाकीपेक्षा जास्त आहे. बाकी: ₹${com.matoshree.shopmanager.utils.CurrencyFormatter.format(maxPayable)} (Payment exceeds current due)")
+                )
+            } else if (maxPayable <= 0.01) {
+                return Result.failure(
+                    IllegalArgumentException("ग्राहकाची कोणतीही उधारी बाकी नाही (Customer has no outstanding due)")
+                )
+            }
+
+            val safePaymentAmount = payment.amount
             val newCustDue = (currentCustDue - safePaymentAmount).coerceAtLeast(0.0)
 
             val effectiveGid = if (payment.gid.isNotBlank()) payment.gid else IdGenerator.generate(IdType.PAYMENT)

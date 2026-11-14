@@ -109,7 +109,13 @@ class BillViewModel(
         note: String? = null,
         context: Context? = null
     ): Result<com.matoshree.shopmanager.domain.model.UdhariTransaction> {
-        val safeAmount = amount.coerceAtLeast(0.01)
+        if (amount <= 0.0) {
+            return Result.failure(IllegalArgumentException("भरणा रक्कम ० पेक्षा जास्त असावी (Payment amount must be greater than 0)"))
+        }
+        if (amount > bill.pendingAmount + 0.01) {
+            return Result.failure(IllegalArgumentException("भरणा रक्कम बिलाच्या बाकीपेक्षा जास्त आहे. बाकी: ₹${com.matoshree.shopmanager.utils.CurrencyFormatter.format(bill.pendingAmount)} (Payment exceeds bill pending)"))
+        }
+        val safeAmount = amount
         val remaining = (bill.pendingAmount - safeAmount).coerceAtLeast(0.0)
         val tx = com.matoshree.shopmanager.domain.model.UdhariTransaction(
             customerId = bill.customerId ?: 0L,
