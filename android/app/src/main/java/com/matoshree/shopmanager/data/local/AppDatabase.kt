@@ -19,9 +19,10 @@ import com.matoshree.shopmanager.data.local.entity.*
         DailyClosingEntity::class,
         SyncQueueEntity::class,
         SettingsEntity::class,
-        ReminderLogEntity::class
+        ReminderLogEntity::class,
+        CustomerAliasEntity::class
     ],
-    version = 8,
+    version = 9,
     exportSchema = false
 )
 @TypeConverters(Converters::class)
@@ -437,6 +438,127 @@ abstract class AppDatabase : RoomDatabase() {
             }
         }
 
+        val MIGRATION_8_9 = object : androidx.room.migration.Migration(8, 9) {
+            override fun migrate(db: androidx.sqlite.db.SupportSQLiteDatabase) {
+                // 1. Create customer_aliases table
+                db.execSQL("CREATE TABLE IF NOT EXISTS `customer_aliases` (`aliasGid` TEXT NOT NULL, `canonicalGid` TEXT NOT NULL, `mergedAt` INTEGER NOT NULL, PRIMARY KEY(`aliasGid`))")
+                db.execSQL("CREATE UNIQUE INDEX IF NOT EXISTS `index_customer_aliases_aliasGid` ON `customer_aliases` (`aliasGid`)")
+                db.execSQL("CREATE INDEX IF NOT EXISTS `index_customer_aliases_canonicalGid` ON `customer_aliases` (`canonicalGid`)")
+
+                // 2. Real docId and GID calculation for all customers:
+                // If 10-digit mobile exists: docId MUST be 'cust_m_' || cleanMobile
+                // GID MUST be IdGenerator.customerGid(docId)
+                val custCursor = db.query("SELECT id, docId, mobile, name, gid, serverId FROM customers ORDER BY id ASC")
+                data class CustRow(val id: Long, val docId: String?, val mobile: String, val name: String, val gid: String, val serverId: Long?)
+                val rows = mutableListOf<CustRow>()
+                while (custCursor.moveToNext()) {
+                    rows.add(
+                        CustRow(
+                            id = custCursor.getLong(0),
+                            docId = if (custCursor.isNull(1)) null else custCursor.getString(1),
+                            mobile = custCursor.getString(2) ?: "",
+                            name = custCursor.getString(3) ?: "",
+                            gid = custCursor.getString(4) ?: "",
+                            serverId = if (custCursor.isNull(5)) null else custCursor.getLong(5)
+                        )
+                    )
+                }
+                custCursor.close()
+
+                // Group by clean 10-digit mobile when available, or by real docId
+                val phoneGroups = rows.groupBy {
+                    val clean = com.matoshree.shopmanager.utils.PhoneUtils.clean10DigitMobileInput(it.mobile)
+                    if (clean.length == 10) "mob_$clean"
+                    else if (!it.docId.isNullOrBlank() && !it.docId.startsWith("cust_") && it.docId.length > 10) "doc_${it.docId}"
+                    else "id_${it.id}"
+                }
+
+                val remappedCustomerGids = mutableMapOf<String, String>() // oldGid -> canonicalGid
+
+                for ((groupKey, groupRows) in phoneGroups) {
+                    val survivor = groupRows.first()
+                    val cleanMob = com.matoshree.shopmanager.utils.PhoneUtils.clean10DigitMobileInput(survivor.mobile)
+                    val canonicalDocId = when {
+                        cleanMob.length == 10 -> "cust_m_$cleanMob"
+                        !survivor.docId.isNullOrBlank() && !survivor.docId.startsWith("cust_") -> survivor.docId
+                        survivor.serverId != null && survivor.serverId > 0 -> "cust_${survivor.serverId}"
+                        else -> "cust_${System.currentTimeMillis()}_${survivor.id}"
+                    }
+                    val canonicalGid = com.matoshree.shopmanager.domain.model.IdGenerator.customerGid(canonicalDocId)
+
+                    // Update survivor
+                    db.execSQL("UPDATE customers SET docId = ?, gid = ? WHERE id = ?", arrayOf(canonicalDocId, canonicalGid, survivor.id))
+
+                    if (survivor.gid.isNotBlank() && survivor.gid != canonicalGid) {
+                        remappedCustomerGids[survivor.gid] = canonicalGid
+                        db.execSQL("INSERT OR REPLACE INTO customer_aliases (aliasGid, canonicalGid, mergedAt) VALUES (?, ?, ?)",
+                            arrayOf(survivor.gid, canonicalGid, System.currentTimeMillis()))
+                    }
+
+                    // Merge duplicates in this group
+                    if (groupRows.size > 1) {
+                        for (i in 1 until groupRows.size) {
+                            val dup = groupRows[i]
+                            if (dup.gid.isNotBlank() && dup.gid != canonicalGid) {
+                                remappedCustomerGids[dup.gid] = canonicalGid
+                                db.execSQL("INSERT OR REPLACE INTO customer_aliases (aliasGid, canonicalGid, mergedAt) VALUES (?, ?, ?)",
+                                    arrayOf(dup.gid, canonicalGid, System.currentTimeMillis()))
+                            }
+                            // Re-point bills attached to duplicate row
+                            db.execSQL("UPDATE bills SET customerId = ?, customerGid = ? WHERE customerId = ?", arrayOf(survivor.id, canonicalGid, dup.id))
+                            if (dup.gid.isNotBlank()) {
+                                db.execSQL("UPDATE bills SET customerId = ?, customerGid = ? WHERE customerGid = ?", arrayOf(survivor.id, canonicalGid, dup.gid))
+                                db.execSQL("UPDATE reminder_logs SET customerGid = ? WHERE customerGid = ?", arrayOf(canonicalGid, dup.gid))
+                            }
+                            // Safely remove the redundant duplicate customer row now that all references are re-pointed
+                            db.execSQL("DELETE FROM customers WHERE id = ?", arrayOf(dup.id))
+                        }
+                    }
+                }
+
+                // 3. Re-point any bills and reminder_logs whose customerGid is an alias
+                for ((oldGid, newGid) in remappedCustomerGids) {
+                    db.execSQL("UPDATE bills SET customerGid = ? WHERE customerGid = ?", arrayOf(newGid, oldGid))
+                    db.execSQL("UPDATE reminder_logs SET customerGid = ? WHERE customerGid = ?", arrayOf(newGid, oldGid))
+                }
+            }
+        }
+
+        val MIGRATION_7_9 = object : androidx.room.migration.Migration(7, 9) {
+            override fun migrate(db: androidx.sqlite.db.SupportSQLiteDatabase) {
+                MIGRATION_7_8.migrate(db)
+                MIGRATION_8_9.migrate(db)
+            }
+        }
+
+        val MIGRATION_6_9 = object : androidx.room.migration.Migration(6, 9) {
+            override fun migrate(db: androidx.sqlite.db.SupportSQLiteDatabase) {
+                MIGRATION_6_8.migrate(db)
+                MIGRATION_8_9.migrate(db)
+            }
+        }
+
+        val MIGRATION_5_9 = object : androidx.room.migration.Migration(5, 9) {
+            override fun migrate(db: androidx.sqlite.db.SupportSQLiteDatabase) {
+                MIGRATION_5_8.migrate(db)
+                MIGRATION_8_9.migrate(db)
+            }
+        }
+
+        val MIGRATION_4_9 = object : androidx.room.migration.Migration(4, 9) {
+            override fun migrate(db: androidx.sqlite.db.SupportSQLiteDatabase) {
+                MIGRATION_4_8.migrate(db)
+                MIGRATION_8_9.migrate(db)
+            }
+        }
+
+        val MIGRATION_3_9 = object : androidx.room.migration.Migration(3, 9) {
+            override fun migrate(db: androidx.sqlite.db.SupportSQLiteDatabase) {
+                MIGRATION_3_8.migrate(db)
+                MIGRATION_8_9.migrate(db)
+            }
+        }
+
         fun getInstance(context: Context): AppDatabase {
             return INSTANCE ?: synchronized(this) {
                 val instance = Room.databaseBuilder(
@@ -447,7 +569,8 @@ abstract class AppDatabase : RoomDatabase() {
                 .addMigrations(
                     MIGRATION_3_4, MIGRATION_4_5, MIGRATION_3_5, MIGRATION_5_6, MIGRATION_4_6, MIGRATION_3_6,
                     MIGRATION_6_7, MIGRATION_5_7, MIGRATION_4_7, MIGRATION_3_7,
-                    MIGRATION_7_8, MIGRATION_6_8, MIGRATION_5_8, MIGRATION_4_8, MIGRATION_3_8
+                    MIGRATION_7_8, MIGRATION_6_8, MIGRATION_5_8, MIGRATION_4_8, MIGRATION_3_8,
+                    MIGRATION_8_9, MIGRATION_7_9, MIGRATION_6_9, MIGRATION_5_9, MIGRATION_4_9, MIGRATION_3_9
                 )
                 .build()
                 INSTANCE = instance

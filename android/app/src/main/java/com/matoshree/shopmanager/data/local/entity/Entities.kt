@@ -148,6 +148,19 @@ data class CustomerEntity(
 }
 
 @Entity(
+    tableName = "customer_aliases",
+    indices = [
+        Index(value = ["aliasGid"], unique = true),
+        Index(value = ["canonicalGid"])
+    ]
+)
+data class CustomerAliasEntity(
+    @PrimaryKey val aliasGid: String,
+    val canonicalGid: String,
+    val mergedAt: Long = System.currentTimeMillis()
+)
+
+@Entity(
     tableName = "categories",
     indices = [Index(value = ["gid"], unique = true)]
 )

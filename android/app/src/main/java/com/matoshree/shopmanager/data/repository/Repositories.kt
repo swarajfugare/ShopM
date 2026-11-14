@@ -20,19 +20,21 @@ import java.util.UUID
 
 // Extension mappers between Room Entities and Domain Models
 fun CustomerEntity.toDomain(): Customer {
-    val effectiveGid = if (!docId.isNullOrBlank()) {
-        IdGenerator.customerGid(docId)
-    } else if (gid.isNotBlank() && !IdFormat.isLegacy(gid)) {
-        gid
-    } else if (gid.isNotBlank()) {
-        gid
-    } else {
-        IdGenerator.generate(IdType.CUSTOMER)
+    val cleanMob = com.matoshree.shopmanager.utils.PhoneUtils.clean10DigitMobileInput(mobile)
+    val trueDocId = when {
+        cleanMob.length == 10 -> "cust_m_$cleanMob"
+        !docId.isNullOrBlank() -> docId
+        else -> null
+    }
+    val effectiveGid = when {
+        !trueDocId.isNullOrBlank() -> IdGenerator.customerGid(trueDocId)
+        gid.isNotBlank() && IdFormat.isValid(gid) -> gid
+        else -> IdGenerator.generate(IdType.CUSTOMER)
     }
     return Customer(
         id = id,
         gid = effectiveGid,
-        docId = docId,
+        docId = trueDocId,
         shopId = shopId,
         name = name,
         mobile = mobile,
@@ -52,19 +54,21 @@ fun CustomerEntity.toDomain(): Customer {
 }
 
 fun Customer.toEntity(): CustomerEntity {
-    val effectiveGid = if (!docId.isNullOrBlank()) {
-        IdGenerator.customerGid(docId)
-    } else if (gid.isNotBlank() && !IdFormat.isLegacy(gid)) {
-        gid
-    } else if (gid.isNotBlank()) {
-        gid
-    } else {
-        IdGenerator.generate(IdType.CUSTOMER)
+    val cleanMob = com.matoshree.shopmanager.utils.PhoneUtils.clean10DigitMobileInput(mobile)
+    val trueDocId = when {
+        cleanMob.length == 10 -> "cust_m_$cleanMob"
+        !docId.isNullOrBlank() -> docId
+        else -> null
+    }
+    val effectiveGid = when {
+        !trueDocId.isNullOrBlank() -> IdGenerator.customerGid(trueDocId)
+        gid.isNotBlank() && IdFormat.isValid(gid) -> gid
+        else -> IdGenerator.generate(IdType.CUSTOMER)
     }
     return CustomerEntity(
         id = if (id > 0) id else 0,
         gid = effectiveGid,
-        docId = docId,
+        docId = trueDocId,
         serverId = null,
         shopId = shopId,
         name = name,
@@ -638,47 +642,13 @@ class CustomerRepository(
 
     fun getAllCustomers(): Flow<List<Customer>> {
         if (database == null) return firestoreRepo.getAllCustomers()
-        return combine(
-            database.customerDao().getAllCustomers().map { entities ->
-                entities.map { it.toDomain() }
-            },
-            firestoreRepo.getAllCustomers()
-        ) { local, cloud ->
-            // Reconcile any missing or inactive customers into Room in the background (at most once per customer)
-            val newCloudToReconcile = cloud.filter {
-                it.isActive && it.name.isNotBlank() && it.name != "Walk-in" && !reconciledKeys.contains(it.canonicalKey())
-            }
-            if (newCloudToReconcile.isNotEmpty() && database != null) {
-                newCloudToReconcile.forEach { reconciledKeys.add(it.canonicalKey()) }
-                repoScope.launch {
-                    try {
-                        for (c in newCloudToReconcile) {
-                            val clean = com.matoshree.shopmanager.utils.PhoneUtils.clean10DigitMobileInput(c.mobile)
-                            if (clean.length == 10) {
-                                database.customerDao().unarchiveCustomerByMobile(c.mobile, clean)
-                            }
-                            database.customerDao().upsertServerCustomer(c.toEntity())
-                        }
-                    } catch (e: Exception) {
-                        Log.w("CustomerRepo", "Reconciliation error: ${e.message}")
-                    }
+        return database.customerDao().getAllCustomers().map { entities ->
+            entities.map { it.toDomain() }
+                .filter { it.isActive && it.name.isNotBlank() && !it.name.equals("Walk-in", ignoreCase = true) }
+                .distinctBy { it.gid }
+                .sortedWith { c1, c2 ->
+                    com.matoshree.shopmanager.utils.AlphabetUtils.compareAlphabetically(c1.name, c2.name)
                 }
-            }
-
-            val map = linkedMapOf<String, Customer>()
-            for (c in cloud) {
-                if (c.isActive && c.name.isNotBlank() && c.name != "Walk-in") {
-                    map[c.canonicalKey()] = c
-                }
-            }
-            for (c in local) {
-                if (c.isActive && c.name.isNotBlank() && c.name != "Walk-in") {
-                    map[c.canonicalKey()] = c
-                }
-            }
-            map.values.sortedWith { c1, c2 ->
-                com.matoshree.shopmanager.utils.AlphabetUtils.compareAlphabetically(c1.name, c2.name)
-            }
         }.distinctUntilChanged()
     }
 
@@ -765,12 +735,35 @@ class CustomerRepository(
         }
     }
 
+    suspend fun updateCustomerTags(customerGid: String, tags: List<String>): Result<Unit> {
+        val cust = database?.customerDao()?.getCustomerByGid(customerGid)?.toDomain()
+        val legacyId = cust?.id ?: (if (customerGid.startsWith("id_")) customerGid.removePrefix("id_").toLongOrNull() ?: 0L else 0L)
+        return try {
+            firestoreRepo.updateCustomerTags(customerGid, tags)
+            if (legacyId > 0) firestoreRepo.updateCustomerTags(legacyId, tags)
+            Result.success(Unit)
+        } catch (e: Exception) {
+            Result.success(Unit)
+        }
+    }
+
     suspend fun updateCustomerTags(customerId: Long, tags: List<String>): Result<Unit> {
         return try {
             firestoreRepo.updateCustomerTags(customerId, tags)
         } catch (e: Exception) {
             Result.success(Unit)
         }
+    }
+
+    suspend fun deleteOrArchiveCustomer(
+        customerGid: String,
+        hintMobile: String = "",
+        hintName: String = ""
+    ): String {
+        val cust = database?.customerDao()?.getCustomerByGid(customerGid)?.toDomain()
+            ?: (if (hintMobile.isNotBlank()) database?.customerDao()?.getCustomerByMobile(hintMobile)?.toDomain() else null)
+        val targetId = cust?.id ?: (if (customerGid.startsWith("id_")) customerGid.removePrefix("id_").toLongOrNull() ?: 0L else 0L)
+        return deleteOrArchiveCustomer(targetId, cust?.mobile ?: hintMobile, cust?.name ?: hintName)
     }
 
     suspend fun deleteOrArchiveCustomer(

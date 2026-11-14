@@ -441,10 +441,10 @@ class FirestoreCustomerRepository {
         val cleanMobile = com.matoshree.shopmanager.utils.PhoneUtils.clean10DigitMobileInput(customer.mobile)
         var docId = if (cleanMobile.length == 10) {
             "cust_m_$cleanMobile"
-        } else if (customer.id > 0) {
-            "cust_${customer.id}"
+        } else if (!customer.docId.isNullOrBlank() && customer.docId.length > 10) {
+            customer.docId
         } else {
-            "cust_${System.currentTimeMillis()}_${UUID.randomUUID().toString().take(5)}"
+            "cust_${System.currentTimeMillis()}_${UUID.randomUUID().toString().take(8)}"
         }
 
         var existingLegacyId: Long? = null
@@ -481,8 +481,10 @@ class FirestoreCustomerRepository {
             }
         }
 
+        val canonicalGid = com.matoshree.shopmanager.domain.model.IdGenerator.customerGid(docId)
         val dto = CustomerDto(
             id = docId,
+            gid = canonicalGid,
             legacyId = customer.id.takeIf { it > 0 } ?: existingLegacyId ?: (docId.hashCode().toLong() and 0x7FFFFFFFFFFFFFFFL),
             name = customer.name.trim(),
             mobile = cleanMobile.ifBlank { customer.mobile.trim() },
@@ -513,6 +515,43 @@ class FirestoreCustomerRepository {
             Log.e(TAG, "FIRESTORE_WRITE entity=CUSTOMER path=$docPath result=FAILURE code=${e.javaClass.simpleName}", e)
         }
         return docId
+    }
+
+    suspend fun updateCustomerTags(customerGid: String, tags: List<String>): Result<Unit> {
+        return try {
+            FirebaseManager.ensureAuthenticated()
+            val snapshot = try {
+                kotlinx.coroutines.withTimeoutOrNull(600) {
+                    FirebaseManager.customersCollection().get().await()
+                } ?: FirebaseManager.customersCollection().get(com.google.firebase.firestore.Source.CACHE).await()
+            } catch (e: Exception) {
+                null
+            }
+            val matchDoc = snapshot?.documents?.find {
+                val dto = it.toObject(CustomerDto::class.java)
+                dto?.gid == customerGid || it.id == customerGid || (dto != null && IdGenerator.customerGid(it.id) == customerGid)
+            }
+            if (matchDoc != null) {
+                val updateMap = mutableMapOf<String, Any?>(
+                    "listTags" to tags,
+                    "updatedAt" to System.currentTimeMillis()
+                )
+                if (!tags.contains("VIP")) {
+                    updateMap["tier"] = "REGULAR"
+                }
+                val currentDto = matchDoc.toObject(CustomerDto::class.java)
+                if (!tags.contains("Kondharki") && currentDto?.address?.trim().equals("Kondharki", ignoreCase = true)) {
+                    updateMap["address"] = ""
+                }
+                FirebaseManager.customersCollection().document(matchDoc.id).update(updateMap).await()
+                try {
+                    FirebaseManager.shopCustomersCollection().document(matchDoc.id).update(updateMap).await()
+                } catch (_: Exception) {}
+            }
+            Result.success(Unit)
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
     }
 
     suspend fun updateCustomerTags(customerId: Long, tags: List<String>): Result<Unit> {

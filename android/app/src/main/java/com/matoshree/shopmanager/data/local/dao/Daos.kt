@@ -342,45 +342,54 @@ interface CustomerDao {
     @Query("SELECT COUNT(id) FROM customers WHERE syncStatus = 'PENDING'")
     fun getPendingCustomersCount(): Flow<Int>
 
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insertAlias(alias: CustomerAliasEntity)
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insertAliases(aliases: List<CustomerAliasEntity>)
+
+    @Query("SELECT * FROM customer_aliases")
+    suspend fun getAllAliasesDirect(): List<CustomerAliasEntity>
+
+    @Query("SELECT canonicalGid FROM customer_aliases WHERE aliasGid = :aliasGid LIMIT 1")
+    suspend fun getCanonicalGid(aliasGid: String): String?
+
     @Transaction
     suspend fun upsertServerCustomer(customer: CustomerEntity) {
         val cleanMob = com.matoshree.shopmanager.utils.PhoneUtils.clean10DigitMobileInput(customer.mobile)
-        val existingByDocId = if (!customer.docId.isNullOrBlank()) getCustomerByDocId(customer.docId) else null
-        val existingByGid = if (existingByDocId == null && customer.gid.isNotBlank()) getCustomerByGid(customer.gid) else null
-        val existingByServer = if (existingByDocId == null && existingByGid == null && customer.serverId != null && customer.serverId > 0) getCustomerByServerId(customer.serverId) else null
-        val existingByMobile = if (existingByDocId == null && existingByGid == null && existingByServer == null && cleanMob.length == 10) getCustomerByMobileFuzzy(customer.mobile, cleanMob) else null
-        val existingByName = if (existingByDocId == null && existingByGid == null && existingByServer == null && existingByMobile == null && cleanMob.isBlank() && customer.name.isNotBlank()) {
-            val byName = getCustomerByName(customer.name)
-            if (byName != null && com.matoshree.shopmanager.utils.PhoneUtils.clean10DigitMobileInput(byName.mobile).isBlank()) {
-                byName
-            } else null
-        } else null
-        val existing = existingByDocId ?: existingByGid ?: existingByServer ?: existingByMobile ?: existingByName
+        val trueDocId = when {
+            cleanMob.length == 10 -> "cust_m_$cleanMob"
+            !customer.docId.isNullOrBlank() -> customer.docId
+            else -> null
+        }
+        val canonicalGid = if (!trueDocId.isNullOrBlank()) {
+            com.matoshree.shopmanager.domain.model.IdGenerator.customerGid(trueDocId)
+        } else if (customer.gid.isNotBlank()) {
+            customer.gid
+        } else {
+            com.matoshree.shopmanager.domain.model.IdGenerator.generate(com.matoshree.shopmanager.domain.model.IdType.CUSTOMER)
+        }
+
+        val existingByDocId = if (!trueDocId.isNullOrBlank()) getCustomerByDocId(trueDocId) else null
+        val existingByGid = if (existingByDocId == null && canonicalGid.isNotBlank()) getCustomerByGid(canonicalGid) else null
+        val existingByMobile = if (existingByDocId == null && existingByGid == null && cleanMob.length == 10) getCustomerByMobileFuzzy(customer.mobile, cleanMob) else null
+        val existingByServer = if (existingByDocId == null && existingByGid == null && existingByMobile == null && customer.serverId != null && customer.serverId > 0) getCustomerByServerId(customer.serverId) else null
+        val existing = existingByDocId ?: existingByGid ?: existingByMobile ?: existingByServer
 
         if (existing != null) {
-            val existingCleanMob = com.matoshree.shopmanager.utils.PhoneUtils.clean10DigitMobileInput(existing.mobile)
-            // Only update Room if fields actually changed (avoids invalidation loops and list jitter)
-            if (existing.name != customer.name ||
-                existingCleanMob != cleanMob ||
-                existing.address != customer.address ||
-                existing.totalBills != customer.totalBills ||
-                Math.abs(existing.lifetimeSpend - customer.lifetimeSpend) > 0.01 ||
-                existing.isActive != customer.isActive ||
-                existing.gid != customer.gid ||
-                existing.docId != customer.docId
-            ) {
-                val updated = customer.copy(
-                    id = existing.id,
-                    gid = if (customer.gid.isNotBlank()) customer.gid else existing.gid,
-                    docId = customer.docId ?: existing.docId,
-                    serverId = existing.serverId ?: customer.serverId,
-                    mobile = if (cleanMob.length == 10) cleanMob else existing.mobile
-                )
-                updateCustomer(updated)
-            }
+            val updated = customer.copy(
+                id = existing.id,
+                gid = canonicalGid,
+                docId = trueDocId ?: existing.docId,
+                serverId = existing.serverId ?: customer.serverId,
+                mobile = if (cleanMob.length == 10) cleanMob else existing.mobile
+            )
+            updateCustomer(updated)
         } else {
             val normalized = customer.copy(
                 id = 0,
+                gid = canonicalGid,
+                docId = trueDocId,
                 mobile = if (cleanMob.length == 10) cleanMob else customer.mobile
             )
             insertCustomer(normalized)
