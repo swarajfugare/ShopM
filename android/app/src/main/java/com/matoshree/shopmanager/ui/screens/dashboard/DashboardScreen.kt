@@ -37,6 +37,8 @@ import com.matoshree.shopmanager.ui.theme.*
 import com.matoshree.shopmanager.domain.usecase.ShopMetricsCalculator
 import com.matoshree.shopmanager.utils.CurrencyFormatter
 import com.matoshree.shopmanager.utils.DateUtils
+import androidx.compose.ui.res.stringResource
+import com.matoshree.shopmanager.R
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.*
@@ -347,8 +349,8 @@ fun DashboardScreen(
                 containerColor = DeepEmerald,
                 contentColor = WarmWhite,
                 shape = RoundedCornerShape(16.dp),
-                icon = { Icon(Icons.Default.AddShoppingCart, contentDescription = "नवीन बिल") },
-                text = { Text("नवीन बिल", fontWeight = FontWeight.Bold) }
+                icon = { Icon(Icons.Default.AddShoppingCart, contentDescription = stringResource(R.string.btn_add_bill)) },
+                text = { Text(stringResource(R.string.btn_add_bill), fontWeight = FontWeight.Bold) }
             )
         }
     ) { padding ->
@@ -402,7 +404,7 @@ fun DashboardScreen(
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Text(
-                        text = "डॅशबोर्ड",
+                        text = stringResource(R.string.dashboard_title),
                         style = MaterialTheme.typography.titleLarge.copy(
                             color = DeepEmerald,
                             fontWeight = FontWeight.Bold
@@ -422,7 +424,7 @@ fun DashboardScreen(
                         )
                         Spacer(modifier = Modifier.width(6.dp))
                         Text(
-                            text = "क्लाउड सिंक सक्रिय",
+                            text = stringResource(R.string.cloud_sync_active),
                             style = MaterialTheme.typography.labelSmall.copy(
                                 color = DeepEmerald,
                                 fontWeight = FontWeight.SemiBold
@@ -443,7 +445,7 @@ fun DashboardScreen(
                         ) {
                             Column {
                                 Text(
-                                    text = "आजची एकूण विक्री",
+                                    text = stringResource(R.string.today_sales),
                                     style = MaterialTheme.typography.labelMedium.copy(color = MutedCharcoal, letterSpacing = 1.sp)
                                 )
                                 Text(
@@ -467,7 +469,7 @@ fun DashboardScreen(
                                         Icon(Icons.Default.TrendingUp, contentDescription = null, tint = DeepEmerald, modifier = Modifier.size(14.dp))
                                         Spacer(modifier = Modifier.width(4.dp))
                                         Text(
-                                            text = "+${CurrencyFormatter.format(todayProfit)} नफा",
+                                            text = "+${CurrencyFormatter.format(todayProfit)} " + stringResource(R.string.profit_suffix),
                                             fontWeight = FontWeight.Bold,
                                             fontSize = 11.sp,
                                             color = DeepEmerald
@@ -476,7 +478,7 @@ fun DashboardScreen(
                                 }
                                 Spacer(modifier = Modifier.height(4.dp))
                                 Text(
-                                    text = "अंदाजे मार्जिन",
+                                    text = stringResource(R.string.estimated_margin),
                                     style = MaterialTheme.typography.labelSmall.copy(fontSize = 10.sp, color = MutedCharcoal)
                                 )
                             }
@@ -493,18 +495,18 @@ fun DashboardScreen(
                             horizontalArrangement = Arrangement.SpaceBetween
                         ) {
                             Row(verticalAlignment = Alignment.CenterVertically) {
-                                Text("💵 कॅश:", fontSize = 11.sp, color = MutedCharcoal)
+                                Text(stringResource(R.string.cash_stat_label), fontSize = 11.sp, color = MutedCharcoal)
                                 Spacer(modifier = Modifier.width(3.dp))
                                 Text(CurrencyFormatter.format(summary.cashPayments), fontSize = 12.sp, fontWeight = FontWeight.Bold, color = DeepEmerald)
                             }
                             Row(verticalAlignment = Alignment.CenterVertically) {
-                                Text("📱 यूपीआय:", fontSize = 11.sp, color = MutedCharcoal)
+                                Text(stringResource(R.string.upi_stat_label), fontSize = 11.sp, color = MutedCharcoal)
                                 Spacer(modifier = Modifier.width(3.dp))
                                 Text(CurrencyFormatter.format(summary.upiPayments), fontSize = 12.sp, fontWeight = FontWeight.Bold, color = ChampagneGold)
                             }
                             if (todayCreditCollected > 0) {
                                 Row(verticalAlignment = Alignment.CenterVertically) {
-                                    Text("🤝 जमा:", fontSize = 11.sp, color = MutedCharcoal)
+                                    Text(stringResource(R.string.collected_stat_label), fontSize = 11.sp, color = MutedCharcoal)
                                     Spacer(modifier = Modifier.width(3.dp))
                                     Text("+${CurrencyFormatter.format(todayCreditCollected)}", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = BoutiqueSuccess)
                                 }
@@ -518,15 +520,15 @@ fun DashboardScreen(
                             horizontalArrangement = Arrangement.SpaceBetween
                         ) {
                             Column {
-                                Text("एकूण बिले", style = MaterialTheme.typography.bodySmall.copy(color = MutedCharcoal, fontSize = 11.sp))
+                                Text(stringResource(R.string.bills_generated), style = MaterialTheme.typography.bodySmall.copy(color = MutedCharcoal, fontSize = 11.sp))
                                 Text("${summary.todayBillsCount}", fontWeight = FontWeight.Bold, color = DeepEmerald, fontSize = 14.sp)
                             }
                             Column {
-                                Text("सरासरी बिल", style = MaterialTheme.typography.bodySmall.copy(color = MutedCharcoal, fontSize = 11.sp))
+                                Text(stringResource(R.string.average_order), style = MaterialTheme.typography.bodySmall.copy(color = MutedCharcoal, fontSize = 11.sp))
                                 Text(CurrencyFormatter.format(summary.averageOrderValue), fontWeight = FontWeight.Bold, color = DeepEmerald, fontSize = 14.sp)
                             }
                             Column(horizontalAlignment = Alignment.End) {
-                                Text("चालू महिना विक्री", style = MaterialTheme.typography.bodySmall.copy(color = MutedCharcoal, fontSize = 11.sp))
+                                Text(stringResource(R.string.monthly_sales_progress), style = MaterialTheme.typography.bodySmall.copy(color = MutedCharcoal, fontSize = 11.sp))
                                 Text(CurrencyFormatter.format(summary.monthlySales), fontWeight = FontWeight.Bold, color = DeepEmerald, fontSize = 14.sp)
                             }
                         }
@@ -553,12 +555,12 @@ fun DashboardScreen(
                                         .background(BoutiqueError.copy(alpha = 0.12f), CircleShape),
                                     contentAlignment = Alignment.Center
                                 ) {
-                                    Icon(Icons.Default.AccountBalanceWallet, contentDescription = "उधारी", tint = BoutiqueError, modifier = Modifier.size(20.dp))
+                                    Icon(Icons.Default.AccountBalanceWallet, contentDescription = stringResource(R.string.nav_udhari), tint = BoutiqueError, modifier = Modifier.size(20.dp))
                                 }
                                 Spacer(modifier = Modifier.width(10.dp))
                                 Column {
-                                    Text("एकूण उधारी बाकी", fontWeight = FontWeight.Bold, fontSize = 15.sp, maxLines = 1, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis)
-                                    Text("$pendingCustCount कस्टमर्सची बाकी", style = MaterialTheme.typography.bodySmall.copy(color = MutedCharcoal), maxLines = 1)
+                                    Text(stringResource(R.string.total_udhari_due), fontWeight = FontWeight.Bold, fontSize = 15.sp, maxLines = 1, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis)
+                                    Text(stringResource(R.string.pending_cust_count_format, pendingCustCount), style = MaterialTheme.typography.bodySmall.copy(color = MutedCharcoal), maxLines = 1)
                                 }
                             }
 
@@ -571,7 +573,7 @@ fun DashboardScreen(
                                     maxLines = 1,
                                     softWrap = false
                                 )
-                                Text("उधारी खाते पहा →", style = MaterialTheme.typography.labelSmall.copy(color = DeepEmerald, fontWeight = FontWeight.SemiBold), maxLines = 1)
+                                Text(stringResource(R.string.view_udhari_account), style = MaterialTheme.typography.labelSmall.copy(color = DeepEmerald, fontWeight = FontWeight.SemiBold), maxLines = 1)
                             }
                         }
                     }
@@ -596,19 +598,19 @@ fun DashboardScreen(
                                     .background(DeepEmeraldContainer.copy(alpha = 0.15f), CircleShape),
                                 contentAlignment = Alignment.Center
                             ) {
-                                Icon(Icons.Filled.Inventory2, contentDescription = "इन्व्हेंटरी", tint = DeepEmerald, modifier = Modifier.size(20.dp))
+                                Icon(Icons.Filled.Inventory2, contentDescription = stringResource(R.string.nav_inventory), tint = DeepEmerald, modifier = Modifier.size(20.dp))
                             }
                             Spacer(modifier = Modifier.width(10.dp))
                             Column {
-                                Text("इन्व्हेंटरी व स्टॉक व्यवस्थापन", fontWeight = FontWeight.Bold, fontSize = 15.sp, maxLines = 1, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis)
-                                Text("आणलेला, खपलेला व शिल्लक माल ट्रॅक करा", style = MaterialTheme.typography.bodySmall.copy(color = MutedCharcoal), maxLines = 1)
+                                Text(stringResource(R.string.stock_mgmt_title), fontWeight = FontWeight.Bold, fontSize = 15.sp, maxLines = 1, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis)
+                                Text(stringResource(R.string.stock_mgmt_desc), style = MaterialTheme.typography.bodySmall.copy(color = MutedCharcoal), maxLines = 1)
                             }
                         }
 
                         Spacer(modifier = Modifier.width(8.dp))
 
                         Column(horizontalAlignment = Alignment.End) {
-                            Text("स्टॉक डॅशबोर्ड →", style = MaterialTheme.typography.labelSmall.copy(color = DeepEmerald, fontWeight = FontWeight.Bold), maxLines = 1)
+                            Text(stringResource(R.string.view_stock_dashboard), style = MaterialTheme.typography.labelSmall.copy(color = DeepEmerald, fontWeight = FontWeight.Bold), maxLines = 1)
                         }
                     }
                 }
@@ -622,33 +624,33 @@ fun DashboardScreen(
                 ) {
                     MatoshreeCard(modifier = Modifier.weight(1f), onClick = onUdhariClick) {
                         Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.fillMaxWidth().padding(horizontal = 2.dp, vertical = 6.dp)) {
-                            Icon(Icons.Default.AccountBalanceWallet, contentDescription = "उधारी", tint = if (totalUdhari > 0) BoutiqueError else DeepEmerald, modifier = Modifier.size(22.dp))
+                            Icon(Icons.Default.AccountBalanceWallet, contentDescription = stringResource(R.string.nav_udhari), tint = if (totalUdhari > 0) BoutiqueError else DeepEmerald, modifier = Modifier.size(22.dp))
                             Spacer(modifier = Modifier.height(4.dp))
-                            Text("उधारी", fontWeight = FontWeight.Bold, fontSize = 11.sp, color = DeepEmerald, maxLines = 1, softWrap = false, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis)
+                            Text(stringResource(R.string.nav_udhari), fontWeight = FontWeight.Bold, fontSize = 11.sp, color = DeepEmerald, maxLines = 1, softWrap = false, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis)
                         }
                     }
 
                     MatoshreeCard(modifier = Modifier.weight(1f), onClick = onProductsClick) {
                         Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.fillMaxWidth().padding(horizontal = 2.dp, vertical = 6.dp)) {
-                            Icon(Icons.Outlined.Inventory2, contentDescription = "प्रॉडक्ट्स", tint = DeepEmerald, modifier = Modifier.size(22.dp))
+                            Icon(Icons.Outlined.Inventory2, contentDescription = stringResource(R.string.products_label), tint = DeepEmerald, modifier = Modifier.size(22.dp))
                             Spacer(modifier = Modifier.height(4.dp))
-                            Text("प्रॉडक्ट्स", fontWeight = FontWeight.Bold, fontSize = 11.sp, color = DeepEmerald, maxLines = 1, softWrap = false, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis)
+                            Text(stringResource(R.string.products_label), fontWeight = FontWeight.Bold, fontSize = 11.sp, color = DeepEmerald, maxLines = 1, softWrap = false, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis)
                         }
                     }
 
                     MatoshreeCard(modifier = Modifier.weight(1f), onClick = onExpensesClick) {
                         Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.fillMaxWidth().padding(horizontal = 2.dp, vertical = 6.dp)) {
-                            Icon(Icons.Outlined.Receipt, contentDescription = "खर्च", tint = DeepEmerald, modifier = Modifier.size(22.dp))
+                            Icon(Icons.Outlined.Receipt, contentDescription = stringResource(R.string.expenses_label), tint = DeepEmerald, modifier = Modifier.size(22.dp))
                             Spacer(modifier = Modifier.height(4.dp))
-                            Text("खर्च", fontWeight = FontWeight.Bold, fontSize = 11.sp, color = DeepEmerald, maxLines = 1, softWrap = false, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis)
+                            Text(stringResource(R.string.expenses_label), fontWeight = FontWeight.Bold, fontSize = 11.sp, color = DeepEmerald, maxLines = 1, softWrap = false, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis)
                         }
                     }
 
                     MatoshreeCard(modifier = Modifier.weight(1f), onClick = onClosingClick) {
                         Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.fillMaxWidth().padding(horizontal = 2.dp, vertical = 6.dp)) {
-                            Icon(Icons.Outlined.LockClock, contentDescription = "क्लोजिंग", tint = DeepEmerald, modifier = Modifier.size(22.dp))
+                            Icon(Icons.Outlined.LockClock, contentDescription = stringResource(R.string.closing_label), tint = DeepEmerald, modifier = Modifier.size(22.dp))
                             Spacer(modifier = Modifier.height(4.dp))
-                            Text("क्लोजिंग", fontWeight = FontWeight.Bold, fontSize = 11.sp, color = DeepEmerald, maxLines = 1, softWrap = false, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis)
+                            Text(stringResource(R.string.closing_label), fontWeight = FontWeight.Bold, fontSize = 11.sp, color = DeepEmerald, maxLines = 1, softWrap = false, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis)
                         }
                     }
                 }
@@ -661,15 +663,19 @@ fun DashboardScreen(
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
+                    val headerText = when {
+                        summary.isShowingTodayBills -> stringResource(R.string.today_bills_with_count, summary.recentBills.size)
+                        else -> stringResource(R.string.recent_bills_with_count, summary.recentBills.size)
+                    }
                     Text(
-                        text = summary.billsHeaderTitle,
+                        text = headerText,
                         style = MaterialTheme.typography.titleMedium.copy(
                             fontWeight = FontWeight.Bold,
                             color = DeepCharcoal
                         )
                     )
                     TextButton(onClick = onViewAllBillsClick) {
-                        Text("सर्व पहा", color = DeepEmerald, fontWeight = FontWeight.Bold)
+                        Text(stringResource(R.string.view_all), color = DeepEmerald, fontWeight = FontWeight.Bold)
                     }
                 }
             }
@@ -692,7 +698,7 @@ fun DashboardScreen(
                                 modifier = Modifier.size(36.dp)
                             )
                             Text(
-                                text = "अद्याप कोणतीही बिले तयार केलेली नाहीत.",
+                                text = stringResource(R.string.no_bills_yet),
                                 color = MutedCharcoal,
                                 fontSize = 13.sp,
                                 textAlign = androidx.compose.ui.text.style.TextAlign.Center
@@ -702,7 +708,7 @@ fun DashboardScreen(
                                 colors = ButtonDefaults.buttonColors(containerColor = DeepEmerald),
                                 shape = RoundedCornerShape(8.dp)
                             ) {
-                                Text("सर्व बिले", color = WarmWhite, fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                                Text(stringResource(R.string.btn_all_bills), color = WarmWhite, fontWeight = FontWeight.Bold, fontSize = 12.sp)
                             }
                         }
                     }
@@ -760,7 +766,7 @@ fun DashboardRecentBillCard(bill: Bill, onBillClick: (Long) -> Unit) {
                     if (bill.pendingAmount > 0.01) {
                         Spacer(modifier = Modifier.width(6.dp))
                         Text(
-                            text = "(बाकी: ${CurrencyFormatter.format(bill.pendingAmount)})",
+                            text = stringResource(R.string.pending_amount_label, CurrencyFormatter.format(bill.pendingAmount)),
                             color = BoutiqueError,
                             fontWeight = FontWeight.Bold,
                             fontSize = 11.sp,
@@ -768,8 +774,10 @@ fun DashboardRecentBillCard(bill: Bill, onBillClick: (Long) -> Unit) {
                         )
                     }
                 }
+                val custName = bill.customerName ?: stringResource(R.string.walk_in_customer)
+                val payMethod = if (bill.paymentMethod.name == "CASH") stringResource(R.string.pay_cash) else stringResource(R.string.pay_upi)
                 Text(
-                    text = "${bill.customerName ?: "थेट कस्टमर"} • ${if (bill.paymentMethod.name == "CASH") "कॅश" else "यूपीआय"}",
+                    text = "$custName • $payMethod",
                     style = MaterialTheme.typography.bodySmall.copy(color = MutedCharcoal),
                     maxLines = 1,
                     overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
@@ -786,8 +794,15 @@ fun DashboardRecentBillCard(bill: Bill, onBillClick: (Long) -> Unit) {
                     softWrap = false
                 )
                 Spacer(modifier = Modifier.height(4.dp))
+                val statusText = if (bill.isVoided) {
+                    stringResource(R.string.status_voided)
+                } else if (bill.pendingAmount > 0.01) {
+                    stringResource(R.string.pay_udhari)
+                } else {
+                    stringResource(R.string.status_fully_paid)
+                }
                 StatusBadge(
-                    status = if (bill.isVoided) "रद्द केलेले" else if (bill.pendingAmount > 0.01) "उधारी" else "पूर्ण जमा",
+                    status = statusText,
                     isSuccess = !bill.isVoided && bill.pendingAmount <= 0.01,
                     isError = bill.isVoided || bill.pendingAmount > 0.01
                 )

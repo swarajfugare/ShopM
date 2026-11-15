@@ -40,6 +40,8 @@ import com.matoshree.shopmanager.ui.screens.settings.SettingsViewModel
 import com.matoshree.shopmanager.ui.screens.trash.TrashBinScreen
 import com.matoshree.shopmanager.ui.screens.trash.TrashBinViewModel
 import com.matoshree.shopmanager.ui.theme.*
+import com.matoshree.shopmanager.R
+import androidx.compose.ui.res.stringResource
 import kotlinx.coroutines.launch
 
 data class BottomNavItem(
@@ -104,11 +106,11 @@ fun AppNavGraph(
     val currentRoute = navBackStackEntry?.destination?.route
 
     val bottomNavItems = listOf(
-        BottomNavItem("मुख्य", Screen.Dashboard.route, Icons.Filled.Home, Icons.Outlined.Home),
-        BottomNavItem("प्रॉडक्ट्स", Screen.Products.route, Icons.Filled.Inventory2, Icons.Outlined.Inventory2),
-        BottomNavItem("कस्टमर्स", Screen.Customers.route, Icons.Filled.Group, Icons.Outlined.Group),
-        BottomNavItem("ॲनालिटिक्स", Screen.Analytics.route, Icons.Filled.Leaderboard, Icons.Outlined.Leaderboard),
-        BottomNavItem("सेटिंग", Screen.Settings.route, Icons.Filled.Settings, Icons.Outlined.Settings)
+        BottomNavItem(stringResource(R.string.nav_home), Screen.Dashboard.route, Icons.Filled.Home, Icons.Outlined.Home),
+        BottomNavItem(stringResource(R.string.products_label), Screen.Products.route, Icons.Filled.Inventory2, Icons.Outlined.Inventory2),
+        BottomNavItem(stringResource(R.string.nav_customers), Screen.Customers.route, Icons.Filled.Group, Icons.Outlined.Group),
+        BottomNavItem(stringResource(R.string.nav_analytics), Screen.Analytics.route, Icons.Filled.Leaderboard, Icons.Outlined.Leaderboard),
+        BottomNavItem(stringResource(R.string.nav_settings), Screen.Settings.route, Icons.Filled.Settings, Icons.Outlined.Settings)
     )
 
     val showBottomBar = currentRoute in bottomNavItems.map { it.route }

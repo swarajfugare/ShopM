@@ -162,4 +162,27 @@
     <string name="data_check_title">Data Check</string>
     <string name="safe_repair_title">Safe Repair</string>
     <string name="backup_restore_title">Backup &amp; Restore</string>
+
+    <!-- Dashboard Localized Strings -->
+    <string name="cloud_sync_active">Cloud Sync Active</string>
+    <string name="profit_suffix">Profit</string>
+    <string name="estimated_margin">Est Margin</string>
+    <string name="cash_stat_label">💵 Cash:</string>
+    <string name="upi_stat_label">📱 UPI:</string>
+    <string name="collected_stat_label">🤝 Received:</string>
+    <string name="pending_cust_count_format">%1$d Customers Due</string>
+    <string name="view_udhari_account">View Khate →</string>
+    <string name="stock_mgmt_title">Inventory and Stock Management</string>
+    <string name="stock_mgmt_desc">Track stock in, stock out and balance</string>
+    <string name="view_stock_dashboard">Stock Dashboard →</string>
+    <string name="products_label">Products</string>
+    <string name="expenses_label">Expenses</string>
+    <string name="closing_label">Closing</string>
+    <string name="no_bills_yet">No bills created yet.</string>
+    <string name="today_bills_with_count">Today Bills (%1$d)</string>
+    <string name="recent_bills_with_count">Recent Bills (%1$d)</string>
+    <string name="pending_amount_label">(Due: %1$s)</string>
+    <string name="walk_in_customer">Walk-in Customer</string>
+    <string name="status_voided">Voided</string>
+    <string name="status_fully_paid">Fully Paid</string>
 </resources>

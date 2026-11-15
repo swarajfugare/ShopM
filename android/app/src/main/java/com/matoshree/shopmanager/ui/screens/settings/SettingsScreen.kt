@@ -1421,6 +1421,7 @@ fun SettingsScreen(
                                 currentLang = com.matoshree.shopmanager.utils.LocaleHelper.LANG_MARATHI
                                 com.matoshree.shopmanager.utils.LocaleHelper.setLocale(context, com.matoshree.shopmanager.utils.LocaleHelper.LANG_MARATHI)
                                 Toast.makeText(context, "मराठी भाषा लागू केली", Toast.LENGTH_SHORT).show()
+                                (context as? android.app.Activity)?.recreate()
                             }
                         },
                         label = { Text("मराठी (Default)") }
@@ -1432,6 +1433,7 @@ fun SettingsScreen(
                                 currentLang = com.matoshree.shopmanager.utils.LocaleHelper.LANG_ENGLISH
                                 com.matoshree.shopmanager.utils.LocaleHelper.setLocale(context, com.matoshree.shopmanager.utils.LocaleHelper.LANG_ENGLISH)
                                 Toast.makeText(context, "English applied", Toast.LENGTH_SHORT).show()
+                                (context as? android.app.Activity)?.recreate()
                             }
                         },
                         label = { Text("English") }

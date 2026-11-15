@@ -162,4 +162,27 @@
     <string name="data_check_title">डेटा तपासणी</string>
     <string name="safe_repair_title">सुरक्षित दुरुस्ती</string>
     <string name="backup_restore_title">बॅकअप आणि रिस्टोअर</string>
+
+    <!-- Dashboard Localized Strings -->
+    <string name="cloud_sync_active">क्लाउड सिंक सक्रिय</string>
+    <string name="profit_suffix">नफा</string>
+    <string name="estimated_margin">अंदाजे मार्जिन</string>
+    <string name="cash_stat_label">💵 कॅश:</string>
+    <string name="upi_stat_label">📱 यूपीआय:</string>
+    <string name="collected_stat_label">🤝 जमा:</string>
+    <string name="pending_cust_count_format">%1$d कस्टमर्सची बाकी</string>
+    <string name="view_udhari_account">उधारी खाते पहा →</string>
+    <string name="stock_mgmt_title">इन्व्हेंटरी व स्टॉक व्यवस्थापन</string>
+    <string name="stock_mgmt_desc">आणलेला, खपलेला व शिल्लक माल ट्रॅक करा</string>
+    <string name="view_stock_dashboard">स्टॉक डॅशबोर्ड →</string>
+    <string name="products_label">प्रॉडक्ट्स</string>
+    <string name="expenses_label">खर्च</string>
+    <string name="closing_label">क्लोजिंग</string>
+    <string name="no_bills_yet">अद्याप कोणतीही बिले तयार केलेली नाहीत.</string>
+    <string name="today_bills_with_count">आजची बिले (%1$d)</string>
+    <string name="recent_bills_with_count">अलीकडील बिले (%1$d)</string>
+    <string name="pending_amount_label">(बाकी: %1$s)</string>
+    <string name="walk_in_customer">थेट कस्टमर</string>
+    <string name="status_voided">रद्द केलेले</string>
+    <string name="status_fully_paid">पूर्ण जमा</string>
 </resources>
