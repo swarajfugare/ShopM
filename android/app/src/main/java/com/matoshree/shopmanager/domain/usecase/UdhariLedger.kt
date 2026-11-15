@@ -48,7 +48,8 @@ data class CustomerLedgerResult(
     val events: List<KhatavahiEntry>,
     val orphanPayments: List<UdhariTransaction> = emptyList(),
     val orphanTransactions: List<UdhariTransaction> = emptyList(),
-    val calculationBreakdown: CustomerCalculationBreakdown = CustomerCalculationBreakdown()
+    val calculationBreakdown: CustomerCalculationBreakdown = CustomerCalculationBreakdown(),
+    val needsReview: Boolean = false
 )
 
 data class ShopUdhariSummary(
@@ -211,7 +212,9 @@ object UdhariLedger {
         customerKey: String,
         allBills: List<Bill>,
         allTransactions: List<UdhariTransaction>,
-        allCustomers: List<Customer>
+        allCustomers: List<Customer>,
+        confirmedDeletedBillNumbers: Set<String> = emptySet(),
+        isBillConfirmedDeleted: ((billGid: String?, billNumber: String?) -> Boolean)? = null
     ): CustomerLedgerResult {
         val nonVoidBills = allBills.filter { !it.isVoided && it.paymentStatus != PaymentStatus.VOID }
         val voidedBillIds = allBills.filter { it.isVoided || it.paymentStatus == PaymentStatus.VOID }.map { it.id }.toSet()
@@ -277,6 +280,7 @@ object UdhariLedger {
         // 1. Process each bill's direct checkout payment & direct payment transactions
         val billBreakdowns = mutableListOf<BillLedgerBreakdown>()
         val vahiEvents = mutableListOf<KhatavahiEntry>()
+        var hasUnconfirmedMissingBills = false
 
         var totalCheckoutPaid = 0.0
         var totalDirectBillPaid = 0.0
@@ -436,9 +440,23 @@ object UdhariLedger {
                 }
 
                 val isVoidedInBills = matchingBill != null && (matchingBill.isVoided || matchingBill.paymentStatus == PaymentStatus.VOID)
-                val isDeletedAppBill = cleanNum.startsWith("MC-") && matchingBill == null
+                val isDeletedAppBill = when {
+                    isBillConfirmedDeleted != null -> isBillConfirmedDeleted.invoke(tx.billGid, cleanNum)
+                    confirmedDeletedBillNumbers.isNotEmpty() -> (
+                        confirmedDeletedBillNumbers.contains(cleanNum) ||
+                        confirmedDeletedBillNumbers.contains(tx.billNumber.trim().uppercase()) ||
+                        confirmedDeletedBillNumbers.contains(cleanNum.substringBefore("(").trim())
+                    )
+                    else -> cleanNum.startsWith("MC-") && matchingBill == null
+                }
+                val isConfirmedAbsent = cleanNum.startsWith("MC-") && matchingBill == null && isDeletedAppBill
+                val isUnconfirmedMissing = cleanNum.startsWith("MC-") && matchingBill == null && !isDeletedAppBill
 
-                if (isVoidedInBills || isDeletedAppBill) {
+                if (isUnconfirmedMissing) {
+                    hasUnconfirmedMissingBills = true
+                }
+
+                if (isVoidedInBills || isConfirmedAbsent) {
                     orphanCreditTxs.add(tx)
                 } else {
                     legacyCreditTxs.add(tx)
@@ -573,9 +591,23 @@ object UdhariLedger {
                     (p.billId != 0L && b.id == p.billId)
                 }
                 val isVoidedInBills = matchingBill != null && (matchingBill.isVoided || matchingBill.paymentStatus == PaymentStatus.VOID)
-                val isDeletedAppBill = cleanNum.startsWith("MC-") && matchingBill == null
+                val isDeletedAppBill = when {
+                    isBillConfirmedDeleted != null -> isBillConfirmedDeleted.invoke(p.billGid, cleanNum)
+                    confirmedDeletedBillNumbers.isNotEmpty() -> (
+                        confirmedDeletedBillNumbers.contains(cleanNum) ||
+                        confirmedDeletedBillNumbers.contains(p.billNumber.trim().uppercase()) ||
+                        confirmedDeletedBillNumbers.contains(cleanNum.substringBefore("(").trim())
+                    )
+                    else -> cleanNum.startsWith("MC-") && matchingBill == null
+                }
+                val isConfirmedAbsent = cleanNum.startsWith("MC-") && matchingBill == null && isDeletedAppBill
+                val isUnconfirmedMissing = cleanNum.startsWith("MC-") && matchingBill == null && !isDeletedAppBill
 
-                if (isVoidedInBills || isDeletedAppBill) {
+                if (isUnconfirmedMissing) {
+                    hasUnconfirmedMissingBills = true
+                }
+
+                if (isVoidedInBills || isConfirmedAbsent) {
                     orphanTxs.add(p)
                 } else {
                     validPaymentTxs.add(p)
@@ -710,7 +742,8 @@ object UdhariLedger {
             events = finalEvents,
             orphanPayments = orphanTxs,
             orphanTransactions = allOrphanTxs,
-            calculationBreakdown = calculationBreakdown
+            calculationBreakdown = calculationBreakdown,
+            needsReview = hasUnconfirmedMissingBills || (cust != null && cust.needsReview)
         )
     }
 
