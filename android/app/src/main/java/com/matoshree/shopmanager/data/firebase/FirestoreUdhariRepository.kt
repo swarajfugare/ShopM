@@ -125,7 +125,13 @@ class FirestoreUdhariRepository {
             val isOnline = FirebaseManager.isNetworkAvailable()
 
             val cleanPaymentMobile = PhoneUtils.clean10DigitMobileInput(payment.customerMobile)
-            val cleanCustName = payment.customerName.trim()
+            val paymentCustGid = payment.customerGid.trim()
+            val paymentCustId = payment.customerId
+
+            // Strict customer identification: reject ambiguous payments with no valid ID or mobile
+            if (paymentCustGid.isBlank() && paymentCustId == 0L && cleanPaymentMobile.length != 10) {
+                return Result.failure(IllegalArgumentException("ग्राहक ओळख स्पष्ट नाही (Customer GID, ID, or 10-digit mobile required)"))
+            }
 
             // 1. Fetch customer documents from both root and shop collections
             val rootCustSnap = try {
@@ -152,10 +158,26 @@ class FirestoreUdhariRepository {
             val matchedCustDocs = allCustDocs.filter { doc ->
                 val c = doc.toObject(CustomerDto::class.java)
                 val cCleanMobile = PhoneUtils.clean10DigitMobileInput(c?.mobile ?: "")
-                val mobileMatches = cleanPaymentMobile.isNotBlank() && cCleanMobile.isNotBlank() && cCleanMobile == cleanPaymentMobile
-                val idMatches = (payment.customerId != 0L && (c?.legacyId == payment.customerId || (doc.id.hashCode().toLong() and 0x7FFFFFFFFFFFFFFFL) == payment.customerId))
-                val nameMatches = cleanCustName.isNotBlank() && c?.name?.trim()?.equals(cleanCustName, ignoreCase = true) == true
-                idMatches || mobileMatches || nameMatches
+                val gidMatches = paymentCustGid.isNotBlank() && (
+                    doc.id == paymentCustGid ||
+                    c?.id == paymentCustGid ||
+                    c?.gid == paymentCustGid
+                )
+                val mobileMatches = cleanPaymentMobile.length == 10 && cCleanMobile == cleanPaymentMobile
+                val idMatches = (paymentCustId != 0L && (
+                    c?.legacyId == paymentCustId ||
+                    (doc.id.hashCode().toLong() and 0x7FFFFFFFFFFFFFFFL) == paymentCustId
+                ))
+                // Identify customer ONLY by customerGid / docId / legacyId / exact 10-digit mobile, NEVER by name
+                gidMatches || idMatches || mobileMatches
+            }
+
+            val distinctMobiles = matchedCustDocs.mapNotNull {
+                val m = PhoneUtils.clean10DigitMobileInput(it.toObject(CustomerDto::class.java)?.mobile ?: "")
+                if (m.length == 10) m else null
+            }.distinct()
+            if (distinctMobiles.size > 1) {
+                return Result.failure(IllegalArgumentException("अस्पष्ट ग्राहक ओळख सापडली (Ambiguous customer match across different mobiles)"))
             }
 
             val currentCustDue = matchedCustDocs.firstOrNull()?.toObject(CustomerDto::class.java)?.outstandingAmount ?: payment.previousOutstanding
@@ -189,16 +211,21 @@ class FirestoreUdhariRepository {
                 if (b.status == "VOIDED" || b.status == "TRASH") continue
 
                 val bCleanMobile = PhoneUtils.clean10DigitMobileInput(b.customerMobile ?: "")
-                val mobileMatches = cleanPaymentMobile.isNotBlank() && bCleanMobile.isNotBlank() && bCleanMobile == cleanPaymentMobile
-                val idMatches = (payment.customerId != 0L && (
-                    b.legacyCustomerId == payment.customerId ||
-                    b.customerId == payment.customerId.toString() ||
-                    b.customerId == "cust_${payment.customerId}" ||
-                    b.customerId?.removePrefix("cust_")?.toLongOrNull() == payment.customerId
+                val mobileMatches = cleanPaymentMobile.length == 10 && bCleanMobile == cleanPaymentMobile
+                val gidMatches = paymentCustGid.isNotBlank() && (
+                    b.customerGid == paymentCustGid ||
+                    b.linkedCustomerGid == paymentCustGid ||
+                    b.customerId == paymentCustGid
+                )
+                val idMatches = (paymentCustId != 0L && (
+                    b.legacyCustomerId == paymentCustId ||
+                    b.customerId == paymentCustId.toString() ||
+                    b.customerId == "cust_$paymentCustId" ||
+                    b.customerId?.removePrefix("cust_")?.toLongOrNull() == paymentCustId
                 ))
-                val nameMatches = cleanCustName.isNotBlank() && b.customerName?.trim()?.equals(cleanCustName, ignoreCase = true) == true
 
-                if (idMatches || mobileMatches || nameMatches) {
+                // Identify customer bills ONLY by customerGid / linkedCustomerGid / customer id / exact mobile, NEVER by name
+                if (gidMatches || idMatches || mobileMatches) {
                     val billKey = if (b.transactionUuid.isNotBlank()) b.transactionUuid else if (b.billNumber.isNotBlank()) b.billNumber else doc.id
                     val existing = matchedBillsMap[billKey]
                     if (existing != null) {
