@@ -328,7 +328,10 @@ object UdhariLedger {
                 it.type == UdhariTransactionType.PAYMENT && (
                     (!it.billGid.isNullOrBlank() && b.gid.isNotBlank() && it.billGid == b.gid) ||
                     (it.billId != 0L && it.billId == b.id) ||
-                    (it.billNumber.isNotBlank() && it.billNumber.trim().equals(b.billNumber.trim(), ignoreCase = true))
+                    (it.billNumber.isNotBlank() && (
+                        it.billNumber.trim().equals(b.billNumber.trim(), ignoreCase = true) ||
+                        it.billNumber.substringBefore("(").trim().equals(b.billNumber.trim(), ignoreCase = true)
+                    ))
                 )
             }
 
@@ -423,12 +426,12 @@ object UdhariLedger {
                 continue
             }
 
-            val cleanNum = tx.billNumber.trim().uppercase()
+            val cleanNum = tx.billNumber.substringBefore("(").trim().uppercase()
             val hasBillRef = !tx.billGid.isNullOrBlank() || tx.billId != 0L || cleanNum.isNotBlank()
             if (hasBillRef) {
                 val matchingBill = allBills.find { b ->
                     (!tx.billGid.isNullOrBlank() && b.gid == tx.billGid) ||
-                    (cleanNum.isNotBlank() && b.billNumber.trim().equals(cleanNum, ignoreCase = true)) ||
+                    (cleanNum.isNotBlank() && (b.billNumber.trim().equals(cleanNum, ignoreCase = true) || cleanNum.equals(b.billNumber.substringBefore("(").trim().uppercase(), ignoreCase = true))) ||
                     (tx.billId != 0L && b.id == tx.billId)
                 }
 
@@ -544,7 +547,7 @@ object UdhariLedger {
 
         for (p in allPaymentTxs) {
             val effKind = p.getEffectiveKind()
-            val cleanNum = p.billNumber.trim().uppercase()
+            val cleanNum = p.billNumber.substringBefore("(").trim().uppercase()
             val isGeneral = effKind == "GENERAL_PAYMENT" ||
                             cleanNum.isBlank() ||
                             cleanNum == "DIRECT-PAY" ||
@@ -566,7 +569,7 @@ object UdhariLedger {
             } else {
                 val matchingBill = allBills.find { b ->
                     (!p.billGid.isNullOrBlank() && b.gid == p.billGid) ||
-                    (cleanNum.isNotBlank() && b.billNumber.trim().equals(cleanNum, ignoreCase = true)) ||
+                    (cleanNum.isNotBlank() && (b.billNumber.trim().equals(cleanNum, ignoreCase = true) || cleanNum.equals(b.billNumber.substringBefore("(").trim().uppercase(), ignoreCase = true))) ||
                     (p.billId != 0L && b.id == p.billId)
                 }
                 val isVoidedInBills = matchingBill != null && (matchingBill.isVoided || matchingBill.paymentStatus == PaymentStatus.VOID)
@@ -605,9 +608,10 @@ object UdhariLedger {
 
         // 4. Unallocated payments (valid payments that do NOT reference any bill)
         val unallocatedTxs = validPaymentTxs.filter {
+            val cleanNum = it.billNumber.substringBefore("(").trim().uppercase()
             (it.billGid.isNullOrBlank() || !knownStateBillGids.contains(it.billGid)) &&
             !knownStateBillIds.contains(it.billId) &&
-            (it.billNumber.isBlank() || !knownStateBillNumbers.contains(it.billNumber.trim().uppercase()))
+            (cleanNum.isBlank() || !knownStateBillNumbers.contains(cleanNum))
         }
         var unallocatedPool = unallocatedTxs.sumOf { it.amount }
 

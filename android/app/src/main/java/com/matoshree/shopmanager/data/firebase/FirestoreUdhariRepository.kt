@@ -299,14 +299,15 @@ class FirestoreUdhariRepository {
             val safePaymentAmount = payment.amount
             val newCustDue = (currentCustDue - safePaymentAmount).coerceAtLeast(0.0)
 
-            val effectiveGid = if (payment.gid.isNotBlank()) payment.gid else IdGenerator.generate(IdType.PAYMENT)
-            val txDocId = effectiveGid
+            val commonTransactionUuid = payment.transactionUuid.ifBlank { UUID.randomUUID().toString() }
             val batch = FirebaseManager.firestore.batch()
             val now = System.currentTimeMillis()
 
+            val resolvedCustGid = if (payment.customerGid.isNotBlank()) payment.customerGid else (matchedCustDocs.firstOrNull()?.toObject(CustomerDto::class.java)?.gid ?: "")
+
             // 3. Multi-Bill Cascading Settlement (FIFO / Priority)
             var remainingToAllocate = safePaymentAmount
-            val settledBillDetails = mutableListOf<String>()
+            var recordedAllocationsCount = 0
 
             for ((b, refs) in pendingBillsList) {
                 if (remainingToAllocate <= 0.001) break
@@ -347,46 +348,74 @@ class FirestoreUdhariRepository {
                     batch.update(ref, updateMap)
                 }
 
-                settledBillDetails.add("${b.billNumber} (₹${String.format(java.util.Locale.US, "%.0f", allocation)})")
+                // Clean bill settlement transaction
+                val txGid = if (recordedAllocationsCount == 0 && payment.gid.isNotBlank()) payment.gid else IdGenerator.generate(IdType.PAYMENT)
+                val cleanBillNum = b.billNumber.trim()
+                val billTxDto = UdhariTransactionDto(
+                    id = txGid,
+                    gid = txGid,
+                    customerId = payment.customerId,
+                    customerGid = resolvedCustGid,
+                    customerName = payment.customerName,
+                    customerMobile = payment.customerMobile,
+                    customerVillage = payment.customerVillage,
+                    billId = b.legacyId ?: (b.id.hashCode().toLong() and 0x7FFFFFFFFFFFFFFFL),
+                    billGid = b.gid.ifBlank { b.id },
+                    billNumber = cleanBillNum, // Exact clean billNumber, e.g. "MC-1"
+                    kind = "SETTLEMENT",
+                    type = UdhariTransactionType.PAYMENT.name,
+                    amount = allocation,
+                    paymentMethod = payment.paymentMethod.name,
+                    previousOutstanding = currentCustDue,
+                    remainingOutstanding = newCustDue,
+                    transactionUuid = commonTransactionUuid,
+                    date = payment.date.ifBlank { DateUtils.todayDate() },
+                    dueDate = b.dueDate,
+                    note = payment.note ?: "Settlement for $cleanBillNum",
+                    isReversed = false,
+                    reversalReason = null,
+                    reversedAt = null,
+                    createdByDeviceId = payment.createdByDeviceId,
+                    createdAt = now
+                )
+                batch.set(FirebaseManager.udhariTransactionsCollection().document(txGid), billTxDto)
+                recordedAllocationsCount++
                 remainingToAllocate -= allocation
             }
 
-            // 4. Record Unified Payment Transaction
-            val primaryBillNumber = when {
-                settledBillDetails.isNotEmpty() -> settledBillDetails.joinToString(", ")
-                payment.billNumber.isNotBlank() -> payment.billNumber
-                else -> "DIRECT-PAY"
+            // If any amount was not allocated to a specific bill, record general payment
+            if (remainingToAllocate > 0.001 || recordedAllocationsCount == 0) {
+                val genAmount = if (recordedAllocationsCount == 0) safePaymentAmount else remainingToAllocate
+                val txGid = if (recordedAllocationsCount == 0 && payment.gid.isNotBlank()) payment.gid else IdGenerator.generate(IdType.PAYMENT)
+                val genTxDto = UdhariTransactionDto(
+                    id = txGid,
+                    gid = txGid,
+                    customerId = payment.customerId,
+                    customerGid = resolvedCustGid,
+                    customerName = payment.customerName,
+                    customerMobile = payment.customerMobile,
+                    customerVillage = payment.customerVillage,
+                    billId = payment.billId,
+                    billGid = payment.billGid,
+                    billNumber = if (payment.billNumber.isNotBlank()) payment.billNumber.trim() else "DIRECT-PAY",
+                    kind = if (payment.billNumber.isNotBlank() || !payment.billGid.isNullOrBlank()) "SETTLEMENT" else "GENERAL_PAYMENT",
+                    type = UdhariTransactionType.PAYMENT.name,
+                    amount = genAmount,
+                    paymentMethod = payment.paymentMethod.name,
+                    previousOutstanding = currentCustDue,
+                    remainingOutstanding = newCustDue,
+                    transactionUuid = commonTransactionUuid,
+                    date = payment.date.ifBlank { DateUtils.todayDate() },
+                    dueDate = pendingBillsList.firstOrNull()?.first?.dueDate,
+                    note = payment.note ?: "Direct payment",
+                    isReversed = false,
+                    reversalReason = null,
+                    reversedAt = null,
+                    createdByDeviceId = payment.createdByDeviceId,
+                    createdAt = now
+                )
+                batch.set(FirebaseManager.udhariTransactionsCollection().document(txGid), genTxDto)
             }
-
-            val resolvedCustGid = if (payment.customerGid.isNotBlank()) payment.customerGid else (matchedCustDocs.firstOrNull()?.toObject(CustomerDto::class.java)?.gid ?: "")
-
-            val txDto = UdhariTransactionDto(
-                id = txDocId,
-                gid = effectiveGid,
-                customerId = payment.customerId,
-                customerGid = resolvedCustGid,
-                customerName = payment.customerName,
-                customerMobile = payment.customerMobile,
-                customerVillage = payment.customerVillage,
-                billId = payment.billId,
-                billGid = payment.billGid,
-                billNumber = primaryBillNumber,
-                type = UdhariTransactionType.PAYMENT.name,
-                amount = safePaymentAmount,
-                paymentMethod = payment.paymentMethod.name,
-                previousOutstanding = currentCustDue,
-                remainingOutstanding = newCustDue,
-                transactionUuid = payment.transactionUuid.ifBlank { UUID.randomUUID().toString() },
-                date = payment.date.ifBlank { DateUtils.todayDate() },
-                dueDate = pendingBillsList.firstOrNull()?.first?.dueDate,
-                note = payment.note ?: if (settledBillDetails.size > 1) "Settled ${settledBillDetails.size} bills" else null,
-                isReversed = false,
-                reversalReason = null,
-                reversedAt = null,
-                createdByDeviceId = payment.createdByDeviceId,
-                createdAt = now
-            )
-            batch.set(FirebaseManager.udhariTransactionsCollection().document(txDocId), txDto)
 
             // 5. Update customer cached outstanding amount in both root and shop collections
             for (custDoc in matchedCustDocs) {
@@ -401,7 +430,7 @@ class FirestoreUdhariRepository {
 
             val commitTask = batch.commit()
             FirebaseManager.awaitWriteTask(commitTask)
-            Log.d(TAG, "Payment recorded successfully: $txDocId")
+            Log.d(TAG, "Payment recorded successfully: $commonTransactionUuid")
             Result.success(Unit)
         } catch (e: Exception) {
             Log.e(TAG, "Error recording payment: ${e.message}", e)
@@ -467,45 +496,95 @@ class FirestoreUdhariRepository {
             val originalTx = txDoc.toObject(UdhariTransactionDto::class.java)
                 ?: return Result.failure(IllegalStateException("Failed to parse transaction"))
 
-            if (originalTx.isReversed) {
+            val relatedTxDocs = if (originalTx.transactionUuid.isNotBlank()) {
+                try {
+                    FirebaseManager.udhariTransactionsCollection()
+                        .whereEqualTo("transactionUuid", originalTx.transactionUuid)
+                        .get().await().documents
+                } catch (_: Exception) { emptyList() }
+            } else emptyList()
+
+            val allTxsToReverse = if (relatedTxDocs.isNotEmpty()) {
+                relatedTxDocs.mapNotNull { doc ->
+                    doc.toObject(UdhariTransactionDto::class.java)?.let { dto -> Pair(doc, dto) }
+                }
+            } else {
+                listOf(Pair(txDoc, originalTx))
+            }
+
+            if (allTxsToReverse.all { it.second.isReversed }) {
                 return Result.failure(IllegalStateException("हा भरणा आधीच रद्द केलेला आहे (Already reversed)"))
             }
 
-            val targetDocId = txDoc.id
+            val batch = FirebaseManager.firestore.batch()
+            val now = System.currentTimeMillis()
+            var totalReversedAmount = 0.0
 
-            // Direct bill read by billGid or clean billNumber (stripping "(₹...)" notes and handling multi-bill CSV)
-            val candidateBillNumbers = originalTx.billNumber.split(",")
-                .map { it.substringBefore("(").trim() }
-                .filter { it.isNotBlank() && it != "DIRECT-PAY" }
+            for ((docItem, tx) in allTxsToReverse) {
+                if (tx.isReversed) continue
 
-            var matchedBillDoc: com.google.firebase.firestore.DocumentSnapshot? = null
-            if (!originalTx.billGid.isNullOrBlank()) {
-                try {
-                    val bDoc = FirebaseManager.billsCollection().document(originalTx.billGid!!).get().await()
-                    if (bDoc.exists()) matchedBillDoc = bDoc
-                } catch (_: Exception) { null }
-                if (matchedBillDoc == null) {
+                totalReversedAmount += tx.amount
+
+                // Mark original as reversed (audit trail - keeps status ACTIVE so visible as cancelled)
+                batch.update(
+                    docItem.reference,
+                    mapOf(
+                        "isReversed" to true,
+                        "reversalReason" to reason,
+                        "reversedAt" to now,
+                        "updatedAt" to now
+                    )
+                )
+
+                // Add reversal transaction record
+                val reversalGid = IdGenerator.generate(IdType.REVERSAL)
+                val reversalDto = UdhariTransactionDto(
+                    id = reversalGid,
+                    gid = reversalGid,
+                    customerId = tx.customerId,
+                    customerGid = tx.customerGid,
+                    customerName = tx.customerName,
+                    customerMobile = tx.customerMobile,
+                    customerVillage = tx.customerVillage,
+                    billId = tx.billId,
+                    billGid = tx.billGid,
+                    billNumber = tx.billNumber,
+                    type = UdhariTransactionType.REVERSAL.name,
+                    amount = tx.amount,
+                    paymentMethod = tx.paymentMethod,
+                    previousOutstanding = 0.0,
+                    remainingOutstanding = 0.0,
+                    transactionUuid = UUID.randomUUID().toString(),
+                    date = DateUtils.todayDate(),
+                    note = "Reversal: $reason",
+                    isReversed = false,
+                    reversalReason = reason,
+                    createdAt = now
+                )
+                batch.set(FirebaseManager.udhariTransactionsCollection().document(reversalGid), reversalDto)
+
+                // Direct bill read by billGid or clean billNumber (stripping "(₹...)" notes and handling multi-bill CSV)
+                val candidateBillNumbers = tx.billNumber.split(",")
+                    .map { it.substringBefore("(").trim() }
+                    .filter { it.isNotBlank() && it != "DIRECT-PAY" }
+
+                var matchedBillDoc: com.google.firebase.firestore.DocumentSnapshot? = null
+                if (!tx.billGid.isNullOrBlank()) {
                     try {
-                        val bDoc = FirebaseManager.shopBillsCollection().document(originalTx.billGid!!).get().await()
+                        val bDoc = FirebaseManager.billsCollection().document(tx.billGid!!).get().await()
                         if (bDoc.exists()) matchedBillDoc = bDoc
-                    } catch (_: Exception) { null }
-                }
-            }
-            if (matchedBillDoc == null && candidateBillNumbers.isNotEmpty()) {
-                for (bNum in candidateBillNumbers) {
-                    try {
-                        val qSnap = FirebaseManager.billsCollection()
-                            .whereEqualTo("billNumber", bNum)
-                            .limit(1)
-                            .get().await()
-                        if (!qSnap.isEmpty) {
-                            matchedBillDoc = qSnap.documents.firstOrNull()
-                            break
-                        }
                     } catch (_: Exception) { null }
                     if (matchedBillDoc == null) {
                         try {
-                            val qSnap = FirebaseManager.shopBillsCollection()
+                            val bDoc = FirebaseManager.shopBillsCollection().document(tx.billGid!!).get().await()
+                            if (bDoc.exists()) matchedBillDoc = bDoc
+                        } catch (_: Exception) { null }
+                    }
+                }
+                if (matchedBillDoc == null && candidateBillNumbers.isNotEmpty()) {
+                    for (bNum in candidateBillNumbers) {
+                        try {
+                            val qSnap = FirebaseManager.billsCollection()
                                 .whereEqualTo("billNumber", bNum)
                                 .limit(1)
                                 .get().await()
@@ -514,66 +593,37 @@ class FirestoreUdhariRepository {
                                 break
                             }
                         } catch (_: Exception) { null }
+                        if (matchedBillDoc == null) {
+                            try {
+                                val qSnap = FirebaseManager.shopBillsCollection()
+                                    .whereEqualTo("billNumber", bNum)
+                                    .limit(1)
+                                    .get().await()
+                                if (!qSnap.isEmpty) {
+                                    matchedBillDoc = qSnap.documents.firstOrNull()
+                                    break
+                                }
+                            } catch (_: Exception) { null }
+                        }
                     }
                 }
-            }
 
-            val currentBill = matchedBillDoc?.toObject(BillDto::class.java)
-            val newPaid = if (currentBill != null) (currentBill.paidAmount - originalTx.amount).coerceAtLeast(0.0) else 0.0
-            val newPending = if (currentBill != null) (currentBill.finalAmount - newPaid).coerceAtLeast(0.0) else 0.0
-            val newStatus = if (newPaid <= 0.01) "PENDING" else if (newPending <= 0.01) "PAID" else "PARTIAL"
+                if (matchedBillDoc != null) {
+                    val currentBill = matchedBillDoc.toObject(BillDto::class.java)
+                    val newPaid = if (currentBill != null) (currentBill.paidAmount - tx.amount).coerceAtLeast(0.0) else 0.0
+                    val newPending = if (currentBill != null) (currentBill.finalAmount - newPaid).coerceAtLeast(0.0) else 0.0
+                    val newStatus = if (newPaid <= 0.01) "PENDING" else if (newPending <= 0.01) "PAID" else "PARTIAL"
 
-            val reversalGid = IdGenerator.generate(IdType.REVERSAL)
-            val reversalDocId = reversalGid
-            val reversalDto = UdhariTransactionDto(
-                id = reversalDocId,
-                gid = reversalGid,
-                customerId = originalTx.customerId,
-                customerGid = originalTx.customerGid,
-                customerName = originalTx.customerName,
-                customerMobile = originalTx.customerMobile,
-                customerVillage = originalTx.customerVillage,
-                billId = originalTx.billId,
-                billGid = originalTx.billGid,
-                billNumber = originalTx.billNumber,
-                type = UdhariTransactionType.REVERSAL.name,
-                amount = originalTx.amount,
-                paymentMethod = originalTx.paymentMethod,
-                previousOutstanding = currentBill?.pendingAmount ?: 0.0,
-                remainingOutstanding = newPending,
-                transactionUuid = UUID.randomUUID().toString(),
-                date = DateUtils.todayDate(),
-                note = "Reversal: $reason",
-                isReversed = false,
-                reversalReason = reason,
-                createdAt = System.currentTimeMillis()
-            )
-
-            val batch = FirebaseManager.firestore.batch()
-            val now = System.currentTimeMillis()
-            // Mark original as reversed (audit trail - keeps status ACTIVE so visible as cancelled)
-            batch.update(
-                FirebaseManager.udhariTransactionsCollection().document(targetDocId),
-                mapOf(
-                    "isReversed" to true,
-                    "reversalReason" to reason,
-                    "reversedAt" to now,
-                    "updatedAt" to now
-                )
-            )
-            // Add reversal transaction record
-            batch.set(FirebaseManager.udhariTransactionsCollection().document(reversalDocId), reversalDto)
-
-            if (matchedBillDoc != null) {
-                batch.update(
-                    matchedBillDoc.reference,
-                    mapOf(
-                        "paidAmount" to newPaid,
-                        "pendingAmount" to newPending,
-                        "paymentStatus" to newStatus,
-                        "updatedAt" to now
+                    batch.update(
+                        matchedBillDoc.reference,
+                        mapOf(
+                            "paidAmount" to newPaid,
+                            "pendingAmount" to newPending,
+                            "paymentStatus" to newStatus,
+                            "updatedAt" to now
+                        )
                     )
-                )
+                }
             }
 
             val targetCustDocId = if (!originalTx.customerGid.isNullOrBlank()) {
@@ -586,14 +636,14 @@ class FirestoreUdhariRepository {
                     val cDoc = FirebaseManager.customersCollection().document(targetCustDocId).get().await()
                     if (cDoc.exists()) {
                         val prev = cDoc.getDouble("outstandingAmount") ?: 0.0
-                        batch.update(cDoc.reference, mapOf("outstandingAmount" to prev + originalTx.amount, "updatedAt" to now))
+                        batch.update(cDoc.reference, mapOf("outstandingAmount" to prev + totalReversedAmount, "updatedAt" to now))
                     }
                 } catch (_: Exception) {}
             }
 
             val commitTask = batch.commit()
             FirebaseManager.awaitWriteTask(commitTask)
-            Log.d(TAG, "Payment reversed successfully: $targetDocId, reason: $reason")
+            Log.d(TAG, "Payment reversed successfully: ${txDoc.id}, reason: $reason")
             Result.success(Unit)
         } catch (e: Exception) {
             Log.e(TAG, "Error reversing payment: ${e.message}", e)
