@@ -656,6 +656,9 @@ class CustomerViewModel(
             } catch (_: Exception) { }
             val targetKey = customer.canonicalKey()
             _customers.value = _customers.value.map { if (it.canonicalKey() == targetKey) it.copy(outstandingBalance = newBalance) else it }
+            try {
+                billRepository.recomputeStoredBillValuesFromLedger(emptyList())
+            } catch (_: Exception) { }
             if (customer.gid.isNotBlank()) loadCustomerProfile(customer.gid) else loadCustomerProfile(customer.id)
             Result.success(transaction)
         } else {
@@ -679,6 +682,11 @@ class CustomerViewModel(
         }
 
         val res = udhariRepository.reversePayment(transactionId, reason)
+        if (res.isSuccess) {
+            try {
+                billRepository.recomputeStoredBillValuesFromLedger(emptyList())
+            } catch (_: Exception) { }
+        }
         selectedCustomerProfile.value?.id?.let { loadCustomerProfile(it) }
         return res
     }

@@ -146,6 +146,10 @@ object FirebaseManager {
                     task.await()
                 }
             } catch (e: Exception) {
+                Log.w(TAG, "awaitWriteTask server write note: ${e.message}")
+                if (e is com.google.firebase.firestore.FirebaseFirestoreException) {
+                    throw e
+                }
                 null
             }
         } else {

@@ -446,20 +446,50 @@ class FirestoreUdhariRepository {
 
             val targetDocId = txDoc.id
 
-            // Direct bill read by billGid or billNumber (no full collection download)
-            val matchedBillDoc = if (!originalTx.billGid.isNullOrBlank()) {
+            // Direct bill read by billGid or clean billNumber (stripping "(₹...)" notes and handling multi-bill CSV)
+            val candidateBillNumbers = originalTx.billNumber.split(",")
+                .map { it.substringBefore("(").trim() }
+                .filter { it.isNotBlank() && it != "DIRECT-PAY" }
+
+            var matchedBillDoc: com.google.firebase.firestore.DocumentSnapshot? = null
+            if (!originalTx.billGid.isNullOrBlank()) {
                 try {
                     val bDoc = FirebaseManager.billsCollection().document(originalTx.billGid!!).get().await()
-                    if (bDoc.exists()) bDoc else null
+                    if (bDoc.exists()) matchedBillDoc = bDoc
                 } catch (_: Exception) { null }
-            } else if (originalTx.billNumber.isNotBlank()) {
-                try {
-                    FirebaseManager.billsCollection()
-                        .whereEqualTo("billNumber", originalTx.billNumber)
-                        .limit(1)
-                        .get().await().documents.firstOrNull()
-                } catch (_: Exception) { null }
-            } else null
+                if (matchedBillDoc == null) {
+                    try {
+                        val bDoc = FirebaseManager.shopBillsCollection().document(originalTx.billGid!!).get().await()
+                        if (bDoc.exists()) matchedBillDoc = bDoc
+                    } catch (_: Exception) { null }
+                }
+            }
+            if (matchedBillDoc == null && candidateBillNumbers.isNotEmpty()) {
+                for (bNum in candidateBillNumbers) {
+                    try {
+                        val qSnap = FirebaseManager.billsCollection()
+                            .whereEqualTo("billNumber", bNum)
+                            .limit(1)
+                            .get().await()
+                        if (!qSnap.isEmpty) {
+                            matchedBillDoc = qSnap.documents.firstOrNull()
+                            break
+                        }
+                    } catch (_: Exception) { null }
+                    if (matchedBillDoc == null) {
+                        try {
+                            val qSnap = FirebaseManager.shopBillsCollection()
+                                .whereEqualTo("billNumber", bNum)
+                                .limit(1)
+                                .get().await()
+                            if (!qSnap.isEmpty) {
+                                matchedBillDoc = qSnap.documents.firstOrNull()
+                                break
+                            }
+                        } catch (_: Exception) { null }
+                    }
+                }
+            }
 
             val currentBill = matchedBillDoc?.toObject(BillDto::class.java)
             val newPaid = if (currentBill != null) (currentBill.paidAmount - originalTx.amount).coerceAtLeast(0.0) else 0.0
