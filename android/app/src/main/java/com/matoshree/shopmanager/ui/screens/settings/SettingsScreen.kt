@@ -2407,7 +2407,14 @@ service cloud.firestore {
                                         Text("   • ${oc.name} (${oc.mobile}): ₹${String.format(java.util.Locale.US, "%.0f", oc.overpaidAmount)} जास्त - ${oc.reason}", fontSize = 11.sp, color = BoutiqueError)
                                     }
                                 }
-                                if (r.erroneouslyArchivedCount == 0 && r.missingFromRoomCount == 0 && r.duplicateMobileCount == 0 && r.duplicateEventsCount == 0 && r.needsReviewCount == 0 && r.overpaidCustomersCount == 0 && r.phantomTransactionsCount == 0) {
+                                if (r.suspiciousReversalsList.isNotEmpty()) {
+                                    Text("⚠️ संशयास्पद रद्द नोंदी: ${r.suspiciousReversalsList.size} नोंदी", fontSize = 12.sp, color = BoutiqueError, fontWeight = FontWeight.Bold)
+                                    r.suspiciousReversalsList.take(5).forEach { sr ->
+                                        Text("   • ${sr.customerName} (${sr.customerMobile}): ₹${String.format(java.util.Locale.US, "%.0f", sr.amount)} - ${sr.reason}", fontSize = 11.sp, color = BoutiqueError)
+                                    }
+                                    Text("   (सूचना: ही केवळ तपासणी आहे. ग्राहकाच्या खात्यातून भरणा पुन्हा नोंदवून पूर्ववत करता येतो.)", fontSize = 10.sp, color = MutedCharcoal)
+                                }
+                                if (r.erroneouslyArchivedCount == 0 && r.missingFromRoomCount == 0 && r.duplicateMobileCount == 0 && r.duplicateEventsCount == 0 && r.needsReviewCount == 0 && r.overpaidCustomersCount == 0 && r.phantomTransactionsCount == 0 && r.suspiciousReversalsList.isEmpty()) {
                                     Text("✅ सर्व ग्राहक डेटा परिपूर्ण आणि सुसंगत आहे!", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = BoutiqueSuccess)
                                 }
 

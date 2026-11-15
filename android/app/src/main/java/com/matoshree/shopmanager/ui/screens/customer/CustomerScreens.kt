@@ -45,6 +45,8 @@ import com.matoshree.shopmanager.data.repository.CustomerRepository
 import com.matoshree.shopmanager.data.repository.UdhariRepository
 import com.matoshree.shopmanager.domain.model.*
 import com.matoshree.shopmanager.domain.usecase.UdhariLedger
+import com.matoshree.shopmanager.domain.usecase.CustomerLedgerResult
+import com.matoshree.shopmanager.domain.usecase.CustomerKeyResolver
 import com.matoshree.shopmanager.utils.PhoneUtils
 import com.matoshree.shopmanager.ui.components.MatoshreeCard
 import com.matoshree.shopmanager.ui.components.MatoshreeDatePickerField
@@ -81,6 +83,89 @@ data class CustomerPaymentRecord(
     val reversalReason: String? = null,
     val udhariTx: UdhariTransaction? = null
 )
+
+fun buildCustomerPaymentRecords(
+    ledgerResult: CustomerLedgerResult,
+    txs: List<UdhariTransaction>,
+    targetKey: String,
+    keyResolver: CustomerKeyResolver
+): List<CustomerPaymentRecord> {
+    val validTxs = txs.filter {
+        !it.isReversed && it.status != "TRASH" &&
+        keyResolver(it.customerGid, it.customerMobile, it.customerName, it.customerId) == targetKey
+    }
+
+    val allPaymentsList = mutableListOf<CustomerPaymentRecord>()
+    for (ev in ledgerResult.events.filter { it.isCredit }) {
+        val isSyntheticCheckout = ev.id.startsWith("checkout_pay_")
+        val matchingTx = if (!isSyntheticCheckout) {
+            validTxs.find {
+                it.id == ev.id ||
+                (it.gid.isNotBlank() && it.gid == ev.id) ||
+                "pay_${it.id}" == ev.id ||
+                (it.gid.isNotBlank() && "pay_${it.gid}" == ev.id)
+            }
+        } else null
+
+        val isCheckoutInitial = isSyntheticCheckout ||
+            matchingTx?.note?.contains("checkout", ignoreCase = true) == true ||
+            matchingTx?.note?.contains("initial", ignoreCase = true) == true ||
+            matchingTx?.id?.endsWith("_pay") == true
+
+        allPaymentsList.add(
+            CustomerPaymentRecord(
+                id = ev.id,
+                txGid = matchingTx?.gid?.takeIf { it.isNotBlank() },
+                originalTxId = matchingTx?.id?.takeIf { it.isNotBlank() } ?: (if (isCheckoutInitial) null else ev.id.takeIf { it.isNotBlank() }),
+                title = ev.description,
+                subtitle = if (isCheckoutInitial) {
+                    if (!ev.billNumber.isNullOrBlank()) "बिल: ${ev.billNumber} • बिलातील पैसे" else "बिलातील सुरुवातीचा भरणा"
+                } else if (!ev.billNumber.isNullOrBlank()) {
+                    "बिल: ${ev.billNumber}"
+                } else "जमा रक्कम",
+                date = ev.date,
+                timeMillis = ev.timeMillis,
+                amount = ev.amount,
+                paymentMethod = ev.paymentMethod ?: PaymentMethod.CASH,
+                billId = ev.billId,
+                billNumber = ev.billNumber,
+                isUdhariSettlement = !isCheckoutInitial,
+                isCancellable = !isCheckoutInitial && matchingTx != null && !matchingTx.isReversed,
+                isReversed = false,
+                udhariTx = matchingTx
+            )
+        )
+    }
+
+    // Include reversed payments for full audit trail
+    val reversedTxs = txs.filter { tx ->
+        tx.isReversed && keyResolver(tx.customerGid, tx.customerMobile, tx.customerName, tx.customerId) == targetKey
+    }
+    for (rtx in reversedTxs) {
+        allPaymentsList.add(
+            CustomerPaymentRecord(
+                id = "rev_${rtx.id}",
+                txGid = rtx.gid.takeIf { it.isNotBlank() },
+                originalTxId = rtx.id.takeIf { it.isNotBlank() },
+                title = "रद्द भरणा (${rtx.paymentMethod.name})",
+                subtitle = if (rtx.billNumber.isNotBlank()) "बिल #${rtx.billNumber} • रद्द" else "रद्द झालेली नोंद",
+                date = rtx.date,
+                timeMillis = rtx.createdAt,
+                amount = rtx.amount,
+                paymentMethod = rtx.paymentMethod,
+                billId = rtx.billId,
+                billNumber = rtx.billNumber,
+                isUdhariSettlement = true,
+                isCancellable = false,
+                isReversed = true,
+                reversalReason = rtx.reversalReason,
+                udhariTx = rtx
+            )
+        )
+    }
+
+    return allPaymentsList.sortedByDescending { it.timeMillis }
+}
 
 class CustomerViewModel(
     private val customerRepository: CustomerRepository,
@@ -302,62 +387,7 @@ class CustomerViewModel(
                 }
 
                 // 3. Tab 3: Payments History (Real customer payments)
-                val allPaymentsList = mutableListOf<CustomerPaymentRecord>()
-                for (ev in ledgerResult.events.filter { it.isCredit }) {
-                    val isCheckout = ev.id.startsWith("checkout_pay_")
-                    val matchingTx = if (!isCheckout) {
-                        validTxs.find { it.id == ev.id || it.gid == ev.id || "pay_${it.id}" == ev.id || "pay_${it.gid}" == ev.id }
-                    } else null
-
-                    allPaymentsList.add(
-                        CustomerPaymentRecord(
-                            id = ev.id,
-                            txGid = matchingTx?.gid ?: if (isCheckout) null else ev.id,
-                            originalTxId = matchingTx?.id ?: if (isCheckout) null else ev.id,
-                            title = ev.description,
-                            subtitle = if (!ev.billNumber.isNullOrBlank()) "बिल: ${ev.billNumber}" else "जमा रक्कम",
-                            date = ev.date,
-                            timeMillis = ev.timeMillis,
-                            amount = ev.amount,
-                            paymentMethod = ev.paymentMethod ?: PaymentMethod.CASH,
-                            billId = ev.billId,
-                            billNumber = ev.billNumber,
-                            isUdhariSettlement = !isCheckout,
-                            isCancellable = !isCheckout && matchingTx != null && !matchingTx.isReversed,
-                            isReversed = false,
-                            udhariTx = matchingTx
-                        )
-                    )
-                }
-
-                // Include reversed payments for full audit trail
-                val reversedTxs = txs.filter { tx ->
-                    tx.isReversed && keyResolver(tx.customerGid, tx.customerMobile, tx.customerName, tx.customerId) == targetKey
-                }
-                for (rtx in reversedTxs) {
-                    allPaymentsList.add(
-                        CustomerPaymentRecord(
-                            id = "rev_${rtx.id}",
-                            txGid = rtx.gid,
-                            originalTxId = rtx.id,
-                            title = "रद्द भरणा (${rtx.paymentMethod.name})",
-                            subtitle = if (rtx.billNumber.isNotBlank()) "बिल #${rtx.billNumber} • रद्द" else "रद्द झालेली नोंद",
-                            date = rtx.date,
-                            timeMillis = rtx.createdAt,
-                            amount = rtx.amount,
-                            paymentMethod = rtx.paymentMethod,
-                            billId = rtx.billId,
-                            billNumber = rtx.billNumber,
-                            isUdhariSettlement = true,
-                            isCancellable = false,
-                            isReversed = true,
-                            reversalReason = rtx.reversalReason,
-                            udhariTx = rtx
-                        )
-                    )
-                }
-
-                val sortedPayments = allPaymentsList.sortedByDescending { it.timeMillis }
+                val sortedPayments = buildCustomerPaymentRecords(ledgerResult, txs, targetKey, keyResolver)
                 if (customerAllPayments.value != sortedPayments) {
                     customerAllPayments.value = sortedPayments
                 }
@@ -676,7 +706,8 @@ class CustomerViewModel(
     suspend fun reversePayment(transactionId: String, reason: String): Result<Unit> {
         val targetTx = customerTransactions.value.find { it.id == transactionId }
             ?: customerAllPayments.value.find { it.udhariTx?.id == transactionId }?.udhariTx
-        val txAmount = targetTx?.amount ?: 0.0
+            ?: customerAllPayments.value.find { it.originalTxId == transactionId || it.txGid == transactionId || it.id == transactionId }?.udhariTx
+        val txAmount = targetTx?.amount ?: customerAllPayments.value.find { it.originalTxId == transactionId || it.txGid == transactionId || it.id == transactionId }?.amount ?: 0.0
 
         val prevPayments = customerAllPayments.value
         val prevTransactions = customerTransactions.value
@@ -684,8 +715,18 @@ class CustomerViewModel(
         val prevDue = customerOutstandingDue.value
         val prevProfile = selectedCustomerProfile.value
 
-        // Optimistically remove from state immediately so user sees it removed with zero delay
-        customerAllPayments.value = customerAllPayments.value.filter { it.udhariTx?.id != transactionId && it.id != transactionId && it.id != "udhari_pay_$transactionId" }
+        // Optimistically update: mark the payment as cancelled (isReversed = true) in the Payments list immediately
+        customerAllPayments.value = customerAllPayments.value.map { p ->
+            if (p.originalTxId == transactionId || p.txGid == transactionId || p.id == transactionId || p.udhariTx?.id == transactionId) {
+                p.copy(
+                    isReversed = true,
+                    isCancellable = false,
+                    title = "रद्द भरणा (${p.paymentMethod.name})",
+                    subtitle = if (!p.billNumber.isNullOrBlank()) "बिल #${p.billNumber} • रद्द" else "रद्द झालेली नोंद",
+                    reversalReason = reason
+                )
+            } else p
+        }
         customerTransactions.value = customerTransactions.value.filter { it.id != transactionId }
         customerKhatavahi.value = customerKhatavahi.value.filter { it.id != transactionId }
         if (txAmount > 0.0) {
@@ -694,8 +735,28 @@ class CustomerViewModel(
             selectedCustomerProfile.value = selectedCustomerProfile.value?.copy(outstandingBalance = updatedDue)
         }
 
-        val res = udhariRepository.reversePayment(transactionId, reason)
+        val res = udhariRepository.reversePayment(
+            transactionId = transactionId,
+            reason = reason,
+            expectedCustomerGid = selectedCustomerProfile.value?.gid,
+            expectedCustomerMobile = selectedCustomerProfile.value?.mobile,
+            expectedCustomerId = selectedCustomerProfile.value?.id ?: 0L,
+            expectedAmount = txAmount.takeIf { it > 0.0 }
+        )
+
         if (res.isSuccess) {
+            try {
+                selectedCustomerProfile.value?.let { cust ->
+                    val newBal = (cust.outstandingBalance).coerceAtLeast(0.0)
+                    customerRepository.saveCustomer(cust.copy(outstandingBalance = newBal))
+                }
+            } catch (_: Exception) { }
+            try {
+                if (targetTx != null && !targetTx.billNumber.isNullOrBlank()) {
+                    val billNum = targetTx.billNumber.substringBefore("(").trim()
+                    billRepository.restoreBillDueAfterReversal(billNum, txAmount)
+                }
+            } catch (_: Exception) { }
             try {
                 billRepository.recomputeStoredBillValuesFromLedger(emptyList())
             } catch (_: Exception) { }
@@ -706,7 +767,6 @@ class CustomerViewModel(
             customerOutstandingDue.value = prevDue
             selectedCustomerProfile.value = prevProfile
         }
-        selectedCustomerProfile.value?.id?.let { loadCustomerProfile(it) }
         return res
     }
 
@@ -2200,7 +2260,10 @@ fun CustomerProfileScreen(
                     onClick = {
                         isReversing = true
                         coroutineScope.launch {
-                            val targetId = rec.txGid ?: rec.originalTxId ?: rec.id
+                            val targetId = rec.originalTxId?.takeIf { it.isNotBlank() }
+                                ?: rec.txGid?.takeIf { it.isNotBlank() }
+                                ?: rec.id.removePrefix("pay_").takeIf { it.isNotBlank() }
+                                ?: rec.id
                             val res = viewModel.reversePayment(targetId, reversalReasonText.ifBlank { "भरणा रद्द केला" })
                             isReversing = false
                             reversingPaymentRecord = null
@@ -3500,6 +3563,13 @@ fun CustomerPaymentCardItem(
                                 Text("रद्द करा", color = BoutiqueError, fontSize = 12.sp, fontWeight = FontWeight.Bold)
                             }
                         }
+                    } else if (!record.isReversed) {
+                        Text(
+                            text = "बिलातील पैसे (बिल बदला/रद्द करा)",
+                            color = MutedCharcoal,
+                            fontSize = 11.sp,
+                            modifier = Modifier.padding(horizontal = 4.dp, vertical = 6.dp)
+                        )
                     }
                 }
             }

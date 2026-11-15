@@ -408,8 +408,7 @@ class RealtimeSyncManager private constructor(
                             } else {
                                 doc.toObject(UdhariTransactionDto::class.java)?.apply { id = doc.id }?.toDomain()
                             }
-                        }.filter { !it.isReversed }
-                         .sortedByDescending { it.createdAt }
+                        }.sortedByDescending { it.createdAt }
 
                         _allUdhariTransactions.value = list
 

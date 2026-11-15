@@ -656,6 +656,20 @@ class BillRepository(
         }
         return updatedCount
     }
+
+    suspend fun restoreBillDueAfterReversal(billNumber: String, reversedAmount: Double) {
+        val db = database ?: return
+        val clean = billNumber.substringBefore("(").trim()
+        if (clean.isBlank()) return
+        val allBills = db.billDao().getAllBillsDirect(50000).map { it.toDomain() }
+        val matching = allBills.filter { it.billNumber.trim().equals(clean, ignoreCase = true) }
+        for (b in matching) {
+            val newPaid = (b.paidAmount - reversedAmount).coerceAtLeast(0.0)
+            val newPending = (b.finalAmount - newPaid).coerceAtLeast(0.0)
+            val newStatus = if (newPaid <= 0.01) PaymentStatus.PENDING.name else if (newPending <= 0.01) PaymentStatus.PAID.name else PaymentStatus.PARTIAL.name
+            db.billDao().updateBillPaymentAmounts(b.id, b.transactionUuid, b.billNumber, newPaid, newPending, newStatus)
+        }
+    }
 }
 
 class UdhariRepository(
@@ -666,7 +680,14 @@ class UdhariRepository(
     fun getTransactionsForCustomer(customerId: Long, customerMobile: String? = null): Flow<List<UdhariTransaction>> = firestoreRepo.getTransactionsForCustomer(customerId, customerMobile)
     fun getTransactionsForBill(billId: Long): Flow<List<UdhariTransaction>> = firestoreRepo.getTransactionsForBill(billId)
     suspend fun recordPayment(payment: UdhariTransaction): Result<Unit> = firestoreRepo.recordPayment(payment)
-    suspend fun reversePayment(transactionId: String, reason: String): Result<Unit> = firestoreRepo.reversePayment(transactionId, reason)
+    suspend fun reversePayment(
+        transactionId: String,
+        reason: String,
+        expectedCustomerGid: String? = null,
+        expectedCustomerMobile: String? = null,
+        expectedCustomerId: Long = 0L,
+        expectedAmount: Double? = null
+    ): Result<Unit> = firestoreRepo.reversePayment(transactionId, reason, expectedCustomerGid, expectedCustomerMobile, expectedCustomerId, expectedAmount)
     suspend fun setCustomerCreditLimit(customerId: Long, creditLimit: Double?): Result<Unit> = firestoreRepo.setCustomerCreditLimit(customerId, creditLimit)
     suspend fun recordManualDebit(
         customer: Customer,

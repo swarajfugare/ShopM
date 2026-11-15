@@ -412,24 +412,65 @@ class FirestoreUdhariRepository(
     /**
      * Atomically reverses an authorized payment to preserve full financial auditability.
      */
-    suspend fun reversePayment(transactionId: String, reason: String): Result<Unit> {
+    suspend fun reversePayment(
+        transactionId: String,
+        reason: String,
+        expectedCustomerGid: String? = null,
+        expectedCustomerMobile: String? = null,
+        expectedCustomerId: Long = 0L,
+        expectedAmount: Double? = null
+    ): Result<Unit> {
         return try {
             gateway.ensureAuthenticated()
 
-            val allTxs = gateway.getTransactionDocs()
-            val candidates = mutableSetOf<String>()
-            candidates.add(transactionId)
-            if (transactionId.startsWith("pay_")) candidates.add(transactionId.removePrefix("pay_")) else candidates.add("pay_$transactionId")
-            if (transactionId.startsWith("udh_")) candidates.add(transactionId.removePrefix("udh_")) else candidates.add("udh_$transactionId")
+            val cleanTxId = transactionId.trim()
+            if (cleanTxId.isBlank()) {
+                return Result.failure(IllegalArgumentException("भरणा आयडी अवैध आहे (Invalid transaction ID)"))
+            }
 
-            val targetDoc = allTxs.firstOrNull { doc ->
-                candidates.contains(doc.id) ||
-                candidates.contains(doc.data.gid) ||
-                candidates.contains(doc.data.id) ||
-                candidates.contains(doc.data.transactionUuid)
-            } ?: return Result.failure(IllegalStateException("भरणा नोंद सापडली नाही (Transaction not found: $transactionId)"))
+            val allTxs = gateway.getTransactionDocs()
+
+            // 1. Look up by EXACT document ID first
+            val targetDoc = allTxs.firstOrNull { it.id == cleanTxId }
+                ?: allTxs.firstOrNull { it.data.id == cleanTxId }
+                ?: allTxs.firstOrNull { it.data.gid.isNotBlank() && it.data.gid == cleanTxId }
+                ?: (if (cleanTxId.startsWith("pay_")) allTxs.firstOrNull { it.id == cleanTxId.removePrefix("pay_") || it.data.id == cleanTxId.removePrefix("pay_") } else null)
+                ?: allTxs.firstOrNull { it.id == "pay_$cleanTxId" || it.data.id == "pay_$cleanTxId" }
+                ?: allTxs.firstOrNull { it.data.transactionUuid.isNotBlank() && it.data.transactionUuid == cleanTxId }
+                ?: return Result.failure(IllegalStateException("भरणा नोंद सापडली नाही (Transaction not found: $transactionId)"))
 
             val originalTx = targetDoc.data
+
+            // Refuse to reverse initial checkout payment directly
+            if (originalTx.note?.contains("checkout", ignoreCase = true) == true ||
+                originalTx.note?.contains("initial", ignoreCase = true) == true ||
+                originalTx.id.endsWith("_pay")) {
+                return Result.failure(IllegalStateException("बिलातील सुरुवातीचा भरणा रद्द करता येत नाही. कृपया बिल बदला किंवा रद्द करा."))
+            }
+
+            // Customer isolation safety check: verify expected customer matches if provided
+            if (expectedCustomerGid?.isNotBlank() == true || expectedCustomerMobile?.isNotBlank() == true || expectedCustomerId != 0L) {
+                val cleanExpectedMobile = PhoneUtils.clean10DigitMobileInput(expectedCustomerMobile ?: "")
+                val cleanTxMobile = PhoneUtils.clean10DigitMobileInput(originalTx.customerMobile)
+
+                val gidMatch = expectedCustomerGid?.isNotBlank() == true && (
+                    originalTx.customerGid == expectedCustomerGid ||
+                    originalTx.customerId.toString() == expectedCustomerGid
+                )
+                val mobMatch = cleanExpectedMobile.length == 10 && cleanTxMobile == cleanExpectedMobile
+                val idMatch = expectedCustomerId != 0L && originalTx.customerId == expectedCustomerId
+
+                if (!gidMatch && !mobMatch && !idMatch) {
+                    return Result.failure(IllegalStateException("भरणा नोंद दुसऱ्या ग्राहकाशी संबंधित आहे (Transaction belongs to another customer)"))
+                }
+            }
+
+            if (expectedAmount != null && expectedAmount > 0.0) {
+                if (kotlin.math.abs(originalTx.amount - expectedAmount) > 0.01) {
+                    return Result.failure(IllegalStateException("भरणा रक्कम जुळत नाही (Transaction amount mismatch)"))
+                }
+            }
+
             val allTxsToReverse = if (originalTx.transactionUuid.isNotBlank()) {
                 allTxs.filter {
                     it.data.transactionUuid == originalTx.transactionUuid &&
