@@ -1490,7 +1490,7 @@ fun BillPreviewScreen(
                     },
                     colors = ButtonDefaults.buttonColors(containerColor = BoutiqueError)
                 ) {
-                    Text("होय, बिल रद्द करा")
+                    Text("बिल रद्द")
                 }
             },
             dismissButton = {
