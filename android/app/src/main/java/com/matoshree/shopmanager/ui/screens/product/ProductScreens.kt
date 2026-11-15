@@ -168,6 +168,23 @@ class ProductViewModel(private val productRepository: ProductRepository) : ViewM
         }
     }
 
+    fun updateProductPrice(productId: Long, sellingPrice: Double, costPrice: Double?, onComplete: (Boolean) -> Unit = {}) {
+        viewModelScope.launch {
+            try {
+                val success = productRepository.updateProductPrice(productId, sellingPrice, costPrice)
+                if (success) {
+                    _products.value = _products.value.map {
+                        if (it.id == productId) it.copy(sellingPrice = sellingPrice, costPrice = costPrice) else it
+                    }
+                }
+                onComplete(success)
+            } catch (e: Exception) {
+                android.util.Log.e("ProductVM", "Error updating product price: ${e.message}", e)
+                onComplete(false)
+            }
+        }
+    }
+
     val selectedProductIds = MutableStateFlow<Set<Long>>(emptySet())
 
     fun toggleProductSelection(productId: Long) {
@@ -245,6 +262,7 @@ fun ProductsListScreen(
     var showRenameCategoryDialog by remember { mutableStateOf<Category?>(null) }
     var showDeleteCategoryDialog by remember { mutableStateOf<Category?>(null) }
     var showChangeProductCatDialog by remember { mutableStateOf<Product?>(null) }
+    var showEditPriceDialog by remember { mutableStateOf<Product?>(null) }
 
     val filtered = remember(products, search, selectedCatId, currentSort) {
         var list = products
@@ -735,11 +753,29 @@ fun ProductsListScreen(
                         Text("बारकोड / एसकेयू:", fontWeight = FontWeight.SemiBold)
                         Text(product.sku ?: "नाही")
                     }
-                    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
                         Text("विक्री किंमत:", fontWeight = FontWeight.SemiBold)
-                        Text(CurrencyFormatter.format(product.sellingPrice), color = DeepEmerald, fontWeight = FontWeight.Bold)
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Text(CurrencyFormatter.format(product.sellingPrice), color = DeepEmerald, fontWeight = FontWeight.Bold)
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Surface(
+                                color = ChampagneGoldContainer.copy(alpha = 0.5f),
+                                shape = RoundedCornerShape(6.dp),
+                                modifier = Modifier.clickable {
+                                    showEditPriceDialog = product
+                                }
+                            ) {
+                                Text(
+                                    "बदला",
+                                    color = DeepEmerald,
+                                    fontWeight = FontWeight.Bold,
+                                    fontSize = 11.sp,
+                                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp)
+                                )
+                            }
+                        }
                     }
-                    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
                         Text("खरेदी किंमत:", fontWeight = FontWeight.SemiBold)
                         Text(if (product.costPrice != null) CurrencyFormatter.format(product.costPrice) else "नोंद नाही")
                     }
@@ -990,6 +1026,78 @@ fun ProductsListScreen(
             confirmButton = {},
             dismissButton = {
                 TextButton(onClick = { showChangeProductCatDialog = null }) {
+                    Text("रद्द करा", color = MutedCharcoal)
+                }
+            },
+            containerColor = WarmWhite,
+            shape = RoundedCornerShape(16.dp)
+        )
+    }
+
+    // Edit Product Price Dialog
+    showEditPriceDialog?.let { prod ->
+        var newSellingPriceText by remember(prod) { mutableStateOf(String.format(java.util.Locale.US, "%.0f", prod.sellingPrice)) }
+        var newCostPriceText by remember(prod) { mutableStateOf(prod.costPrice?.let { String.format(java.util.Locale.US, "%.0f", it) } ?: "") }
+
+        AlertDialog(
+            onDismissRequest = { showEditPriceDialog = null },
+            title = {
+                Text(
+                    text = "'${prod.name}' ची किंमत बदला",
+                    fontWeight = FontWeight.Bold,
+                    color = DeepEmerald,
+                    fontSize = 18.sp
+                )
+            },
+            text = {
+                Column(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    Text(
+                        "टीप: नवीन किंमत फक्त नवीन बिलांसाठी लागू होईल. जुनी बिले जशीच्या तशी सुरक्षित राहतील.",
+                        style = MaterialTheme.typography.bodySmall.copy(color = MutedCharcoal)
+                    )
+                    OutlinedTextField(
+                        value = newSellingPriceText,
+                        onValueChange = { newSellingPriceText = it },
+                        label = { Text("विक्री किंमत (Selling Price) *") },
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                    OutlinedTextField(
+                        value = newCostPriceText,
+                        onValueChange = { newCostPriceText = it },
+                        label = { Text("खरेदी किंमत (Cost Price - पर्यायी)") },
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                }
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        val newSellPrice = newSellingPriceText.toDoubleOrNull() ?: 0.0
+                        val newCost = newCostPriceText.toDoubleOrNull()
+                        if (newSellPrice > 0.0) {
+                            viewModel.updateProductPrice(prod.id, newSellPrice, newCost) { success ->
+                                if (success) {
+                                    Toast.makeText(context, "किंमत यशस्वीरित्या अपडेट केली", Toast.LENGTH_SHORT).show()
+                                    selectedProductForDetails = selectedProductForDetails?.copy(sellingPrice = newSellPrice, costPrice = newCost)
+                                } else {
+                                    Toast.makeText(context, "किंमत अपडेट अयशस्वी", Toast.LENGTH_SHORT).show()
+                                }
+                                showEditPriceDialog = null
+                            }
+                        } else {
+                            Toast.makeText(context, "विक्री किंमत ० पेक्षा जास्त असावी", Toast.LENGTH_SHORT).show()
+                        }
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = DeepEmerald)
+                ) {
+                    Text("सेव्ह करा")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showEditPriceDialog = null }) {
                     Text("रद्द करा", color = MutedCharcoal)
                 }
             },

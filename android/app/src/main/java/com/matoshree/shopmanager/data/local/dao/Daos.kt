@@ -414,6 +414,9 @@ interface ProductDao {
     @Query("UPDATE products SET serverId = :serverId WHERE id = :id")
     suspend fun updateServerId(id: Long, serverId: Long)
 
+    @Query("UPDATE products SET sellingPrice = :sellingPrice, costPrice = :costPrice WHERE id = :id OR (serverId IS NOT NULL AND serverId = :id)")
+    suspend fun updateProductPrices(id: Long, sellingPrice: Double, costPrice: Double?)
+
     @Query("SELECT * FROM products WHERE isActive = 1 ORDER BY id DESC")
     fun getAllProducts(): Flow<List<ProductEntity>>
 
