@@ -297,7 +297,7 @@ class Round20PaymentCancellationRegressionTest {
         // 3. Customer outstanding restored to 400
         assertEquals("Customer due must be restored to 400", 400.0, custSnap.data.outstandingAmount, 0.001)
 
-        // 4. Payments tab shows cancelled payment as grey audit row
+        // 4. Payments tab: cancelled payment disappears as requested by owner
         domainBill = billSnap.data.toDomain()
         domainTxs = gateway.transactions.map { it.data.toDomain() }
         ledger = UdhariLedger.computeCustomerLedger(custGid, listOf(domainBill), domainTxs, listOf(domainCustomer))
@@ -306,11 +306,9 @@ class Round20PaymentCancellationRegressionTest {
         // Ledger balance must be 400
         assertEquals("Ledger balance must be restored to 400", 400.0, ledger.balance, 0.001)
 
-        // Cancelled row must exist with isReversed=true and isCancellable=false
-        val cancelledRow = paymentRows.find { it.amount == 200.0 && it.isReversed }
-        assertNotNull("Cancelled 200 payment must appear as an audit row", cancelledRow)
-        assertFalse("Cancelled payment must NOT be cancellable again", cancelledRow!!.isCancellable)
-        assertTrue("Title must indicate cancelled payment", cancelledRow.title.contains("रद्द भरणा"))
+        // Cancelled row must disappear from Payments tab (v3.6.3 behaviour restored in v3.6.6)
+        val active200Row = paymentRows.find { it.amount == 200.0 }
+        assertNull("Cancelled 200 payment must disappear from Payments tab", active200Row)
 
         // 5. T5: Take 200 again -> works cleanly and reduces due to 200
         val paymentTx2 = UdhariTransaction(

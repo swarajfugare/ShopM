@@ -41,15 +41,6 @@ data class OrphanPaymentInfo(
     val date: String
 )
 
-data class SuspiciousReversalInfo(
-    val txId: String,
-    val customerName: String,
-    val customerMobile: String,
-    val amount: Double,
-    val date: String,
-    val reason: String
-)
-
 data class CustomerDiagnosticReport(
     val scanTimestamp: Long = System.currentTimeMillis(),
     val totalFirestoreCount: Int = 0,
@@ -79,7 +70,6 @@ data class CustomerDiagnosticReport(
     val overpaidCustomersCount: Int = 0,
     val overpaidCustomersList: List<OverpaidCustomerInfo> = emptyList(),
     val phantomTransactionsCount: Int = 0,
-    val suspiciousReversalsList: List<SuspiciousReversalInfo> = emptyList(),
     val firestoreDocsList: List<FirestoreCustomerDocDiagnostic> = emptyList(),
     val details: List<String> = emptyList()
 )
@@ -359,33 +349,6 @@ object CustomerDiagnosticManager {
                 details.add("⚠️ अनधिकृत/ऑर्फन भरणा नोंदी: $orphanCount")
             }
 
-            val suspiciousReversals = mutableListOf<SuspiciousReversalInfo>()
-            val reversedTxs = txs.filter { it.isReversed }
-            val reversalAudits = txs.filter { it.type == com.matoshree.shopmanager.domain.model.UdhariTransactionType.REVERSAL }
-
-            for (rtx in reversedTxs) {
-                val hasMatchingAudit = reversalAudits.any { audit ->
-                    kotlin.math.abs(audit.amount - rtx.amount) < 0.01 && (
-                        (audit.customerGid.isNotBlank() && audit.customerGid == rtx.customerGid) ||
-                        (audit.customerMobile.isNotBlank() && audit.customerMobile == rtx.customerMobile) ||
-                        audit.note?.contains(rtx.id) == true
-                    )
-                }
-                if (!hasMatchingAudit) {
-                    suspiciousReversals.add(
-                        SuspiciousReversalInfo(
-                            txId = rtx.id,
-                            customerName = rtx.customerName,
-                            customerMobile = rtx.customerMobile,
-                            amount = rtx.amount,
-                            date = rtx.date,
-                            reason = "रद्द दाखल्याविना (No REVERSAL doc) रद्द झालेली नोंद"
-                        )
-                    )
-                    details.add("संशयास्पद रद्द नोंद: ${rtx.customerName} - ₹${rtx.amount} (${rtx.date})")
-                }
-            }
-
             return@withContext CustomerDiagnosticReport(
                 scanTimestamp = System.currentTimeMillis(),
                 totalFirestoreCount = totalFirestoreDocs,
@@ -415,7 +378,6 @@ object CustomerDiagnosticManager {
                 overpaidCustomersCount = overpaidCount,
                 overpaidCustomersList = overpaidList,
                 phantomTransactionsCount = phantomTransactionsCount,
-                suspiciousReversalsList = suspiciousReversals,
                 firestoreDocsList = firestoreDocsList,
                 details = details.take(30)
             )

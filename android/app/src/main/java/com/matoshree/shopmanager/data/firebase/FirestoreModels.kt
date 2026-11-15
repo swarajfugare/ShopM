@@ -2,6 +2,7 @@ package com.matoshree.shopmanager.data.firebase
 
 import com.google.firebase.firestore.DocumentId
 import com.google.firebase.firestore.IgnoreExtraProperties
+import com.google.firebase.firestore.PropertyName
 import com.matoshree.shopmanager.domain.model.*
 
 @IgnoreExtraProperties
@@ -373,7 +374,7 @@ data class UdhariTransactionDto(
     var date: String = "", // YYYY-MM-DD
     var dueDate: String? = null,
     var note: String? = null,
-    var isReversed: Boolean = false,
+    @get:PropertyName("isReversed") @set:PropertyName("isReversed") var isReversed: Boolean = false,
     var isDeleted: Boolean = false,
     var cascadedBy: String? = null,
     var linkedCustomerGid: String? = null,

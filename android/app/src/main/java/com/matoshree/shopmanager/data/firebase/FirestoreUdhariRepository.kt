@@ -592,6 +592,14 @@ class FirestoreUdhariRepository(
             }
 
             gateway.commitReversalBatch(reversalTransactionsToSave, reversedTxDocUpdates, billUpdates, customerUpdates)
+
+            // S3: Read original payment document back from SERVER and confirm toObject has isReversed == true
+            val isConfirmedReversed = gateway.verifyTransactionReversed(targetDoc.path)
+            if (!isConfirmedReversed) {
+                Log.e(TAG, "Reversal verification failed on server for ${targetDoc.path}")
+                return Result.failure(IllegalStateException("भरणा रद्द करण्याची नोंद सर्व्हरवर तपासता आली नाही. कृपया इंटरनेट तपासून पुन्हा प्रयत्न करा."))
+            }
+
             Log.d(TAG, "Payment reversed successfully: ${targetDoc.id}, reason: $reason")
             Result.success(Unit)
         } catch (e: Exception) {

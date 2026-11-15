@@ -137,33 +137,6 @@ fun buildCustomerPaymentRecords(
         )
     }
 
-    // Include reversed payments for full audit trail
-    val reversedTxs = txs.filter { tx ->
-        tx.isReversed && keyResolver(tx.customerGid, tx.customerMobile, tx.customerName, tx.customerId) == targetKey
-    }
-    for (rtx in reversedTxs) {
-        allPaymentsList.add(
-            CustomerPaymentRecord(
-                id = "rev_${rtx.id}",
-                txGid = rtx.gid.takeIf { it.isNotBlank() },
-                originalTxId = rtx.id.takeIf { it.isNotBlank() },
-                title = "रद्द भरणा (${rtx.paymentMethod.name})",
-                subtitle = if (rtx.billNumber.isNotBlank()) "बिल #${rtx.billNumber} • रद्द" else "रद्द झालेली नोंद",
-                date = rtx.date,
-                timeMillis = rtx.createdAt,
-                amount = rtx.amount,
-                paymentMethod = rtx.paymentMethod,
-                billId = rtx.billId,
-                billNumber = rtx.billNumber,
-                isUdhariSettlement = true,
-                isCancellable = false,
-                isReversed = true,
-                reversalReason = rtx.reversalReason,
-                udhariTx = rtx
-            )
-        )
-    }
-
     return allPaymentsList.sortedByDescending { it.timeMillis }
 }
 
@@ -715,17 +688,9 @@ class CustomerViewModel(
         val prevDue = customerOutstandingDue.value
         val prevProfile = selectedCustomerProfile.value
 
-        // Optimistically update: mark the payment as cancelled (isReversed = true) in the Payments list immediately
-        customerAllPayments.value = customerAllPayments.value.map { p ->
-            if (p.originalTxId == transactionId || p.txGid == transactionId || p.id == transactionId || p.udhariTx?.id == transactionId) {
-                p.copy(
-                    isReversed = true,
-                    isCancellable = false,
-                    title = "रद्द भरणा (${p.paymentMethod.name})",
-                    subtitle = if (!p.billNumber.isNullOrBlank()) "बिल #${p.billNumber} • रद्द" else "रद्द झालेली नोंद",
-                    reversalReason = reason
-                )
-            } else p
+        // Optimistically remove from state immediately so user sees it removed with zero delay
+        customerAllPayments.value = customerAllPayments.value.filter {
+            it.originalTxId != transactionId && it.txGid != transactionId && it.id != transactionId && it.udhariTx?.id != transactionId
         }
         customerTransactions.value = customerTransactions.value.filter { it.id != transactionId }
         customerKhatavahi.value = customerKhatavahi.value.filter { it.id != transactionId }
@@ -745,18 +710,6 @@ class CustomerViewModel(
         )
 
         if (res.isSuccess) {
-            try {
-                selectedCustomerProfile.value?.let { cust ->
-                    val newBal = (cust.outstandingBalance).coerceAtLeast(0.0)
-                    customerRepository.saveCustomer(cust.copy(outstandingBalance = newBal))
-                }
-            } catch (_: Exception) { }
-            try {
-                if (targetTx != null && !targetTx.billNumber.isNullOrBlank()) {
-                    val billNum = targetTx.billNumber.substringBefore("(").trim()
-                    billRepository.restoreBillDueAfterReversal(billNum, txAmount)
-                }
-            } catch (_: Exception) { }
             try {
                 billRepository.recomputeStoredBillValuesFromLedger(emptyList())
             } catch (_: Exception) { }
@@ -1496,7 +1449,6 @@ fun CustomerProfileScreen(
     var selectedUdhariForAction by remember { mutableStateOf<UdhariTransaction?>(null) }
     var selectedLedgerEntryForAction by remember { mutableStateOf<UdhariLedgerEntry?>(null) }
     var prefilledPaymentAmount by remember { mutableStateOf<Double?>(null) }
-    var showCancelledPaymentsOnly by remember { mutableStateOf(false) }
     var deletingOrphanTx by remember { mutableStateOf<UdhariTransaction?>(null) }
     var ignoringOrphanTx by remember { mutableStateOf<UdhariTransaction?>(null) }
     var convertingOrphanTx by remember { mutableStateOf<UdhariTransaction?>(null) }
@@ -1802,46 +1754,29 @@ fun CustomerProfileScreen(
                     }
                     2 -> {
                         // PAYMENTS TAB (Includes ALL payments: Bill checkout payments & Udhari settlements)
-                        val activePayments = allPayments.filter { !it.isReversed }
-                        val cancelledCount = allPayments.count { it.isReversed }
-                        val displayedPayments = if (showCancelledPaymentsOnly) allPayments.filter { it.isReversed } else allPayments
+                        val displayedPayments = allPayments
 
                         item {
-                            val totalPaid = activePayments.sumOf { it.amount }
+                            val totalPaid = allPayments.sumOf { it.amount }
                             MatoshreeCard(hasGoldTopBorder = true) {
-                                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                                    Row(
-                                        modifier = Modifier.fillMaxWidth(),
-                                        horizontalArrangement = Arrangement.SpaceBetween,
-                                        verticalAlignment = Alignment.CenterVertically
-                                    ) {
-                                        Column {
-                                            Text("एकूण मिळालेली रक्कम", style = MaterialTheme.typography.labelSmall.copy(color = MutedCharcoal))
-                                            Text(
-                                                text = CurrencyFormatter.format(totalPaid),
-                                                fontWeight = FontWeight.Bold,
-                                                fontSize = 18.sp,
-                                                color = BoutiqueSuccess
-                                            )
-                                        }
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Column {
+                                        Text("एकूण मिळालेली रक्कम", style = MaterialTheme.typography.labelSmall.copy(color = MutedCharcoal))
                                         Text(
-                                            text = "${activePayments.size} व्यवहार",
-                                            style = MaterialTheme.typography.bodySmall.copy(color = MutedCharcoal, fontWeight = FontWeight.SemiBold)
+                                            text = CurrencyFormatter.format(totalPaid),
+                                            fontWeight = FontWeight.Bold,
+                                            fontSize = 18.sp,
+                                            color = BoutiqueSuccess
                                         )
                                     }
-
-                                    if (cancelledCount > 0) {
-                                        FilterChip(
-                                            selected = showCancelledPaymentsOnly,
-                                            onClick = { showCancelledPaymentsOnly = !showCancelledPaymentsOnly },
-                                            label = { Text("रद्द भरणा ($cancelledCount)") },
-                                            leadingIcon = {
-                                                if (showCancelledPaymentsOnly) {
-                                                    Icon(Icons.Default.Check, contentDescription = null, modifier = Modifier.size(16.dp))
-                                                }
-                                            }
-                                        )
-                                    }
+                                    Text(
+                                        text = "${allPayments.size} व्यवहार",
+                                        style = MaterialTheme.typography.bodySmall.copy(color = MutedCharcoal, fontWeight = FontWeight.SemiBold)
+                                    )
                                 }
                             }
                         }
@@ -1973,7 +1908,7 @@ fun CustomerProfileScreen(
                             item {
                                 MatoshreeCard {
                                     Box(modifier = Modifier.fillMaxWidth().padding(24.dp), contentAlignment = Alignment.Center) {
-                                        Text(if (showCancelledPaymentsOnly) "कोणतेही रद्द केलेले पेमेंट नाही." else "या कस्टमरकडून अद्याप कोणतेही पेमेंट नोंदवले गेले नाही.", color = MutedCharcoal)
+                                        Text("या कस्टमरकडून अद्याप कोणतेही पेमेंट नोंदवले गेले नाही.", color = MutedCharcoal)
                                     }
                                 }
                             }
@@ -3512,7 +3447,7 @@ fun CustomerPaymentCardItem(
                     Text(
                         text = record.title,
                         fontWeight = FontWeight.Bold,
-                        color = if (record.isReversed) MutedCharcoal else BoutiqueSuccess
+                        color = BoutiqueSuccess
                     )
                     Text(
                         text = "${DateUtils.formatForDisplay(record.date)} • ${record.paymentMethod.name} • ${record.subtitle}",
@@ -3524,12 +3459,10 @@ fun CustomerPaymentCardItem(
                         text = CurrencyFormatter.format(record.amount),
                         fontWeight = FontWeight.Bold,
                         fontSize = 16.sp,
-                        color = if (record.isReversed) MutedCharcoal else BoutiqueSuccess
+                        color = BoutiqueSuccess
                     )
                     Spacer(modifier = Modifier.height(2.dp))
-                    if (record.isReversed) {
-                        StatusBadge(status = "रद्द (REVERSED)", isError = true)
-                    } else if (record.isUdhariSettlement) {
+                    if (record.isUdhariSettlement) {
                         StatusBadge(status = "उधारी जमा", isSuccess = true)
                     } else {
                         StatusBadge(status = "बिल भरणा", isSuccess = true)
@@ -3537,40 +3470,38 @@ fun CustomerPaymentCardItem(
                 }
             }
 
-            if (!record.isReversed) {
-                Spacer(modifier = Modifier.height(8.dp))
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.End,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    if (record.billId != null) {
-                        TextButton(onClick = { onBillClick(record.billId) }) {
-                            Icon(Icons.Default.ReceiptLong, contentDescription = "बिल पहा", modifier = Modifier.size(16.dp), tint = DeepEmerald)
-                            Spacer(modifier = Modifier.width(4.dp))
-                            Text("बिल पहा", color = DeepEmerald, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+            Spacer(modifier = Modifier.height(8.dp))
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.End,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                if (record.billId != null) {
+                    TextButton(onClick = { onBillClick(record.billId) }) {
+                        Icon(Icons.Default.ReceiptLong, contentDescription = "बिल पहा", modifier = Modifier.size(16.dp), tint = DeepEmerald)
+                        Spacer(modifier = Modifier.width(4.dp))
+                        Text("बिल पहा", color = DeepEmerald, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                    }
+                }
+                if (record.isUdhariSettlement) {
+                    TextButton(onClick = onReceiptClick) {
+                        Icon(Icons.Default.Receipt, contentDescription = "पावती", modifier = Modifier.size(16.dp), tint = DeepEmerald)
+                        Spacer(modifier = Modifier.width(4.dp))
+                        Text("पावती पहा", color = DeepEmerald, fontSize = 12.sp)
+                    }
+                    if (record.isCancellable) {
+                        Spacer(modifier = Modifier.width(4.dp))
+                        TextButton(onClick = onReverseClick) {
+                            Text("रद्द करा", color = BoutiqueError, fontSize = 12.sp, fontWeight = FontWeight.Bold)
                         }
                     }
-                    if (record.isUdhariSettlement) {
-                        TextButton(onClick = onReceiptClick) {
-                            Icon(Icons.Default.Receipt, contentDescription = "पावती", modifier = Modifier.size(16.dp), tint = DeepEmerald)
-                            Spacer(modifier = Modifier.width(4.dp))
-                            Text("पावती पहा", color = DeepEmerald, fontSize = 12.sp)
-                        }
-                        if (record.isCancellable && !record.isReversed) {
-                            Spacer(modifier = Modifier.width(4.dp))
-                            TextButton(onClick = onReverseClick) {
-                                Text("रद्द करा", color = BoutiqueError, fontSize = 12.sp, fontWeight = FontWeight.Bold)
-                            }
-                        }
-                    } else if (!record.isReversed) {
-                        Text(
-                            text = "बिलातील पैसे (बिल बदला/रद्द करा)",
-                            color = MutedCharcoal,
-                            fontSize = 11.sp,
-                            modifier = Modifier.padding(horizontal = 4.dp, vertical = 6.dp)
-                        )
-                    }
+                } else {
+                    Text(
+                        text = "बिलातील पैसे (बिल बदला/रद्द करा)",
+                        color = MutedCharcoal,
+                        fontSize = 11.sp,
+                        modifier = Modifier.padding(horizontal = 4.dp, vertical = 6.dp)
+                    )
                 }
             }
         }

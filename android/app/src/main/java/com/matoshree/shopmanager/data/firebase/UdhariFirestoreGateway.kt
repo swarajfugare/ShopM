@@ -50,6 +50,7 @@ interface UdhariFirestoreGateway {
         billUpdates: Map<String, Map<String, Any?>>,
         customerUpdates: Map<String, Double>
     )
+    suspend fun verifyTransactionReversed(path: String): Boolean = true
 }
 
 class DefaultUdhariFirestoreGateway : UdhariFirestoreGateway {
@@ -210,5 +211,18 @@ class DefaultUdhariFirestoreGateway : UdhariFirestoreGateway {
         }
         val task = batch.commit()
         FirebaseManager.awaitWriteTask(task)
+    }
+
+    override suspend fun verifyTransactionReversed(path: String): Boolean {
+        return try {
+            val snap = kotlinx.coroutines.withTimeoutOrNull(4000) {
+                FirebaseManager.firestore.document(path).get(com.google.firebase.firestore.Source.SERVER).await()
+            } ?: FirebaseManager.firestore.document(path).get().await()
+            val dto = snap.toObject(UdhariTransactionDto::class.java)
+            dto?.isReversed == true
+        } catch (e: Exception) {
+            android.util.Log.e("UdhariFirestoreGateway", "Failed to verify transaction reversal on server: ${e.message}", e)
+            false
+        }
     }
 }
