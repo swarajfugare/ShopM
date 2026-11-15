@@ -133,29 +133,52 @@ class FirestoreUdhariRepository {
                 return Result.failure(IllegalArgumentException("ग्राहक ओळख स्पष्ट नाही (Customer GID, ID, or 10-digit mobile required)"))
             }
 
-            // 1. Fetch customer documents from both root and shop collections
-            val rootCustSnap = try {
-                if (isOnline) {
-                    kotlinx.coroutines.withTimeoutOrNull(1000) {
-                        FirebaseManager.customersCollection().get().await()
-                    } ?: FirebaseManager.customersCollection().get(com.google.firebase.firestore.Source.CACHE).await()
-                } else {
-                    FirebaseManager.customersCollection().get(com.google.firebase.firestore.Source.CACHE).await()
-                }
-            } catch (e: Exception) { null }
+            // 1. Fetch targeted customer documents from root and shop collections (avoiding full collection scans)
+            val candidateCustDocRefs = mutableListOf<com.google.firebase.firestore.DocumentReference>()
+            if (paymentCustGid.isNotBlank()) {
+                candidateCustDocRefs.add(FirebaseManager.customersCollection().document(paymentCustGid))
+                candidateCustDocRefs.add(FirebaseManager.shopCustomersCollection().document(paymentCustGid))
+            }
+            if (cleanPaymentMobile.length == 10) {
+                candidateCustDocRefs.add(FirebaseManager.customersCollection().document("cust_m_$cleanPaymentMobile"))
+                candidateCustDocRefs.add(FirebaseManager.shopCustomersCollection().document("cust_m_$cleanPaymentMobile"))
+            }
+            if (paymentCustId > 0L) {
+                candidateCustDocRefs.add(FirebaseManager.customersCollection().document("cust_$paymentCustId"))
+                candidateCustDocRefs.add(FirebaseManager.shopCustomersCollection().document("cust_$paymentCustId"))
+            }
 
-            val shopCustSnap = try {
-                if (isOnline) {
-                    kotlinx.coroutines.withTimeoutOrNull(1000) {
-                        FirebaseManager.shopCustomersCollection().get().await()
-                    } ?: FirebaseManager.shopCustomersCollection().get(com.google.firebase.firestore.Source.CACHE).await()
-                } else {
-                    FirebaseManager.shopCustomersCollection().get(com.google.firebase.firestore.Source.CACHE).await()
-                }
-            } catch (e: Exception) { null }
+            val custDocsList = mutableListOf<com.google.firebase.firestore.DocumentSnapshot>()
+            for (ref in candidateCustDocRefs.distinctBy { it.path }) {
+                try {
+                    val snap = if (isOnline) {
+                        kotlinx.coroutines.withTimeoutOrNull(2000) {
+                            ref.get(com.google.firebase.firestore.Source.SERVER).await()
+                        } ?: ref.get(com.google.firebase.firestore.Source.DEFAULT).await()
+                    } else {
+                        ref.get(com.google.firebase.firestore.Source.CACHE).await()
+                    }
+                    if (snap != null && snap.exists()) {
+                        custDocsList.add(snap)
+                    }
+                } catch (_: Exception) {}
+            }
 
-            val allCustDocs = (rootCustSnap?.documents ?: emptyList()) + (shopCustSnap?.documents ?: emptyList())
-            val matchedCustDocs = allCustDocs.filter { doc ->
+            // Fallback mobile query if document IDs didn't yield customer doc
+            if (custDocsList.isEmpty() && cleanPaymentMobile.length == 10) {
+                try {
+                    val q1 = if (isOnline) {
+                        kotlinx.coroutines.withTimeoutOrNull(2000) {
+                            FirebaseManager.customersCollection().whereEqualTo("mobile", cleanPaymentMobile).limit(3).get(com.google.firebase.firestore.Source.SERVER).await()
+                        } ?: FirebaseManager.customersCollection().whereEqualTo("mobile", cleanPaymentMobile).limit(3).get(com.google.firebase.firestore.Source.DEFAULT).await()
+                    } else {
+                        FirebaseManager.customersCollection().whereEqualTo("mobile", cleanPaymentMobile).limit(3).get(com.google.firebase.firestore.Source.CACHE).await()
+                    }
+                    if (q1 != null && !q1.isEmpty) custDocsList.addAll(q1.documents)
+                } catch (_: Exception) {}
+            }
+
+            val matchedCustDocs = custDocsList.filter { doc ->
                 val c = doc.toObject(CustomerDto::class.java)
                 val cCleanMobile = PhoneUtils.clean10DigitMobileInput(c?.mobile ?: "")
                 val gidMatches = paymentCustGid.isNotBlank() && (
@@ -182,28 +205,56 @@ class FirestoreUdhariRepository {
 
             val currentCustDue = matchedCustDocs.firstOrNull()?.toObject(CustomerDto::class.java)?.outstandingAmount ?: payment.previousOutstanding
 
-            // 2. Fetch all bills across both root and shop collections
-            val rootBillsSnap = try {
-                if (isOnline) {
-                    kotlinx.coroutines.withTimeoutOrNull(1000) {
-                        FirebaseManager.billsCollection().get().await()
-                    } ?: FirebaseManager.billsCollection().get(com.google.firebase.firestore.Source.CACHE).await()
-                } else {
-                    FirebaseManager.billsCollection().get(com.google.firebase.firestore.Source.CACHE).await()
-                }
-            } catch (e: Exception) { null }
+            // 2. Fetch targeted customer bills only (avoiding full collection scans)
+            val custBillDocsList = mutableListOf<com.google.firebase.firestore.DocumentSnapshot>()
+            suspend fun queryCustomerBills(q: com.google.firebase.firestore.Query) {
+                try {
+                    val snap = if (isOnline) {
+                        kotlinx.coroutines.withTimeoutOrNull(2500) {
+                            q.get(com.google.firebase.firestore.Source.SERVER).await()
+                        } ?: q.get(com.google.firebase.firestore.Source.DEFAULT).await()
+                    } else {
+                        q.get(com.google.firebase.firestore.Source.CACHE).await()
+                    }
+                    if (snap != null && !snap.isEmpty) {
+                        custBillDocsList.addAll(snap.documents)
+                    }
+                } catch (_: Exception) {}
+            }
 
-            val shopBillsSnap = try {
-                if (isOnline) {
-                    kotlinx.coroutines.withTimeoutOrNull(1000) {
-                        FirebaseManager.shopBillsCollection().get().await()
-                    } ?: FirebaseManager.shopBillsCollection().get(com.google.firebase.firestore.Source.CACHE).await()
-                } else {
-                    FirebaseManager.shopBillsCollection().get(com.google.firebase.firestore.Source.CACHE).await()
-                }
-            } catch (e: Exception) { null }
+            if (paymentCustGid.isNotBlank()) {
+                queryCustomerBills(FirebaseManager.billsCollection().whereEqualTo("customerGid", paymentCustGid))
+                queryCustomerBills(FirebaseManager.shopBillsCollection().whereEqualTo("customerGid", paymentCustGid))
+                queryCustomerBills(FirebaseManager.billsCollection().whereEqualTo("linkedCustomerGid", paymentCustGid))
+                queryCustomerBills(FirebaseManager.shopBillsCollection().whereEqualTo("linkedCustomerGid", paymentCustGid))
+                queryCustomerBills(FirebaseManager.billsCollection().whereEqualTo("customerId", paymentCustGid))
+                queryCustomerBills(FirebaseManager.shopBillsCollection().whereEqualTo("customerId", paymentCustGid))
+            }
+            if (cleanPaymentMobile.length == 10) {
+                queryCustomerBills(FirebaseManager.billsCollection().whereEqualTo("customerMobile", cleanPaymentMobile))
+                queryCustomerBills(FirebaseManager.shopBillsCollection().whereEqualTo("customerMobile", cleanPaymentMobile))
+            }
+            if (paymentCustId > 0L) {
+                queryCustomerBills(FirebaseManager.billsCollection().whereEqualTo("legacyCustomerId", paymentCustId))
+                queryCustomerBills(FirebaseManager.shopBillsCollection().whereEqualTo("legacyCustomerId", paymentCustId))
+                queryCustomerBills(FirebaseManager.billsCollection().whereEqualTo("customerId", "cust_$paymentCustId"))
+                queryCustomerBills(FirebaseManager.shopBillsCollection().whereEqualTo("customerId", "cust_$paymentCustId"))
+            }
 
-            val allBillDocs = (rootBillsSnap?.documents ?: emptyList()) + (shopBillsSnap?.documents ?: emptyList())
+            if (!payment.billGid.isNullOrBlank()) {
+                try {
+                    val bDoc = if (isOnline) {
+                        FirebaseManager.billsCollection().document(payment.billGid!!).get(com.google.firebase.firestore.Source.SERVER).await()
+                    } else FirebaseManager.billsCollection().document(payment.billGid!!).get(com.google.firebase.firestore.Source.CACHE).await()
+                    if (bDoc.exists()) custBillDocsList.add(bDoc)
+                } catch (_: Exception) {}
+            }
+            if (payment.billNumber.isNotBlank()) {
+                queryCustomerBills(FirebaseManager.billsCollection().whereEqualTo("billNumber", payment.billNumber.trim()))
+                queryCustomerBills(FirebaseManager.shopBillsCollection().whereEqualTo("billNumber", payment.billNumber.trim()))
+            }
+
+            val allBillDocs = custBillDocsList.distinctBy { it.reference.path }
             val matchedBillsMap = mutableMapOf<String, Pair<BillDto, MutableList<com.google.firebase.firestore.DocumentReference>>>()
 
             for (doc in allBillDocs) {
