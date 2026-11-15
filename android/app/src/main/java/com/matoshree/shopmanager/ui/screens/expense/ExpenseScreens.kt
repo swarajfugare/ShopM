@@ -64,6 +64,20 @@ class ExpenseViewModel(private val expenseRepository: ExpenseRepository) : ViewM
             )
         }
     }
+
+    fun updateExpense(id: Long, category: String, amount: Double, paymentMethod: PaymentMethod, note: String?, onComplete: (Boolean) -> Unit = {}) {
+        viewModelScope.launch {
+            val res = expenseRepository.updateExpense(id, category, amount, paymentMethod, note)
+            onComplete(res)
+        }
+    }
+
+    fun deleteExpense(id: Long, onComplete: () -> Unit = {}) {
+        viewModelScope.launch {
+            expenseRepository.deleteExpense(id)
+            onComplete()
+        }
+    }
 }
 
 @Composable
@@ -71,8 +85,11 @@ fun ExpensesListScreen(
     viewModel: ExpenseViewModel,
     onBackClick: () -> Unit
 ) {
+    val context = androidx.compose.ui.platform.LocalContext.current
     val expenses by viewModel.expenses.collectAsState()
     var showAddDialog by remember { mutableStateOf(false) }
+    var expenseToEdit by remember { mutableStateOf<Expense?>(null) }
+    var expenseToDelete by remember { mutableStateOf<Expense?>(null) }
 
     val totalExpenses = remember(expenses) {
         expenses.sumOf { it.amount }
@@ -150,18 +167,125 @@ fun ExpensesListScreen(
                                 )
                             }
 
-                            Text(
-                                text = "-${CurrencyFormatter.format(ex.amount)}",
-                                style = MaterialTheme.typography.titleMedium.copy(
-                                    color = BoutiqueError,
-                                    fontWeight = FontWeight.Bold
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(4.dp)
+                            ) {
+                                Text(
+                                    text = "-${CurrencyFormatter.format(ex.amount)}",
+                                    style = MaterialTheme.typography.titleMedium.copy(
+                                        color = BoutiqueError,
+                                        fontWeight = FontWeight.Bold
+                                    )
                                 )
-                            )
+                                IconButton(
+                                    onClick = { expenseToEdit = ex },
+                                    modifier = Modifier.size(32.dp)
+                                ) {
+                                    Icon(Icons.Default.Edit, contentDescription = "बदला", tint = DeepEmerald, modifier = Modifier.size(18.dp))
+                                }
+                                IconButton(
+                                    onClick = { expenseToDelete = ex },
+                                    modifier = Modifier.size(32.dp)
+                                ) {
+                                    Icon(Icons.Default.Delete, contentDescription = "हटवा", tint = BoutiqueError, modifier = Modifier.size(18.dp))
+                                }
+                            }
                         }
                     }
                 }
             }
         }
+    }
+
+    // Edit Expense Dialog
+    expenseToEdit?.let { ex ->
+        var editCategory by remember(ex) { mutableStateOf(ex.category) }
+        var editAmountText by remember(ex) { mutableStateOf(String.format(java.util.Locale.US, "%.0f", ex.amount)) }
+        var editNote by remember(ex) { mutableStateOf(ex.note ?: "") }
+
+        AlertDialog(
+            onDismissRequest = { expenseToEdit = null },
+            title = { Text("खर्च बदला", fontWeight = FontWeight.Bold) },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    OutlinedTextField(
+                        value = editAmountText,
+                        onValueChange = { editAmountText = it },
+                        label = { Text("रक्कम (₹) *") },
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                    OutlinedTextField(
+                        value = editCategory,
+                        onValueChange = { editCategory = it },
+                        label = { Text("खर्च प्रकार") },
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                    OutlinedTextField(
+                        value = editNote,
+                        onValueChange = { editNote = it },
+                        label = { Text("नोंद / टीप") },
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                }
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        val amt = editAmountText.toDoubleOrNull() ?: 0.0
+                        if (amt > 0) {
+                            viewModel.updateExpense(
+                                id = ex.id,
+                                category = editCategory.trim(),
+                                amount = amt,
+                                paymentMethod = ex.paymentMethod,
+                                note = editNote.ifBlank { null }
+                            ) { success ->
+                                if (success) {
+                                    android.widget.Toast.makeText(context, "खर्च अपडेट केला", android.widget.Toast.LENGTH_SHORT).show()
+                                }
+                            }
+                            expenseToEdit = null
+                        }
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = DeepEmerald)
+                ) {
+                    Text("बदल सेव्ह करा")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { expenseToEdit = null }) {
+                    Text("रद्द करा")
+                }
+            }
+        )
+    }
+
+    // Delete Expense Confirmation Dialog
+    expenseToDelete?.let { ex ->
+        AlertDialog(
+            onDismissRequest = { expenseToDelete = null },
+            title = { Text("खर्च ट्रॅशमध्ये हलवायचा का?", fontWeight = FontWeight.Bold, color = BoutiqueError) },
+            text = { Text("आपण '${ex.category} - ${CurrencyFormatter.format(ex.amount)}' हा खर्च ट्रॅशमध्ये हलवू इच्छिता का? आवश्यक असल्यास ट्रॅशमधून तो रिस्टोअर करता येईल.") },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        viewModel.deleteExpense(ex.id) {
+                            android.widget.Toast.makeText(context, "खर्च ट्रॅशमध्ये हलवला", android.widget.Toast.LENGTH_SHORT).show()
+                        }
+                        expenseToDelete = null
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = BoutiqueError)
+                ) {
+                    Text("ट्रॅशमध्ये हलवा")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { expenseToDelete = null }) {
+                    Text("रद्द करा")
+                }
+            }
+        )
     }
 
     if (showAddDialog) {

@@ -54,6 +54,9 @@ class TrashBinViewModel(
     private val _payments = MutableStateFlow<List<TrashedItem>>(emptyList())
     val payments: StateFlow<List<TrashedItem>> = _payments
 
+    private val _expenses = MutableStateFlow<List<TrashedItem>>(emptyList())
+    val expenses: StateFlow<List<TrashedItem>> = _expenses
+
     val selectedTab = MutableStateFlow(0)
     val selectedDocIds = MutableStateFlow<Set<String>>(emptySet())
 
@@ -81,6 +84,11 @@ class TrashBinViewModel(
         viewModelScope.launch {
             trashRepository.observeTrashedPayments().collectLatest {
                 _payments.value = it
+            }
+        }
+        viewModelScope.launch {
+            trashRepository.observeTrashedExpenses().collectLatest {
+                _expenses.value = it
             }
         }
     }
@@ -275,6 +283,7 @@ fun TrashBinScreen(
     val customers by viewModel.customers.collectAsState()
     val bills by viewModel.bills.collectAsState()
     val payments by viewModel.payments.collectAsState()
+    val expenses by viewModel.expenses.collectAsState()
 
     val currentTab by viewModel.selectedTab.collectAsState()
     val selectedDocIds by viewModel.selectedDocIds.collectAsState()
@@ -287,21 +296,23 @@ fun TrashBinScreen(
         0 -> products
         1 -> customers
         2 -> bills
-        else -> payments
+        3 -> payments
+        else -> expenses
     }
 
     val tabTitles = listOf(
         "प्रॉडक्ट्स (${products.size})",
         "कस्टमर्स (${customers.size})",
         "बिले (${bills.size})",
-        "पेमेंट्स (${payments.size})"
+        "पेमेंट्स (${payments.size})",
+        "खर्च (${expenses.size})"
     )
 
     if (showEmptyAllDialog) {
         AlertDialog(
             onDismissRequest = { showEmptyAllDialog = false },
             title = { Text("कचरा पेटी (Trash) रिकामी करायची का?", fontWeight = FontWeight.Bold, color = BoutiqueError) },
-            text = { Text("आपण कचरा पेटीतील सर्व ${products.size + customers.size + bills.size + payments.size} नोंदी कायमच्या डिलीट करू इच्छिता का? हे पूर्ववत करता येणार नाही.") },
+            text = { Text("आपण कचरा पेटीतील सर्व ${products.size + customers.size + bills.size + payments.size + expenses.size} नोंदी कायमच्या डिलीट करू इच्छिता का? हे पूर्ववत करता येणार नाही.") },
             confirmButton = {
                 Button(
                     onClick = {

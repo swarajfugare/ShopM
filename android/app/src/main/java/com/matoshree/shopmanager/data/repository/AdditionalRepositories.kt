@@ -35,6 +35,16 @@ class ExpenseRepository(
         )
     }
 
+    suspend fun updateExpense(
+        id: Long,
+        category: String,
+        amount: Double,
+        paymentMethod: PaymentMethod,
+        note: String?
+    ): Boolean {
+        return firestoreRepo.updateExpense(id, category, amount, paymentMethod, note)
+    }
+
     suspend fun deleteExpense(id: Long) {
         firestoreRepo.deleteExpense(id)
     }
