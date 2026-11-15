@@ -930,9 +930,69 @@ class CustomerRepository(
     suspend fun unTrashCustomerIfAccidental(name: String) {
         try {
             firestoreRepo.unTrashCustomerIfAccidental(name)
-            database?.customerDao()?.unarchiveCustomerByName(name)
+            restoreCustomerFromTrash(0L, "", "", name)
         } catch (e: Exception) {
             Log.w("CustomerRepo", "unTrashCustomerIfAccidental note: ${e.message}")
+        }
+    }
+
+    suspend fun restoreCustomerFromTrash(customerId: Long, mobile: String, gid: String = "", name: String = "") {
+        val cleanMobile = com.matoshree.shopmanager.utils.PhoneUtils.clean10DigitMobileInput(mobile)
+        if (database != null) {
+            try {
+                // 1. Unarchive customer
+                if (customerId > 0L) {
+                    database.customerDao().unarchiveCustomer(customerId)
+                }
+                if (cleanMobile.length == 10) {
+                    database.customerDao().unarchiveCustomerByMobile(cleanMobile, cleanMobile)
+                }
+                if (gid.isNotBlank()) {
+                    database.customerDao().unarchiveCustomerByGid(gid)
+                }
+                if (name.isNotBlank()) {
+                    database.customerDao().unarchiveCustomerByName(name)
+                }
+
+                // 2. Unvoid cascaded bills and re-deduct product stock in Room
+                val bills = database.billDao().getBillsByCustomer(customerId, cleanMobile)
+                var totalSpend = 0.0
+                var billCount = 0
+
+                bills.forEach { bWithItems ->
+                    if (bWithItems.bill.isVoided && bWithItems.bill.voidReason?.startsWith("CUSTOMER_DELETE") == true) {
+                        bWithItems.items.forEach { item ->
+                            item.productId?.let { pid ->
+                                database.productDao().recordSaleStockDeduction(pid, item.quantity)
+                            }
+                        }
+                        val originalStatus = when {
+                            bWithItems.bill.pendingAmount <= 0.01 -> "PAID"
+                            bWithItems.bill.paidAmount > 0.01 -> "PARTIAL"
+                            else -> "PENDING"
+                        }
+                        database.billDao().unvoidBill(bWithItems.bill.id, originalStatus)
+                        totalSpend += bWithItems.bill.finalAmount
+                        billCount++
+                    }
+                }
+
+                if (billCount > 0) {
+                    val targetCust = if (customerId > 0L) database.customerDao().getCustomerById(customerId)
+                        else if (cleanMobile.length == 10) database.customerDao().getCustomerByMobile(cleanMobile)
+                        else null
+                    if (targetCust != null) {
+                        database.customerDao().updateCustomer(
+                            targetCust.copy(
+                                totalBills = targetCust.totalBills + billCount,
+                                lifetimeSpend = targetCust.lifetimeSpend + totalSpend
+                            )
+                        )
+                    }
+                }
+            } catch (e: Exception) {
+                Log.w("CustomerRepo", "Local restoreCustomerFromTrash note: ${e.message}")
+            }
         }
     }
 }

@@ -123,6 +123,9 @@ interface BillDao {
     @Query("UPDATE bills SET isVoided = 1, paymentStatus = 'VOID', voidReason = :reason WHERE id = :id")
     suspend fun voidBill(id: Long, reason: String)
 
+    @Query("UPDATE bills SET isVoided = 0, paymentStatus = :status, voidReason = NULL WHERE id = :id")
+    suspend fun unvoidBill(id: Long, status: String)
+
     @Query("UPDATE bills SET syncStatus = :status, serverId = :serverId WHERE transactionUuid = :uuid")
     suspend fun updateSyncStatus(uuid: String, status: SyncStatus, serverId: Long?)
 

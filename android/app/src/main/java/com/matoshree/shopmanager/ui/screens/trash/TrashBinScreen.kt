@@ -113,10 +113,31 @@ class TrashBinViewModel(
         selectedDocIds.value = emptySet()
     }
 
-    fun restoreItem(item: TrashedItem, onComplete: () -> Unit) {
+    fun restoreItem(item: TrashedItem, context: Context? = null, onComplete: () -> Unit) {
         viewModelScope.launch {
             try {
                 trashRepository.restoreItem(item)
+                context?.let { ctx ->
+                    try {
+                        val db = com.matoshree.shopmanager.data.local.AppDatabase.getInstance(ctx)
+                        when (item.entityType) {
+                            "CUSTOMER" -> {
+                                val customerRepo = com.matoshree.shopmanager.data.repository.CustomerRepository(
+                                    database = db,
+                                    firestoreRepo = com.matoshree.shopmanager.data.firebase.FirestoreCustomerRepository()
+                                )
+                                customerRepo.restoreCustomerFromTrash(
+                                    customerId = item.legacyId,
+                                    mobile = item.extraIdentifier,
+                                    gid = item.gid,
+                                    name = item.title
+                                )
+                            }
+                        }
+                    } catch (e: Exception) {
+                        Log.w("TrashViewModel", "Room customer restore note: ${e.message}")
+                    }
+                }
                 onComplete()
             } catch (e: Exception) {
                 Log.w("TrashViewModel", "Restore error: ${e.message}")
@@ -190,7 +211,7 @@ class TrashBinViewModel(
         }
     }
 
-    fun restoreSelected(currentList: List<TrashedItem>, onComplete: (Int) -> Unit) {
+    fun restoreSelected(currentList: List<TrashedItem>, context: Context? = null, onComplete: (Int) -> Unit) {
         val targetDocs = selectedDocIds.value
         val itemsToRestore = currentList.filter { targetDocs.contains(it.docId) }
         viewModelScope.launch {
@@ -198,6 +219,23 @@ class TrashBinViewModel(
             itemsToRestore.forEach { item ->
                 try {
                     trashRepository.restoreItem(item)
+                    context?.let { ctx ->
+                        try {
+                            val db = com.matoshree.shopmanager.data.local.AppDatabase.getInstance(ctx)
+                            if (item.entityType == "CUSTOMER") {
+                                val customerRepo = com.matoshree.shopmanager.data.repository.CustomerRepository(
+                                    database = db,
+                                    firestoreRepo = com.matoshree.shopmanager.data.firebase.FirestoreCustomerRepository()
+                                )
+                                customerRepo.restoreCustomerFromTrash(
+                                    customerId = item.legacyId,
+                                    mobile = item.extraIdentifier,
+                                    gid = item.gid,
+                                    name = item.title
+                                )
+                            }
+                        } catch (_: Exception) {}
+                    }
                     count++
                 } catch (e: Exception) {}
             }
@@ -366,7 +404,7 @@ fun TrashBinScreen(
             confirmButton = {
                 Button(
                     onClick = {
-                        viewModel.restoreItem(item) {
+                        viewModel.restoreItem(item, context) {
                             Toast.makeText(context, "'${item.title}' पूर्ववत करण्यात आले", Toast.LENGTH_SHORT).show()
                             itemToRestore = null
                         }
@@ -425,7 +463,7 @@ fun TrashBinScreen(
                                 )
                             }
                             IconButton(onClick = {
-                                viewModel.restoreSelected(currentList) { count ->
+                                viewModel.restoreSelected(currentList, context) { count ->
                                     Toast.makeText(context, "$count नोंद(ी) पूर्ववत करण्यात आल्या", Toast.LENGTH_SHORT).show()
                                 }
                             }) {
