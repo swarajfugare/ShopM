@@ -276,6 +276,8 @@ data class BillDto(
     var status: String = "COMPLETED", // COMPLETED, VOIDED, TRASH
     var deletedAt: Long? = null,
     var voidReason: String? = null,
+    var cascadedBy: String? = null,
+    var linkedCustomerGid: String? = null,
     var note: String? = null,
     var billDate: String = "",
     var shopNameSnapshot: String = "Matoshree Collection",
@@ -341,6 +343,8 @@ data class BillDto(
             syncStatus = SyncStatus.SYNCED,
             isVoided = status == "VOIDED" || status == "TRASH",
             voidReason = voidReason,
+            cascadedBy = cascadedBy,
+            linkedCustomerGid = linkedCustomerGid,
             needsReview = needsReview,
             items = items.map { it.toDomain().copy(billGid = effectiveGid) }
         )
@@ -370,6 +374,9 @@ data class UdhariTransactionDto(
     var dueDate: String? = null,
     var note: String? = null,
     var isReversed: Boolean = false,
+    var isDeleted: Boolean = false,
+    var cascadedBy: String? = null,
+    var linkedCustomerGid: String? = null,
     var reversalReason: String? = null,
     var reversedAt: Long? = null,
     var status: String = "ACTIVE", // ACTIVE, TRASH
@@ -410,6 +417,9 @@ data class UdhariTransactionDto(
             reversalReason = reversalReason,
             reversedAt = reversedAt,
             status = status,
+            isDeleted = isDeleted || status == "TRASH",
+            cascadedBy = cascadedBy,
+            linkedCustomerGid = linkedCustomerGid,
             deletedAt = deletedAt,
             createdByDeviceId = createdByDeviceId,
             needsReview = needsReview,
@@ -429,6 +439,8 @@ data class ExpenseDto(
     var paymentMethod: String = "CASH",
     var expenseDate: String = "",
     var note: String? = null,
+    var status: String = "ACTIVE",
+    var deletedAt: Long? = null,
     var createdAt: Long = System.currentTimeMillis(),
     var updatedAt: Long = System.currentTimeMillis()
 ) {

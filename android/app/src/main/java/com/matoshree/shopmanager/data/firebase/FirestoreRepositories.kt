@@ -627,48 +627,52 @@ class FirestoreCustomerRepository {
 
         val allDocs = (snapshot?.documents ?: emptyList()) + (shopSnap?.documents ?: emptyList())
         val cleanMobile = com.matoshree.shopmanager.utils.PhoneUtils.clean10DigitMobileInput(hintMobile)
-        val cleanName = hintName.trim()
 
+        // Identify customer strictly by GID, docId, legacyId or exact 10-digit mobile - NEVER by name!
         val matchingDocs = allDocs.filter { doc ->
             val dto = doc.toObject(CustomerDto::class.java) ?: return@filter false
             val dMobile = com.matoshree.shopmanager.utils.PhoneUtils.clean10DigitMobileInput(dto.mobile)
-            val dName = dto.name.trim()
 
             val mobileMatches = cleanMobile.length == 10 && dMobile == cleanMobile
-            val nameMatches = cleanName.isNotBlank() && dName.equals(cleanName, ignoreCase = true)
             val docIdMatches = doc.id == "cust_$customerId" || doc.id == customerId.toString()
-            val idMatches = dto.legacyId == customerId && (cleanName.isBlank() || nameMatches)
+            val idMatches = customerId > 0 && dto.legacyId == customerId
 
-            mobileMatches || nameMatches || docIdMatches || idMatches
+            mobileMatches || docIdMatches || idMatches
+        }
+
+        if (matchingDocs.isEmpty()) {
+            Log.w(TAG, "No customer found matching id=$customerId, mobile=$cleanMobile. Aborting delete to prevent unintended cascade.")
+            return "Customer not found"
         }
 
         val matchDoc = matchingDocs.firstOrNull()
-        val custMobile = matchDoc?.toObject(CustomerDto::class.java)?.mobile?.ifBlank { hintMobile } ?: hintMobile
-        val custName = matchDoc?.toObject(CustomerDto::class.java)?.name?.trim() ?: cleanName
-        val effectiveCleanMobile = com.matoshree.shopmanager.utils.PhoneUtils.clean10DigitMobileInput(custMobile)
+        val targetCustDto = matchDoc?.toObject(CustomerDto::class.java)
+        val targetCustGid = targetCustDto?.gid?.ifBlank { null } ?: matchDoc?.id ?: (if (customerId > 0) "cust_$customerId" else "")
+        val targetLegacyId = targetCustDto?.legacyId ?: customerId
+        val targetCleanMobile = com.matoshree.shopmanager.utils.PhoneUtils.clean10DigitMobileInput(targetCustDto?.mobile ?: hintMobile)
+        val now = System.currentTimeMillis()
 
         try {
             val batch = FirebaseManager.firestore.batch()
 
-            // 1. Find all bills of this customer across root bills AND shop bills collections
+            // 1. Find all bills of this customer strictly by GID, legacyId, docId, or exact mobile (NO name matching)
             val rootBills = try { FirebaseManager.billsCollection().get().await().documents } catch (_: Exception) { emptyList() }
             val shopBills = try { FirebaseManager.shopBillsCollection().get().await().documents } catch (_: Exception) { emptyList() }
             val allBillDocs = rootBills + shopBills
 
             val billsToDelete = allBillDocs.filter { doc ->
                 val bDto = doc.toObject(BillDto::class.java) ?: return@filter false
-                val idMatch = (customerId > 0 && bDto.legacyCustomerId == customerId) ||
-                        bDto.customerId == "cust_$customerId" ||
-                        bDto.customerId == customerId.toString() ||
-                        (matchDoc != null && bDto.customerId == matchDoc.id)
                 val bMobile = com.matoshree.shopmanager.utils.PhoneUtils.clean10DigitMobileInput(bDto.customerMobile ?: "")
-                val mobileMatch = cleanMobile.length == 10 &&
-                        (bMobile == cleanMobile || (bDto.customerMobile != null && bDto.customerMobile!!.contains(cleanMobile)))
-                val nameMatch = custName.isNotBlank() && bDto.customerName != null && bDto.customerName!!.trim().equals(custName, ignoreCase = true)
-                idMatch || mobileMatch || nameMatch
+
+                val gidMatch = targetCustGid.isNotBlank() && (bDto.customerGid == targetCustGid || bDto.linkedCustomerGid == targetCustGid)
+                val idMatch = (targetLegacyId > 0 && (bDto.legacyCustomerId == targetLegacyId || bDto.customerId == "cust_$targetLegacyId" || bDto.customerId == targetLegacyId.toString())) ||
+                        (matchDoc != null && bDto.customerId == matchDoc.id)
+                val mobileMatch = targetCleanMobile.length == 10 && bMobile == targetCleanMobile
+
+                gidMatch || idMatch || mobileMatch
             }
 
-            // 2. For each active bill, restore product stock in Firestore
+            // 2. For each active bill, restore product stock in Firestore, then SOFT-DELETE bill to TRASH
             billsToDelete.forEach { billDoc ->
                 val bDto = billDoc.toObject(BillDto::class.java)
                 val isVoid = bDto?.status.equals("VOIDED", ignoreCase = true) ||
@@ -685,28 +689,48 @@ class FirestoreCustomerRepository {
                                 mapOf(
                                     "currentStock" to FieldValue.increment(qty),
                                     "totalSold" to FieldValue.increment(-qty),
-                                    "updatedAt" to System.currentTimeMillis()
+                                    "updatedAt" to now
                                 ),
                                 com.google.firebase.firestore.SetOptions.merge()
                             )
                         }
                     }
                 }
-                // Delete bill so it's completely cleared
-                batch.delete(billDoc.reference)
+                // Soft-delete bill with cascade metadata for full Trash restoration
+                batch.update(
+                    billDoc.reference,
+                    mapOf(
+                        "status" to "TRASH",
+                        "cascadedBy" to "CUSTOMER_DELETE",
+                        "linkedCustomerGid" to targetCustGid,
+                        "deletedAt" to now,
+                        "updatedAt" to now
+                    )
+                )
             }
 
-            // 3. Find and delete all udhari transactions for this customer
+            // 3. Find and SOFT-DELETE all udhari transactions strictly by customer identity (NO name matching)
             val txSnap = FirebaseManager.udhariTransactionsCollection().get().await()
             txSnap.documents.forEach { txDoc ->
                 val txDto = txDoc.toObject(UdhariTransactionDto::class.java)
-                val idMatch = (customerId > 0 && txDto?.customerId == customerId) || (matchDoc != null && txDto?.customerId == (matchDoc.id.hashCode().toLong() and 0x7FFFFFFFFFFFFFFFL))
                 val tMobile = com.matoshree.shopmanager.utils.PhoneUtils.clean10DigitMobileInput(txDto?.customerMobile ?: "")
-                val mobileMatch = cleanMobile.length == 10 &&
-                        (tMobile == cleanMobile || (txDto?.customerMobile != null && txDto.customerMobile.contains(cleanMobile)))
-                val nameMatch = custName.isNotBlank() && txDto?.customerName != null && txDto.customerName.trim().equals(custName, ignoreCase = true)
-                if (idMatch || mobileMatch || nameMatch) {
-                    batch.delete(txDoc.reference)
+
+                val gidMatch = targetCustGid.isNotBlank() && (txDto?.customerGid == targetCustGid || txDto?.linkedCustomerGid == targetCustGid)
+                val idMatch = (targetLegacyId > 0 && txDto?.customerId == targetLegacyId) || (matchDoc != null && txDto?.customerId == (matchDoc.id.hashCode().toLong() and 0x7FFFFFFFFFFFFFFFL))
+                val mobileMatch = targetCleanMobile.length == 10 && tMobile == targetCleanMobile
+
+                if (gidMatch || idMatch || mobileMatch) {
+                    batch.update(
+                        txDoc.reference,
+                        mapOf(
+                            "status" to "TRASH",
+                            "isDeleted" to true,
+                            "cascadedBy" to "CUSTOMER_DELETE",
+                            "linkedCustomerGid" to targetCustGid,
+                            "deletedAt" to now,
+                            "updatedAt" to now
+                        )
+                    )
                 }
             }
 
@@ -718,8 +742,8 @@ class FirestoreCustomerRepository {
                     "lifetimeSpend" to 0.0,
                     "totalBills" to 0,
                     "outstandingAmount" to 0.0,
-                    "deletedAt" to System.currentTimeMillis(),
-                    "updatedAt" to System.currentTimeMillis()
+                    "deletedAt" to now,
+                    "updatedAt" to now
                 )
                 matchingDocs.forEach { doc ->
                     batch.update(doc.reference, updateData)
@@ -727,7 +751,7 @@ class FirestoreCustomerRepository {
             }
 
             batch.commit().await()
-            Log.d(TAG, "FIRESTORE_WRITE entity=CUSTOMER cascade_delete_success bills_deleted=${billsToDelete.size} custId=$customerId")
+            Log.d(TAG, "FIRESTORE_WRITE entity=CUSTOMER cascade_delete_success bills_soft_deleted=${billsToDelete.size} custId=$customerId")
         } catch (e: Exception) {
             Log.e(TAG, "FIRESTORE_WRITE entity=CUSTOMER cascade_delete_failed: ${e.message}", e)
         }
@@ -751,8 +775,7 @@ class FirestoreCustomerRepository {
                 val idMatch = (customerId > 0 && (bDto.legacyCustomerId == customerId || bDto.customerId == "cust_$customerId" || bDto.customerId == customerId.toString()))
                 val bMobile = com.matoshree.shopmanager.utils.PhoneUtils.clean10DigitMobileInput(bDto.customerMobile ?: "")
                 val mobileMatch = cleanMobile.length == 10 && (bMobile == cleanMobile || (bDto.customerMobile != null && bDto.customerMobile!!.contains(cleanMobile)))
-                val nameMatch = cleanName.isNotBlank() && bDto.customerName != null && bDto.customerName!!.trim().equals(cleanName, ignoreCase = true)
-                if (idMatch || mobileMatch || nameMatch) {
+                if (idMatch || mobileMatch) {
                     val isVoid = bDto.status.equals("VOIDED", ignoreCase = true) || bDto.status.equals("TRASH", ignoreCase = true) || bDto.paymentStatus.equals("VOID", ignoreCase = true)
                     if (!isVoid) {
                         bDto.items?.forEach { item ->
@@ -784,8 +807,7 @@ class FirestoreCustomerRepository {
                 val idMatch = customerId > 0 && txDto?.customerId == customerId
                 val tMobile = com.matoshree.shopmanager.utils.PhoneUtils.clean10DigitMobileInput(txDto?.customerMobile ?: "")
                 val mobileMatch = cleanMobile.length == 10 && (tMobile == cleanMobile || (txDto?.customerMobile != null && txDto.customerMobile.contains(cleanMobile)))
-                val nameMatch = cleanName.isNotBlank() && txDto?.customerName != null && txDto.customerName.trim().equals(cleanName, ignoreCase = true)
-                if (idMatch || mobileMatch || nameMatch) {
+                if (idMatch || mobileMatch) {
                     batch.delete(txDoc.reference)
                     txsDeleted++
                 }
@@ -1172,6 +1194,32 @@ class FirestoreProductRepository {
         awaitClose { listener.remove() }
     }
 
+
+    suspend fun updateProductPrice(productId: Long, sellingPrice: Double, costPrice: Double?): Boolean {
+        return try {
+            FirebaseManager.ensureAuthenticated()
+            val allProducts = searchProducts("")
+            val target = allProducts.find { it.id == productId }
+            val docId = if (target != null && target.id > 0) "prod_${target.id}" else "prod_$productId"
+            val now = System.currentTimeMillis()
+            val updateMap = mutableMapOf<String, Any>(
+                "sellingPrice" to sellingPrice,
+                "updatedAt" to now
+            )
+            if (costPrice != null) {
+                updateMap["costPrice"] = costPrice
+            }
+            FirebaseManager.productsCollection().document(docId).set(updateMap, com.google.firebase.firestore.SetOptions.merge()).await()
+            try {
+                FirebaseManager.shopProductsCollection().document(docId).set(updateMap, com.google.firebase.firestore.SetOptions.merge()).await()
+            } catch (_: Exception) {}
+            Log.d(TAG, "FIRESTORE_WRITE entity=PRODUCT path=products/$docId result=SUCCESS (PRICE_UPDATED)")
+            true
+        } catch (e: Exception) {
+            Log.e(TAG, "updateProductPrice error: ${e.message}", e)
+            false
+        }
+    }
 
     suspend fun saveCategory(name: String, description: String? = null): String {
         val docId = "cat_${System.currentTimeMillis()}_${UUID.randomUUID().toString().take(4)}"
@@ -2109,7 +2157,8 @@ class FirestoreExpenseRepository {
                 }
                 if (snapshot != null) {
                     val list = snapshot.documents.mapNotNull { doc ->
-                        doc.toObject(ExpenseDto::class.java)?.toDomain()
+                        val dto = doc.toObject(ExpenseDto::class.java)
+                        if (dto != null && dto.status != "TRASH") dto.toDomain() else null
                     }
                     trySend(list)
                 }
@@ -2142,6 +2191,33 @@ class FirestoreExpenseRepository {
         return legacyId
     }
 
+    suspend fun updateExpense(id: Long, category: String, amount: Double, paymentMethod: PaymentMethod, note: String?): Boolean {
+        FirebaseManager.ensureAuthenticated()
+        val snapshot = FirebaseManager.expensesCollection().get().await()
+        val matchDoc = snapshot.documents.find {
+            val dto = it.toObject(ExpenseDto::class.java)
+            dto?.legacyId == id || (it.id.hashCode().toLong() and 0x7FFFFFFFFFFFFFFFL) == id
+        } ?: return false
+        val docPath = "expenses/${matchDoc.id}"
+        return try {
+            val now = System.currentTimeMillis()
+            matchDoc.reference.update(
+                mapOf(
+                    "category" to category,
+                    "amount" to amount,
+                    "paymentMethod" to paymentMethod.name,
+                    "note" to note,
+                    "updatedAt" to now
+                )
+            ).await()
+            Log.d(TAG, "FIRESTORE_WRITE entity=EXPENSE path=$docPath result=SUCCESS (UPDATED)")
+            true
+        } catch (e: Exception) {
+            Log.e(TAG, "FIRESTORE_WRITE entity=EXPENSE path=$docPath result=FAILURE code=${e.javaClass.simpleName}", e)
+            false
+        }
+    }
+
     suspend fun deleteExpense(id: Long) {
         FirebaseManager.ensureAuthenticated()
         val snapshot = FirebaseManager.expensesCollection().get().await()
@@ -2152,8 +2228,15 @@ class FirestoreExpenseRepository {
         if (matchDoc != null) {
             val docPath = "expenses/${matchDoc.id}"
             try {
-                FirebaseManager.expensesCollection().document(matchDoc.id).delete().await()
-                Log.d(TAG, "FIRESTORE_WRITE entity=EXPENSE path=$docPath result=SUCCESS (DELETED)")
+                val now = System.currentTimeMillis()
+                matchDoc.reference.update(
+                    mapOf(
+                        "status" to "TRASH",
+                        "deletedAt" to now,
+                        "updatedAt" to now
+                    )
+                ).await()
+                Log.d(TAG, "FIRESTORE_WRITE entity=EXPENSE path=$docPath result=SUCCESS (TRASHED)")
             } catch (e: Exception) {
                 Log.e(TAG, "FIRESTORE_WRITE entity=EXPENSE path=$docPath result=FAILURE code=${e.javaClass.simpleName}", e)
             }

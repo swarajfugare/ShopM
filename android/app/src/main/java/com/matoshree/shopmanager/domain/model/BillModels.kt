@@ -102,6 +102,8 @@ data class Bill(
     val syncStatus: SyncStatus = SyncStatus.SYNCED,
     val isVoided: Boolean = false,
     val voidReason: String? = null,
+    val cascadedBy: String? = null,
+    val linkedCustomerGid: String? = null,
     val items: List<BillItem> = emptyList(),
     val needsReview: Boolean = false
 ) {

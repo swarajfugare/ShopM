@@ -148,19 +148,61 @@ class FirestoreTrashRepository {
                     val daysRemaining = (((SEVEN_DAYS_MS - elapsed) / (24L * 60L * 60L * 1000L)) + 1).toInt().coerceIn(1, 7)
                     val idNum = doc.id.hashCode().toLong() and 0x7FFFFFFFFFFFFFFFL
 
-                    val label = if (dto.type == "PURCHASE_CREDIT") "मॅन्युअल उधारी (+)" else "उधारी जमा (${dto.paymentMethod})"
+                    val isManual = dto.type == "PURCHASE_CREDIT" || dto.kind.equals("MANUAL", ignoreCase = true)
+                    val label = if (isManual) "जुनी उधारी" else "उधारी जमा (${dto.paymentMethod})"
+                    val displayCustName = dto.customerName.ifBlank { "ग्राहक" }
+                    val itemTitle = if (isManual) {
+                        "जुनी उधारी - $displayCustName - ${CurrencyFormatter.format(dto.amount)}"
+                    } else {
+                        "$label • ${CurrencyFormatter.format(dto.amount)}"
+                    }
 
                     TrashedItem(
                         docId = doc.id,
                         gid = dto.gid.ifBlank { doc.id },
                         legacyId = idNum,
                         entityType = "PAYMENT",
-                        title = "$label • ${CurrencyFormatter.format(dto.amount)}",
+                        title = itemTitle,
                         subtitle = "${dto.customerName.ifBlank { "ग्राहक" }} • ${dto.customerMobile.ifBlank { "No Mobile" }}",
                         amount = dto.amount,
                         deletedAt = dAt,
                         daysLeft = daysRemaining,
                         extraIdentifier = dto.transactionUuid.ifBlank { doc.id }
+                    )
+                }?.sortedByDescending { it.deletedAt } ?: emptyList()
+
+                trySend(list)
+            }
+        awaitClose { listener.remove() }
+    }
+
+    fun observeTrashedExpenses(): Flow<List<TrashedItem>> = callbackFlow {
+        val listener = FirebaseManager.expensesCollection()
+            .whereEqualTo("status", "TRASH")
+            .addSnapshotListener { snapshot, error ->
+                if (error != null) {
+                    Log.w(TAG, "Trash expenses error: ${error.message}")
+                    return@addSnapshotListener
+                }
+                val now = System.currentTimeMillis()
+                val list = snapshot?.documents?.mapNotNull { doc ->
+                    val dto = doc.toObject(ExpenseDto::class.java)?.apply { id = doc.id } ?: return@mapNotNull null
+                    val dAt = dto.deletedAt ?: dto.updatedAt
+                    val elapsed = now - dAt
+                    val daysRemaining = (((SEVEN_DAYS_MS - elapsed) / (24L * 60L * 60L * 1000L)) + 1).toInt().coerceIn(1, 7)
+                    val idNum = dto.legacyId ?: (doc.id.hashCode().toLong() and 0x7FFFFFFFFFFFFFFFL)
+
+                    TrashedItem(
+                        docId = doc.id,
+                        gid = dto.gid.ifBlank { doc.id },
+                        legacyId = idNum,
+                        entityType = "EXPENSE",
+                        title = "${dto.category} • ${CurrencyFormatter.format(dto.amount)}",
+                        subtitle = "${dto.expenseDate} • ${dto.paymentMethod} ${if (!dto.note.isNullOrBlank()) "• ${dto.note}" else ""}",
+                        amount = dto.amount,
+                        deletedAt = dAt,
+                        daysLeft = daysRemaining,
+                        extraIdentifier = dto.category
                     )
                 }?.sortedByDescending { it.deletedAt } ?: emptyList()
 
@@ -183,14 +225,114 @@ class FirestoreTrashRepository {
                 ).await()
             }
             "CUSTOMER" -> {
-                FirebaseManager.customersCollection().document(item.docId).update(
+                val now = System.currentTimeMillis()
+                val custRef = FirebaseManager.customersCollection().document(item.docId)
+                val cDoc = try { custRef.get().await() } catch (_: Exception) { null }
+                val cDto = cDoc?.toObject(CustomerDto::class.java)
+                val custGid = cDto?.gid?.ifBlank { null } ?: item.gid.ifBlank { item.docId }
+                val custLegacyId = cDto?.legacyId ?: item.legacyId
+                val cleanMob = com.matoshree.shopmanager.utils.PhoneUtils.clean10DigitMobileInput(cDto?.mobile ?: item.extraIdentifier)
+
+                custRef.update(
                     mapOf(
                         "status" to "ACTIVE",
                         "isActive" to true,
                         "deletedAt" to null,
-                        "updatedAt" to System.currentTimeMillis()
+                        "updatedAt" to now
                     )
                 ).await()
+
+                try {
+                    FirebaseManager.shopCustomersCollection().document(item.docId).update(
+                        mapOf(
+                            "status" to "ACTIVE",
+                            "isActive" to true,
+                            "deletedAt" to null,
+                            "updatedAt" to now
+                        )
+                    ).await()
+                } catch (_: Exception) {}
+
+                // Reactivate cascaded bills and reverse stock restore
+                try {
+                    val rootBills = try { FirebaseManager.billsCollection().whereEqualTo("cascadedBy", "CUSTOMER_DELETE").get().await().documents } catch (_: Exception) { emptyList() }
+                    val shopBills = try { FirebaseManager.shopBillsCollection().whereEqualTo("cascadedBy", "CUSTOMER_DELETE").get().await().documents } catch (_: Exception) { emptyList() }
+                    val allCascadedBills = (rootBills + shopBills).distinctBy { it.id }
+
+                    val matchedBills = allCascadedBills.filter { doc ->
+                        val b = doc.toObject(BillDto::class.java) ?: return@filter false
+                        val bMob = com.matoshree.shopmanager.utils.PhoneUtils.clean10DigitMobileInput(b.customerMobile ?: "")
+                        val gidMatch = b.linkedCustomerGid == custGid || b.customerGid == custGid
+                        val idMatch = (custLegacyId > 0 && b.legacyCustomerId == custLegacyId) || b.customerId == item.docId || b.customerId == "cust_$custLegacyId"
+                        val mobMatch = cleanMob.length == 10 && bMob == cleanMob
+                        gidMatch || idMatch || mobMatch
+                    }
+
+                    if (matchedBills.isNotEmpty()) {
+                        val batch = FirebaseManager.firestore.batch()
+                        matchedBills.forEach { billDoc ->
+                            val b = billDoc.toObject(BillDto::class.java)
+                            // Reverse stock restore: deduct stock again
+                            b?.items?.forEach { itm ->
+                                val pId = itm.legacyProductId ?: itm.productId?.removePrefix("prod_")?.toLongOrNull()
+                                if (pId != null && pId > 0 && itm.quantity > 0) {
+                                    val prodRef = FirebaseManager.productsCollection().document("prod_$pId")
+                                    val qty = itm.quantity.toLong()
+                                    batch.set(
+                                        prodRef,
+                                        mapOf(
+                                            "currentStock" to FieldValue.increment(-qty),
+                                            "totalSold" to FieldValue.increment(qty),
+                                            "updatedAt" to now
+                                        ),
+                                        com.google.firebase.firestore.SetOptions.merge()
+                                    )
+                                }
+                            }
+                            batch.update(billDoc.reference, mapOf(
+                                "status" to "COMPLETED",
+                                "cascadedBy" to null,
+                                "linkedCustomerGid" to null,
+                                "deletedAt" to null,
+                                "updatedAt" to now
+                            ))
+                        }
+                        batch.commit().await()
+                    }
+                } catch (e: Exception) {
+                    Log.w(TAG, "Restore customer cascaded bills error: ${e.message}")
+                }
+
+                // Reactivate cascaded udhari transactions
+                try {
+                    val txSnap = FirebaseManager.udhariTransactionsCollection()
+                        .whereEqualTo("cascadedBy", "CUSTOMER_DELETE")
+                        .get().await()
+                    val matchedTxs = txSnap.documents.filter { doc ->
+                        val tx = doc.toObject(UdhariTransactionDto::class.java) ?: return@filter false
+                        val tMob = com.matoshree.shopmanager.utils.PhoneUtils.clean10DigitMobileInput(tx.customerMobile)
+                        val gidMatch = tx.linkedCustomerGid == custGid || tx.customerGid == custGid
+                        val idMatch = (custLegacyId > 0 && tx.customerId == custLegacyId)
+                        val mobMatch = cleanMob.length == 10 && tMob == cleanMob
+                        gidMatch || idMatch || mobMatch
+                    }
+                    if (matchedTxs.isNotEmpty()) {
+                        val batch = FirebaseManager.firestore.batch()
+                        matchedTxs.forEach { txDoc ->
+                            batch.update(txDoc.reference, mapOf(
+                                "status" to "ACTIVE",
+                                "isDeleted" to false,
+                                "cascadedBy" to null,
+                                "linkedCustomerGid" to null,
+                                "deletedAt" to null,
+                                "updatedAt" to now
+                            ))
+                        }
+                        batch.commit().await()
+                    }
+                } catch (e: Exception) {
+                    Log.w(TAG, "Restore customer cascaded transactions error: ${e.message}")
+                }
             }
             "BILL" -> {
                 FirebaseManager.billsCollection().document(item.docId).update(
@@ -233,6 +375,7 @@ class FirestoreTrashRepository {
                 FirebaseManager.udhariTransactionsCollection().document(item.docId).update(
                     mapOf(
                         "status" to "ACTIVE",
+                        "isDeleted" to false,
                         "isReversed" to false,
                         "deletedAt" to null,
                         "reversalReason" to null,
@@ -251,6 +394,15 @@ class FirestoreTrashRepository {
                 } catch (e: Exception) {
                     Log.w(TAG, "Restore payment balance adjust note: ${e.message}")
                 }
+            }
+            "EXPENSE" -> {
+                FirebaseManager.expensesCollection().document(item.docId).update(
+                    mapOf(
+                        "status" to "ACTIVE",
+                        "deletedAt" to null,
+                        "updatedAt" to System.currentTimeMillis()
+                    )
+                ).await()
             }
         }
     }
@@ -300,6 +452,7 @@ class FirestoreTrashRepository {
             }
             "BILL" -> FirebaseManager.billsCollection().document(item.docId).delete().await()
             "PAYMENT" -> FirebaseManager.udhariTransactionsCollection().document(item.docId).delete().await()
+            "EXPENSE" -> FirebaseManager.expensesCollection().document(item.docId).delete().await()
         }
     }
 
@@ -322,6 +475,10 @@ class FirestoreTrashRepository {
         if (entityType == null || entityType == "PAYMENT") {
             val paySnap = FirebaseManager.udhariTransactionsCollection().whereEqualTo("status", "TRASH").get().await()
             paySnap.documents.forEach { batch.delete(it.reference) }
+        }
+        if (entityType == null || entityType == "EXPENSE") {
+            val expSnap = FirebaseManager.expensesCollection().whereEqualTo("status", "TRASH").get().await()
+            expSnap.documents.forEach { batch.delete(it.reference) }
         }
 
         batch.commit().await()
@@ -367,6 +524,16 @@ class FirestoreTrashRepository {
             // 4. Purge expired payments
             val pays = FirebaseManager.udhariTransactionsCollection().whereEqualTo("status", "TRASH").get().await()
             pays.documents.forEach { doc ->
+                val dAt = doc.getLong("deletedAt") ?: doc.getLong("updatedAt")
+                if (dAt != null && dAt > 0L && dAt < purgeThreshold) {
+                    batch.delete(doc.reference)
+                    count++
+                }
+            }
+
+            // 5. Purge expired expenses
+            val exps = FirebaseManager.expensesCollection().whereEqualTo("status", "TRASH").get().await()
+            exps.documents.forEach { doc ->
                 val dAt = doc.getLong("deletedAt") ?: doc.getLong("updatedAt")
                 if (dAt != null && dAt > 0L && dAt < purgeThreshold) {
                     batch.delete(doc.reference)

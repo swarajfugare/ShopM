@@ -849,12 +849,10 @@ class CustomerRepository(
                             }
                         }
                     }
-                    database.billDao().deleteBillItems(bWithItems.bill.id)
+                    database.billDao().voidBill(bWithItems.bill.id, "CUSTOMER_DELETE")
                 }
-                database.billDao().deleteBillsByCustomer(targetId, cleanMobile)
                 database.customerDao().resetCustomerStats(targetId)
                 database.customerDao().archiveCustomer(targetId)
-                database.customerDao().hardDeleteCustomer(targetId)
             } catch (e: Exception) {
                 Log.w("CustomerRepo", "Local cascade delete note: ${e.message}")
             }
@@ -1054,6 +1052,17 @@ class ProductRepository(
             Log.w("ProductRepo", "Cloud product save pending (offline/rules): ${e.message}")
             return if (localId > 0) localId else System.currentTimeMillis()
         }
+    }
+
+    suspend fun updateProductPrice(productId: Long, sellingPrice: Double, costPrice: Double?): Boolean {
+        if (database != null) {
+            try {
+                database.productDao().updateProductPrices(productId, sellingPrice, costPrice)
+            } catch (e: Exception) {
+                Log.w("ProductRepo", "Local product price update note: ${e.message}")
+            }
+        }
+        return firestoreRepo.updateProductPrice(productId, sellingPrice, costPrice)
     }
 
     suspend fun saveCategory(name: String, description: String? = null): Long {
