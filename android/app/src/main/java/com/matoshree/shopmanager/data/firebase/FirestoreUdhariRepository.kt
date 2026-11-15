@@ -417,11 +417,10 @@ class FirestoreUdhariRepository(
             gateway.ensureAuthenticated()
 
             val allTxs = gateway.getTransactionDocs()
-            val candidates = mutableListOf<String>()
+            val candidates = mutableSetOf<String>()
             candidates.add(transactionId)
-            if (transactionId.startsWith("pay_")) {
-                candidates.add(transactionId.removePrefix("pay_"))
-            }
+            if (transactionId.startsWith("pay_")) candidates.add(transactionId.removePrefix("pay_")) else candidates.add("pay_$transactionId")
+            if (transactionId.startsWith("udh_")) candidates.add(transactionId.removePrefix("udh_")) else candidates.add("udh_$transactionId")
 
             val targetDoc = allTxs.firstOrNull { doc ->
                 candidates.contains(doc.id) ||
@@ -432,7 +431,11 @@ class FirestoreUdhariRepository(
 
             val originalTx = targetDoc.data
             val allTxsToReverse = if (originalTx.transactionUuid.isNotBlank()) {
-                allTxs.filter { it.data.transactionUuid == originalTx.transactionUuid }
+                allTxs.filter {
+                    it.data.transactionUuid == originalTx.transactionUuid &&
+                    it.data.type != UdhariTransactionType.REVERSAL.name &&
+                    !it.data.isReversed
+                }
             } else {
                 listOf(targetDoc)
             }
@@ -495,23 +498,30 @@ class FirestoreUdhariRepository(
                     .map { it.substringBefore("(").trim() }
                     .filter { it.isNotBlank() && it != "DIRECT-PAY" }
 
-                val matchedBill = allBillDocs.firstOrNull { bDoc ->
+                val matchingBills = allBillDocs.filter { bDoc ->
                     val b = bDoc.data
                     (!tx.billGid.isNullOrBlank() && (b.gid == tx.billGid || b.id == tx.billGid || bDoc.id == tx.billGid)) ||
                     (candidateBillNumbers.any { num -> b.billNumber.trim().equals(num, ignoreCase = true) }) ||
                     (tx.billId > 0L && (b.legacyId == tx.billId || (bDoc.id.hashCode().toLong() and 0x7FFFFFFFFFFFFFFFL) == tx.billId))
                 }
 
-                if (matchedBill != null) {
+                for (matchedBill in matchingBills) {
                     val currentBill = matchedBill.data
                     val newPaid = (currentBill.paidAmount - tx.amount).coerceAtLeast(0.0)
                     val newPending = (currentBill.finalAmount - newPaid).coerceAtLeast(0.0)
                     val newStatus = if (newPaid <= 0.01) "PENDING" else if (newPending <= 0.01) "PAID" else "PARTIAL"
 
+                    val updatedPayments = currentBill.payments.filterNot { p ->
+                        p.id == tx.id || p.id == tx.gid ||
+                        (tx.id.isNotBlank() && p.id.contains(tx.id)) ||
+                        (tx.transactionUuid.isNotBlank() && p.id.contains(tx.transactionUuid))
+                    }
+
                     billUpdates[matchedBill.path] = mapOf(
                         "paidAmount" to newPaid,
                         "pendingAmount" to newPending,
                         "paymentStatus" to newStatus,
+                        "payments" to updatedPayments,
                         "updatedAt" to now
                     )
                 }

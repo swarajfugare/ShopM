@@ -196,15 +196,16 @@ class DefaultUdhariFirestoreGateway : UdhariFirestoreGateway {
             batch.set(FirebaseManager.udhariTransactionsCollection().document(rtx.id), rtx)
         }
         for ((path, updates) in reversedTxDocUpdates) {
-            batch.update(FirebaseManager.firestore.document(path), updates)
+            batch.set(FirebaseManager.firestore.document(path), updates, com.google.firebase.firestore.SetOptions.merge())
         }
         for ((path, updates) in billUpdates) {
-            batch.update(FirebaseManager.firestore.document(path), updates)
+            batch.set(FirebaseManager.firestore.document(path), updates, com.google.firebase.firestore.SetOptions.merge())
         }
         for ((path, newOutstanding) in customerUpdates) {
-            batch.update(
+            batch.set(
                 FirebaseManager.firestore.document(path),
-                mapOf("outstandingAmount" to newOutstanding, "updatedAt" to System.currentTimeMillis())
+                mapOf("outstandingAmount" to newOutstanding, "updatedAt" to System.currentTimeMillis()),
+                com.google.firebase.firestore.SetOptions.merge()
             )
         }
         val task = batch.commit()

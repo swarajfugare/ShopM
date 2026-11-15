@@ -55,17 +55,13 @@ service cloud.firestore {
     }
 
     function isImmutableOrOneTimeLegacyCorrection(prefix) {
-      let hasOldGid = 'gid' in resource.data;
-      let hasNewGid = 'gid' in request.resource.data;
-      let existingGid = resource.data.gid;
-      let newGid = request.resource.data.gid;
-      return (!hasOldGid) ||
-        (hasNewGid && (
-          newGid == existingGid ||
+      return !('gid' in resource.data) ||
+        (('gid' in request.resource.data) && (
+          request.resource.data.gid == resource.data.gid ||
           (
-            existingGid.size() >= 6 &&
-            existingGid[4] == 'L' &&
-            isValidGidFormat(prefix, newGid)
+            resource.data.gid.size() >= 6 &&
+            resource.data.gid[4] == 'L' &&
+            isValidGidFormat(prefix, request.resource.data.gid)
           )
         ));
     }

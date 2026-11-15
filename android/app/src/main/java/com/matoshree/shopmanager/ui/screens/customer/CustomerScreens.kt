@@ -220,7 +220,14 @@ class CustomerViewModel(
                     customerKey = targetKey,
                     allBills = allBills,
                     allTransactions = txs,
-                    allCustomers = allCustomers
+                    allCustomers = allCustomers,
+                    isBillConfirmedDeleted = { billGid, billNumber ->
+                        val clean = billNumber?.substringBefore("(")?.trim()?.uppercase() ?: ""
+                        clean.startsWith("MC-") && allBills.none { b ->
+                            (!billGid.isNullOrBlank() && b.gid == billGid) ||
+                            (clean.isNotBlank() && b.billNumber.trim().equals(clean, ignoreCase = true))
+                        }
+                    }
                 )
                 customerBillBreakdowns.value = ledgerResult.billBreakdowns
                 customerOrphanTransactions.value = ledgerResult.orphanTransactions
@@ -671,6 +678,12 @@ class CustomerViewModel(
             ?: customerAllPayments.value.find { it.udhariTx?.id == transactionId }?.udhariTx
         val txAmount = targetTx?.amount ?: 0.0
 
+        val prevPayments = customerAllPayments.value
+        val prevTransactions = customerTransactions.value
+        val prevKhatavahi = customerKhatavahi.value
+        val prevDue = customerOutstandingDue.value
+        val prevProfile = selectedCustomerProfile.value
+
         // Optimistically remove from state immediately so user sees it removed with zero delay
         customerAllPayments.value = customerAllPayments.value.filter { it.udhariTx?.id != transactionId && it.id != transactionId && it.id != "udhari_pay_$transactionId" }
         customerTransactions.value = customerTransactions.value.filter { it.id != transactionId }
@@ -686,6 +699,12 @@ class CustomerViewModel(
             try {
                 billRepository.recomputeStoredBillValuesFromLedger(emptyList())
             } catch (_: Exception) { }
+        } else {
+            customerAllPayments.value = prevPayments
+            customerTransactions.value = prevTransactions
+            customerKhatavahi.value = prevKhatavahi
+            customerOutstandingDue.value = prevDue
+            selectedCustomerProfile.value = prevProfile
         }
         selectedCustomerProfile.value?.id?.let { loadCustomerProfile(it) }
         return res
@@ -2188,7 +2207,9 @@ fun CustomerProfileScreen(
                             if (res.isSuccess) {
                                 Toast.makeText(context, "भरणा रद्द झाला", Toast.LENGTH_SHORT).show()
                             } else {
-                                Toast.makeText(context, res.exceptionOrNull()?.message ?: "भरणा रद्द करताना त्रुटी आली", Toast.LENGTH_LONG).show()
+                                val err = res.exceptionOrNull()
+                                val msg = if (err != null) "रद्द अयशस्वी: ${err.message}" else "भरणा रद्द करताना त्रुटी आली"
+                                Toast.makeText(context, msg, Toast.LENGTH_LONG).show()
                             }
                         }
                     },

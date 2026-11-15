@@ -139,18 +139,15 @@ object FirebaseManager {
      * When offline: Firestore queues the mutation locally in persistent cache; we do NOT block on server ack.
      * When online: waits with a short timeout (1500ms) for server confirmation.
      */
-    suspend fun <T> awaitWriteTask(task: com.google.android.gms.tasks.Task<T>, timeoutMs: Long = 1500L): T? {
+    suspend fun <T> awaitWriteTask(task: com.google.android.gms.tasks.Task<T>, timeoutMs: Long = 8000L): T? {
         return if (isNetworkAvailable()) {
             try {
-                kotlinx.coroutines.withTimeoutOrNull(timeoutMs) {
+                kotlinx.coroutines.withTimeout(timeoutMs) {
                     task.await()
                 }
             } catch (e: Exception) {
                 Log.w(TAG, "awaitWriteTask server write note: ${e.message}")
-                if (e is com.google.firebase.firestore.FirebaseFirestoreException) {
-                    throw e
-                }
-                null
+                throw e
             }
         } else {
             // Offline: the mutation has already been accepted into Firestore's local cache

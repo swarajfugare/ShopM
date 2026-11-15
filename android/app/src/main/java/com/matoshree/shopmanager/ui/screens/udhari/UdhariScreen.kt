@@ -85,7 +85,19 @@ class UdhariViewModel(
 
         uniqueCustomers.map { customer ->
             val customerKey = keyResolver(customer.mobile, customer.name, customer.id) ?: customer.canonicalKey()
-            val ledgerRes = summary.customerResults[customerKey] ?: UdhariLedger.computeCustomerLedger(customerKey, activeBills, validTxs, uniqueCustomers)
+            val ledgerRes = summary.customerResults[customerKey] ?: UdhariLedger.computeCustomerLedger(
+                customerKey = customerKey,
+                allBills = activeBills,
+                allTransactions = validTxs,
+                allCustomers = uniqueCustomers,
+                isBillConfirmedDeleted = { billGid, billNumber ->
+                    val clean = billNumber?.substringBefore("(")?.trim()?.uppercase() ?: ""
+                    clean.startsWith("MC-") && activeBills.none { b ->
+                        (!billGid.isNullOrBlank() && b.gid == billGid) ||
+                        (clean.isNotBlank() && b.billNumber.trim().equals(clean, ignoreCase = true))
+                    }
+                }
+            )
 
             val availableCredit = customer.creditLimit?.let { (it - ledgerRes.balance).coerceAtLeast(0.0) }
 
