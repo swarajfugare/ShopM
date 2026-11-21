@@ -21,7 +21,8 @@ interface InvoiceAiClient {
 }
 
 class FirebaseVertexAiClient(
-    private val modelName: String = "gemini-1.5-flash",
+    private val primaryModelName: String = "gemini-2.0-flash",
+    private val fallbackModelNames: List<String> = listOf("gemini-2.5-flash"),
     private val timeoutMs: Long = 60_000L
 ) : InvoiceAiClient {
 
@@ -35,62 +36,85 @@ class FirebaseVertexAiClient(
             return@withContext Result.failure(IllegalArgumentException("स्कॅन करण्यासाठी किमान एक फोटो आवश्यक आहे"))
         }
 
-        try {
-            val generativeModel = Firebase.vertexAI.generativeModel(
-                modelName = modelName,
-                generationConfig = generationConfig {
-                    responseMimeType = "application/json"
-                    temperature = 0.1f
-                },
-                systemInstruction = content {
-                    text(buildSystemPrompt(existingCategories))
-                }
-            )
+        val allModels = listOf(primaryModelName) + fallbackModelNames
+        var lastException: Exception? = null
 
-            val promptContent = content {
-                text("Please extract all line items and details from these invoice pages into the required JSON format.")
-                images.forEach { bmp ->
-                    image(bmp)
-                }
-            }
-
-            val response = withTimeoutOrNull(timeoutMs) {
-                generativeModel.generateContent(promptContent)
-            } ?: return@withContext Result.failure(
-                Exception("वेळ संपली (Timeout). कृपया पुन्हा प्रयत्न करा.")
-            )
-
-            val responseText = response.text
-            if (responseText.isNullOrBlank()) {
-                return@withContext Result.failure(
-                    Exception("बिलातून काहीही वाचता आले नाही. कृपया स्पष्ट फोटो काढा.")
+        for (modelName in allModels) {
+            try {
+                Log.d(TAG, "Attempting extraction with model: $modelName")
+                val generativeModel = Firebase.vertexAI.generativeModel(
+                    modelName = modelName,
+                    generationConfig = generationConfig {
+                        responseMimeType = "application/json"
+                        temperature = 0.1f
+                    },
+                    systemInstruction = content {
+                        text(buildSystemPrompt(existingCategories))
+                    }
                 )
-            }
 
-            val parseResult = InvoiceParser.parse(responseText)
-            if (parseResult.isFailure) {
-                Log.w(TAG, "Failed to parse AI output: ${parseResult.exceptionOrNull()?.message}")
-                return@withContext Result.failure(
-                    Exception("बिलाची माहिती समजण्यात अडचण आली. कृपया पुन्हा प्रयत्न करा.")
-                )
-            }
+                val promptContent = content {
+                    text("Please extract all line items and details from these invoice pages into the required JSON format.")
+                    images.forEach { bmp ->
+                        image(bmp)
+                    }
+                }
 
-            parseResult
-        } catch (e: Exception) {
-            Log.e(TAG, "Vertex AI extraction failed: ${e.message}", e)
-            val userMsg = when {
-                e.message?.contains("RESOURCE_EXHAUSTED", ignoreCase = true) == true ->
-                    "AI कोटा संपला आहे. काही वेळाने प्रयत्न करा."
-                e.message?.contains("PERMISSION_DENIED", ignoreCase = true) == true ->
-                    "Firebase Vertex AI सुरू केलेले नाही. कृपया कन्सोलमध्ये Vertex AI सुरू करा."
-                e.message?.contains("UNAVAILABLE", ignoreCase = true) == true ||
-                e.message?.contains("connect", ignoreCase = true) == true ->
-                    "इंटरनेट कनेक्शन तपासा आणि पुन्हा प्रयत्न करा."
-                else ->
-                    "स्कॅन करताना त्रुटी आली: ${e.localizedMessage ?: "अनोळखी चूक"}"
+                val response = withTimeoutOrNull(timeoutMs) {
+                    generativeModel.generateContent(promptContent)
+                } ?: run {
+                    lastException = Exception("वेळ संपली (Timeout). कृपया पुन्हा प्रयत्न करा.")
+                    return@run null
+                }
+
+                if (response == null) {
+                    continue
+                }
+
+                val responseText = response.text
+                if (responseText.isNullOrBlank()) {
+                    lastException = Exception("बिलातून काहीही वाचता आले नाही. कृपया स्पष्ट फोटो काढा.")
+                    continue
+                }
+
+                val parseResult = InvoiceParser.parse(responseText)
+                if (parseResult.isFailure) {
+                    Log.w(TAG, "Failed to parse AI output from $modelName: ${parseResult.exceptionOrNull()?.message}")
+                    lastException = Exception("बिलाची माहिती समजण्यात अडचण आली. कृपया पुन्हा प्रयत्न करा.")
+                    continue
+                }
+
+                return@withContext parseResult
+            } catch (e: Exception) {
+                Log.e(TAG, "Vertex AI extraction failed with $modelName: ${e.message}", e)
+                lastException = e
+                val isModelRetired = e.message?.contains("retired", ignoreCase = true) == true ||
+                        e.message?.contains("discontinued", ignoreCase = true) == true ||
+                        e.message?.contains("not found", ignoreCase = true) == true
+                if (isModelRetired && modelName != allModels.last()) {
+                    Log.w(TAG, "Model $modelName is retired/unavailable. Falling back to next model.")
+                    continue
+                }
+                break
             }
-            Result.failure(Exception(userMsg, e))
         }
+
+        val e = lastException ?: Exception("स्कॅन अयशस्वी झाले")
+        val userMsg = when {
+            e.message?.contains("RESOURCE_EXHAUSTED", ignoreCase = true) == true ->
+                "AI कोटा संपला आहे. काही वेळाने प्रयत्न करा."
+            e.message?.contains("PERMISSION_DENIED", ignoreCase = true) == true ->
+                "Firebase Vertex AI सुरू केलेले नाही. कृपया कन्सोलमध्ये Vertex AI सुरू करा."
+            e.message?.contains("UNAVAILABLE", ignoreCase = true) == true ||
+                    e.message?.contains("connect", ignoreCase = true) == true ->
+                "इंटरनेट कनेक्शन तपासा आणि पुन्हा प्रयत्न करा."
+            e.message?.contains("retired", ignoreCase = true) == true ||
+                    e.message?.contains("discontinued", ignoreCase = true) == true ->
+                "नवीन मॉडेल आवृत्ती वापरली जात आहे. कृपया ॲप अपडेट करा."
+            else ->
+                "स्कॅन करताना त्रुटी आली: ${e.localizedMessage ?: "अनोळखी चूक"}"
+        }
+        Result.failure(Exception(userMsg, e))
     }
 
     private fun buildSystemPrompt(existingCategories: List<String>): String {
