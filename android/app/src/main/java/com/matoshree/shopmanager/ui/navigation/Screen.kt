@@ -26,5 +26,6 @@ sealed class Screen(val route: String) {
     object Settings : Screen("settings")
     object SyncStatus : Screen("sync_status")
     object TrashBin : Screen("trash_bin")
+    object InvoiceScan : Screen("invoice_scan")
 }
 

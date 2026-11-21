@@ -185,4 +185,38 @@
     <string name="walk_in_customer">थेट कस्टमर</string>
     <string name="status_voided">रद्द केलेले</string>
     <string name="status_fully_paid">पूर्ण जमा</string>
+
+    <!-- Invoice Scan (v3.7.0) -->
+    <string name="btn_invoice_scan">बिल स्कॅन</string>
+    <string name="btn_take_photo">फोटो काढा</string>
+    <string name="btn_gallery">गॅलरी</string>
+    <string name="btn_scan_now">स्कॅन करा</string>
+    <string name="btn_try_again">पुन्हा प्रयत्न</string>
+    <string name="btn_save_all">सर्व सेव्ह</string>
+    <string name="btn_restock">स्टॉक वाढवा</string>
+    <string name="btn_new_product">नवीन बनवा</string>
+    <string name="btn_print_labels">बारकोड प्रिंट</string>
+    <string name="btn_done">पूर्ण झाले</string>
+    <string name="btn_for_all">सर्वांसाठी</string>
+    <string name="title_invoice_scan">बिल स्कॅन</string>
+    <string name="title_invoice_review">बिल तपासणी</string>
+    <string name="msg_scanning_ai">AI बिल तपासत आहे...</string>
+    <string name="msg_saving_products">प्रॉडक्ट्स सेव्ह करत आहे...</string>
+    <string name="label_gst_included">किंमत GST सहित</string>
+    <string name="label_multiplier">मार्जिन</string>
+    <string name="label_purchase_price">खरेदी दर</string>
+    <string name="label_selling_price">विक्री दर</string>
+    <string name="label_quantity">प्रमाण</string>
+    <string name="label_category">कॅटेगरी</string>
+    <string name="label_category_existing">आहे</string>
+    <string name="label_category_new">नवीन</string>
+    <string name="label_duplicate_scanned_warning">हे बिल आधी स्कॅन केलेले दिसते</string>
+    <string name="label_save_success_format">%1$d नवीन प्रॉडक्ट, %2$d स्टॉक वाढवले, %3$d नवीन कॅटेगरी</string>
+    <string name="dialog_unsaved_title">बदल सेव्ह करायचे?</string>
+    <string name="dialog_unsaved_msg">तुम्ही केलेले बदल सेव्ह झालेले नाहीत. बाहेर पडायचे का?</string>
+    <string name="btn_exit">बाहेर पडा</string>
+    <string name="btn_stay">इथेच राहा</string>
+    <string name="label_manual_edit">मॅन्युअल</string>
+    <string name="label_page_count_format">पान %1$d/%2$d</string>
+    <string name="label_max_pages_warning">जास्तीत जास्त ६ पाने स्कॅन करता येतात</string>
 </resources>

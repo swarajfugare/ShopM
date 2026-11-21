@@ -21,12 +21,14 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.matoshree.shopmanager.R
 import com.matoshree.shopmanager.data.repository.ProductRepository
 import com.matoshree.shopmanager.domain.model.Category
 import com.matoshree.shopmanager.domain.model.Product
@@ -237,6 +239,7 @@ fun ProductsListScreen(
     viewModel: ProductViewModel,
     onNavigateToLabels: () -> Unit = {},
     onNavigateToInventory: () -> Unit = {},
+    onNavigateToInvoiceScan: () -> Unit = {},
     onBackClick: () -> Unit
 ) {
     val context = LocalContext.current
@@ -533,13 +536,32 @@ fun ProductsListScreen(
         },
         floatingActionButton = {
             if (selectedProductIds.isEmpty()) {
-                FloatingActionButton(
-                    onClick = { showAddDialog = true },
-                    containerColor = DeepEmerald,
-                    contentColor = WarmWhite,
-                    shape = RoundedCornerShape(12.dp)
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(10.dp),
+                    verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Icon(Icons.Default.Add, contentDescription = "Add Product")
+                    ExtendedFloatingActionButton(
+                        onClick = onNavigateToInvoiceScan,
+                        containerColor = DeepEmerald,
+                        contentColor = WarmWhite,
+                        shape = RoundedCornerShape(12.dp),
+                        icon = { Icon(Icons.Default.DocumentScanner, contentDescription = null) },
+                        text = {
+                            Text(
+                                text = stringResource(R.string.btn_invoice_scan),
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 14.sp
+                            )
+                        }
+                    )
+                    FloatingActionButton(
+                        onClick = { showAddDialog = true },
+                        containerColor = DeepEmerald,
+                        contentColor = WarmWhite,
+                        shape = RoundedCornerShape(12.dp)
+                    ) {
+                        Icon(Icons.Default.Add, contentDescription = "Add Product")
+                    }
                 }
             }
         }

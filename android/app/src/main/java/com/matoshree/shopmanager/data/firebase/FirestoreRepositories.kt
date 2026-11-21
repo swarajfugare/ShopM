@@ -1175,6 +1175,30 @@ class FirestoreProductRepository {
         }
     }
 
+    suspend fun recordStockMovement(movement: com.matoshree.shopmanager.domain.model.StockMovement): Result<Unit> {
+        return try {
+            FirebaseManager.ensureAuthenticated()
+            val movementId = if (movement.id.isNotBlank()) movement.id else "sm_${System.currentTimeMillis()}_${UUID.randomUUID().toString().take(4)}"
+            val movementDto = StockMovementDto(
+                id = movementId,
+                productId = movement.productId,
+                productName = movement.productName,
+                sku = movement.sku,
+                changeType = movement.changeType.name,
+                quantityDelta = movement.quantityDelta,
+                stockAfter = movement.stockAfter,
+                note = movement.note,
+                referenceId = movement.referenceId,
+                timestamp = if (movement.timestamp > 0) movement.timestamp else System.currentTimeMillis()
+            )
+            FirebaseManager.stockMovementsCollection().document(movementId).set(movementDto).await()
+            Result.success(Unit)
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to record stock movement: ${e.message}", e)
+            Result.failure(e)
+        }
+    }
+
     fun getStockMovements(productId: Long? = null): Flow<List<com.matoshree.shopmanager.domain.model.StockMovement>> = callbackFlow {
         val listener = FirebaseManager.stockMovementsCollection()
             .addSnapshotListener { snapshot, error ->

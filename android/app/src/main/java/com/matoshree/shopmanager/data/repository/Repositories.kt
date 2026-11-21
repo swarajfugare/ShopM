@@ -1233,4 +1233,8 @@ class ProductRepository(
     fun getStockMovements(productId: Long? = null): Flow<List<com.matoshree.shopmanager.domain.model.StockMovement>> {
         return firestoreRepo.getStockMovements(productId)
     }
+
+    suspend fun recordStockMovement(movement: com.matoshree.shopmanager.domain.model.StockMovement): Result<Unit> {
+        return firestoreRepo.recordStockMovement(movement)
+    }
 }

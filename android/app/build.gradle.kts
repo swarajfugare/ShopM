@@ -32,8 +32,8 @@ android {
         applicationId = "com.matoshree.collection"
         minSdk = 26
         targetSdk = 35
-        versionCode = 64
-        versionName = "3.6.6"
+        versionCode = 65
+        versionName = "3.7.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         vectorDrawables {
@@ -115,11 +115,12 @@ dependencies {
     implementation(libs.androidx.material.icons.extended)
     implementation(libs.androidx.navigation.compose)
 
-    // Firebase (Authentication, Cloud Firestore, Cloud Storage)
+    // Firebase (Authentication, Cloud Firestore, Cloud Storage, Vertex AI Gemini)
     implementation(platform(libs.firebase.bom))
     implementation(libs.firebase.auth)
     implementation(libs.firebase.firestore)
     implementation(libs.firebase.storage)
+    implementation("com.google.firebase:firebase-vertexai")
     implementation("com.google.android.gms:play-services-auth:21.3.0")
 
     // Room Database

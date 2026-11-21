@@ -228,7 +228,21 @@ fun AppNavGraph(
                     viewModel = getProductViewModel(),
                     onNavigateToLabels = { navController.navigate(Screen.ProductLabels.route) },
                     onNavigateToInventory = { navController.navigate(Screen.Inventory.route) },
+                    onNavigateToInvoiceScan = { navController.navigate(Screen.InvoiceScan.route) },
                     onBackClick = { navController.popBackStack() }
+                )
+            }
+
+            composable(Screen.InvoiceScan.route) {
+                val invoiceScanViewModel = remember {
+                    com.matoshree.shopmanager.ui.screens.invoicescan.InvoiceScanViewModel(productRepository)
+                }
+                com.matoshree.shopmanager.ui.screens.invoicescan.InvoiceScanScreen(
+                    viewModel = invoiceScanViewModel,
+                    onBackClick = { navController.popBackStack() },
+                    onNavigateToLabels = { productIds ->
+                        navController.navigate(Screen.ProductLabels.route)
+                    }
                 )
             }
 
