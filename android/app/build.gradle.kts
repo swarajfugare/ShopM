@@ -15,6 +15,15 @@ val keystoreProperties = Properties().apply {
 }
 val releaseCertSha256: String = keystoreProperties.getProperty("certSha256", "") ?: ""
 
+// Local properties (for secure local configuration like Gemini API Key)
+val localPropertiesFile = File(rootDir, "local.properties")
+val localProperties = Properties().apply {
+    if (localPropertiesFile.exists()) {
+        load(FileInputStream(localPropertiesFile))
+    }
+}
+val defaultGeminiApiKey: String = localProperties.getProperty("GEMINI_API_KEY", "") ?: ""
+
 plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.android)
@@ -32,8 +41,8 @@ android {
         applicationId = "com.matoshree.collection"
         minSdk = 26
         targetSdk = 35
-        versionCode = 67
-        versionName = "3.7.2"
+        versionCode = 68
+        versionName = "3.7.3"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         vectorDrawables {
@@ -46,6 +55,7 @@ android {
         }
 
         buildConfigField("String", "RELEASE_CERT_SHA256", "\"$releaseCertSha256\"")
+        buildConfigField("String", "DEFAULT_GEMINI_API_KEY", "\"$defaultGeminiApiKey\"")
     }
 
     testOptions {

@@ -234,8 +234,12 @@ fun AppNavGraph(
             }
 
             composable(Screen.InvoiceScan.route) {
+                val context = androidx.compose.ui.platform.LocalContext.current
                 val invoiceScanViewModel = remember {
-                    com.matoshree.shopmanager.ui.screens.invoicescan.InvoiceScanViewModel(productRepository)
+                    com.matoshree.shopmanager.ui.screens.invoicescan.InvoiceScanViewModel(
+                        productRepository = productRepository,
+                        aiClient = com.matoshree.shopmanager.data.ai.InvoiceAiClientFactory.create(context)
+                    )
                 }
                 com.matoshree.shopmanager.ui.screens.invoicescan.InvoiceScanScreen(
                     viewModel = invoiceScanViewModel,

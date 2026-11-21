@@ -336,6 +336,8 @@ fun SettingsScreen(
     var showBulkReminderConfirmDialog by remember { mutableStateOf(false) }
     var bulkReminderStatusText by remember { mutableStateOf("") }
     var showWaConfigDialog by remember { mutableStateOf(false) }
+    var showGeminiConfigDialog by remember { mutableStateOf(false) }
+    var geminiApiKey by remember { mutableStateOf(com.matoshree.shopmanager.data.ai.GeminiApiKeyManager.getApiKey(context)) }
     var showRulesHelpDialog by remember { mutableStateOf(false) }
     var showCrashReportDialog by remember { mutableStateOf(false) }
     var lastCrashContent by remember { mutableStateOf<String?>(null) }
@@ -953,6 +955,47 @@ fun SettingsScreen(
                             contentPadding = PaddingValues(horizontal = 10.dp, vertical = 2.dp)
                         ) {
                             Text("बदला", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                        }
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(8.dp))
+
+                // Gemini AI API Key Card for Invoice Scanner
+                val isGeminiConfigured = geminiApiKey.isNotBlank()
+                Surface(
+                    shape = RoundedCornerShape(8.dp),
+                    color = if (isGeminiConfigured) ChampagneGoldContainer.copy(alpha = 0.35f) else OutlineVariantGrey.copy(alpha = 0.15f),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(12.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                if (isGeminiConfigured) "Gemini AI Key (बिल स्कॅनर): जोडलेली आहे ⚡" else "Gemini AI Key: सेट केलेली नाही ⚠️",
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = if (isGeminiConfigured) DeepEmerald else MutedCharcoal
+                            )
+                            Text(
+                                if (isGeminiConfigured) "Google Gemini द्वारे थेट व विना-अडथळा बिल स्कॅनिंग चालू आहे" else "बिल स्कॅन जलद व थेट चालवण्यासाठी Gemini API Key सेट करा",
+                                fontSize = 11.sp,
+                                color = MutedCharcoal
+                            )
+                        }
+                        OutlinedButton(
+                            onClick = {
+                                geminiApiKey = com.matoshree.shopmanager.data.ai.GeminiApiKeyManager.getApiKey(context)
+                                showGeminiConfigDialog = true
+                            },
+                            shape = RoundedCornerShape(6.dp),
+                            contentPadding = PaddingValues(horizontal = 10.dp, vertical = 2.dp)
+                        ) {
+                            Text(if (isGeminiConfigured) "पहा / बदला" else "सेट करा", fontSize = 11.sp, fontWeight = FontWeight.Bold)
                         }
                     }
                 }
@@ -1948,6 +1991,72 @@ fun SettingsScreen(
             },
             dismissButton = {
                 TextButton(onClick = { showWaConfigDialog = false }) {
+                    Text("रद्द करा")
+                }
+            },
+            containerColor = WarmWhite,
+            shape = RoundedCornerShape(16.dp)
+        )
+    }
+
+    // Secure Gemini API Key Dialog
+    if (showGeminiConfigDialog) {
+        var editKey by remember { mutableStateOf(geminiApiKey) }
+        var showPassword by remember { mutableStateOf(false) }
+
+        AlertDialog(
+            onDismissRequest = { showGeminiConfigDialog = false },
+            title = {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(Icons.Default.VpnKey, contentDescription = null, tint = DeepEmerald, modifier = Modifier.size(20.dp))
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text("Gemini AI API Key सेटिंग्ज", fontWeight = FontWeight.Bold, color = DeepEmerald, fontSize = 16.sp)
+                }
+            },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Text(
+                        "ही Key थेट Google Gemini शी कनेक्ट करून बिलाचे फोटो आपोआप वाचण्यासाठी वापरली जाते. ही Key डिव्हाइसवर सुरक्षितपणे सेव्ह होते.",
+                        fontSize = 11.sp,
+                        color = MutedCharcoal
+                    )
+
+                    OutlinedTextField(
+                        value = editKey,
+                        onValueChange = { editKey = it },
+                        label = { Text("Gemini API Key") },
+                        placeholder = { Text("AIzaSy... किंवा AQ...") },
+                        visualTransformation = if (showPassword) VisualTransformation.None else PasswordVisualTransformation(),
+                        trailingIcon = {
+                            IconButton(onClick = { showPassword = !showPassword }) {
+                                Icon(
+                                    imageVector = if (showPassword) Icons.Default.VisibilityOff else Icons.Default.Visibility,
+                                    contentDescription = if (showPassword) "Hide API Key" else "Show API Key"
+                                )
+                            }
+                        },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(8.dp)
+                    )
+                }
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        com.matoshree.shopmanager.data.ai.GeminiApiKeyManager.setApiKey(context, editKey)
+                        geminiApiKey = editKey
+                        showGeminiConfigDialog = false
+                        Toast.makeText(context, "Gemini API Key सुरक्षितपणे सेव्ह केली", Toast.LENGTH_SHORT).show()
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = DeepEmerald),
+                    shape = RoundedCornerShape(8.dp)
+                ) {
+                    Text("सेव्ह करा")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showGeminiConfigDialog = false }) {
                     Text("रद्द करा")
                 }
             },

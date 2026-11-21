@@ -61,6 +61,30 @@ class InvoiceAiClientRobustnessTest {
     }
 
     @Test
+    fun testDirectGeminiAiClientEmptyImages() = runBlocking {
+        val client = com.matoshree.shopmanager.data.ai.DirectGeminiAiClient("test-key")
+        val result = client.extractInvoice(emptyList(), emptyList())
+        assertTrue(result.isFailure)
+        assertTrue(result.exceptionOrNull()?.message?.contains("किमान एक फोटो") == true)
+    }
+
+    @Test
+    fun testDirectGeminiAiClientBlankKeyFallback() = runBlocking {
+        val mockInvoice = InvoiceExtractionResult(
+            supplierName = "Fallback Textiles",
+            items = listOf(InvoiceItemDraft(name = "Saree", quantity = 1, unitPrice = 500.0, lineTotal = 500.0))
+        )
+        val fallback = FakeInvoiceAiClient(Result.success(mockInvoice))
+        val client = com.matoshree.shopmanager.data.ai.DirectGeminiAiClient(
+            apiKey = "",
+            fallbackClient = fallback
+        )
+        val result = client.extractInvoice(emptyList(), emptyList())
+        assertTrue(result.isSuccess)
+        assertEquals("Fallback Textiles", result.getOrThrow().supplierName)
+    }
+
+    @Test
     fun testInvalidJsonResponseFallback() {
         val rawNonsense = "<html><body>502 Bad Gateway</body></html>"
         val parseResult = InvoiceParser.parse(rawNonsense)
