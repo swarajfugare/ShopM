@@ -51,6 +51,16 @@ class InvoiceAiClientRobustnessTest {
     }
 
     @Test
+    fun testAppCheckError() = runBlocking {
+        val client = FakeInvoiceAiClient(
+            Result.failure(Exception("Firebase App Check त्रुटी: कृपया Firebase Console मध्ये App Check > APIs मध्ये जाऊन 'Vertex AI in Firebase' हे Unenforce (सक्ती बंद) करा."))
+        )
+        val result = client.extractInvoice(emptyList(), emptyList())
+        assertTrue(result.isFailure)
+        assertTrue(result.exceptionOrNull()?.message?.contains("Firebase App Check त्रुटी") == true)
+    }
+
+    @Test
     fun testInvalidJsonResponseFallback() {
         val rawNonsense = "<html><body>502 Bad Gateway</body></html>"
         val parseResult = InvoiceParser.parse(rawNonsense)

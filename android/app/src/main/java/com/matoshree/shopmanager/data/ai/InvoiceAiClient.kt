@@ -105,6 +105,9 @@ class FirebaseVertexAiClient(
                 "AI कोटा संपला आहे. काही वेळाने प्रयत्न करा."
             e.message?.contains("PERMISSION_DENIED", ignoreCase = true) == true ->
                 "Firebase Vertex AI सुरू केलेले नाही. कृपया कन्सोलमध्ये Vertex AI सुरू करा."
+            e.message?.contains("app check", ignoreCase = true) == true ||
+                    e.message?.contains("appcheck", ignoreCase = true) == true ->
+                "Firebase App Check त्रुटी: कृपया Firebase Console मध्ये App Check > APIs मध्ये जाऊन 'Vertex AI in Firebase' हे Unenforce (सक्ती बंद) करा."
             e.message?.contains("UNAVAILABLE", ignoreCase = true) == true ||
                     e.message?.contains("connect", ignoreCase = true) == true ->
                 "इंटरनेट कनेक्शन तपासा आणि पुन्हा प्रयत्न करा."
